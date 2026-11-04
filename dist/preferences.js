@@ -1,0 +1,178 @@
+(function (global) {
+  'use strict';
+  const STORAGE_KEY = 'minerva.claims.preferences.v1';
+  const SIZES = [100, 115, 130];
+  function normalizePreferences(value) {
+    const v = value && typeof value === 'object' ? value : {};
+    return {theme:['light','dark','system'].includes(v.theme) ? v.theme : 'system', textSize:SIZES.includes(Number(v.textSize)) ? Number(v.textSize) : 100, menuCollapsed:v.menuCollapsed === true};
+  }
+  function initials(name) {return String(name || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join('').toLocaleUpperCase('pt-BR');}
+  if (typeof module !== 'undefined' && module.exports) {module.exports = {normalizePreferences, initials}; return;}
+  if (typeof document === 'undefined') return;
+
+  let saved;
+  try {saved = JSON.parse(global.localStorage.getItem(STORAGE_KEY) || '{}');} catch {saved = {};}
+  const preferences = normalizePreferences(saved);
+  const root = document.documentElement;
+  const $ = id => document.getElementById(id);
+  const darkMedia = global.matchMedia('(prefers-color-scheme: dark)');
+  let mounted = false, messageTimer = null, scaleFrame = null, fullscreenBusy = false;
+  let currentProfile = null;
+  const activeTheme = () => preferences.theme === 'system' ? darkMedia.matches ? 'dark' : 'light' : preferences.theme;
+  function save() {try {global.localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));} catch {announce('Preferência aplicada. Este navegador não permite salvar a configuração.');}}
+  function announce(message) {const el = $('preferencesStatus');if (!el) return;global.clearTimeout(messageTimer);el.textContent=message;el.hidden=false;messageTimer=global.setTimeout(() => {el.hidden=true;el.textContent='';}, 7000);}
+  function applyPreferences() {
+    const dark = activeTheme() === 'dark';
+    root.dataset.theme = dark ? 'dark' : 'light';
+    root.dataset.textSize = String(preferences.textSize);
+    root.dataset.menuCollapsed = String(preferences.menuCollapsed);
+    if (!mounted) return;
+    $('themeToggle').setAttribute('aria-pressed', String(dark));
+    $('themeToggle').title = dark ? 'Desativar modo noturno' : 'Ativar modo noturno';
+    $('textSizeSelect').value = String(preferences.textSize);
+    const collapsed = preferences.menuCollapsed;
+    $('menuToggle').setAttribute('aria-expanded', String(!collapsed));
+    $('menuToggle').setAttribute('aria-label', collapsed ? 'Mostrar menu lateral' : 'Recolher menu lateral');
+    $('menuToggle').title = collapsed ? 'Mostrar menu lateral' : 'Recolher menu lateral';
+    $('menuToggleLabel').textContent = collapsed ? 'Mostrar menu' : 'Recolher menu';
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) {sidebar.inert = collapsed;if (collapsed) sidebar.setAttribute('aria-hidden','true');else sidebar.removeAttribute('aria-hidden');}
+  }
+  applyPreferences();
+
+  function setTheme(value) {if (!['light','dark','system'].includes(value)) return;preferences.theme=value;applyPreferences();save();announce(activeTheme()==='dark'?'Modo noturno ativado.':'Modo claro ativado.');}
+  function setTextSize(value) {if (!SIZES.includes(Number(value))) return;preferences.textSize=Number(value);applyPreferences();save();announce('Tamanho do texto: '+preferences.textSize+'%.');}
+  function setMenuCollapsed(value) {preferences.menuCollapsed=Boolean(value);applyPreferences();save();}
+
+  // Reuse only font-size declarations from the app's trusted local stylesheets.
+  // Their responsive conditions and specificity remain intact; no document data is read.
+  function fontRules(rules) {
+    let css = '';
+    for (const rule of rules) {
+      if (rule.type === 1 && rule.style) {
+        const size = rule.style.getPropertyValue('font-size');
+        if (size) {
+          // Preserve later inheritance/variable rules too, so an earlier fixed
+          // heading size cannot override the table's responsive font size.
+          const scalable = !/inherit|initial|unset|revert|var\(|--minerva-text-scale/.test(size) && /px|rem|em|vw|vh|%/.test(size);
+          const value = scalable ? 'calc(('+size+') * var(--minerva-text-scale))' : size;
+          css += rule.selectorText+'{font-size:'+value+(rule.style.getPropertyPriority('font-size')?'!important':'')+'}\n';
+        }
+      } else if (rule.cssRules && (rule.type === 4 || rule.type === 12)) {
+        const child = fontRules(rule.cssRules);
+        if (child) css += rule.cssText.slice(0, rule.cssText.indexOf('{'))+'{'+child+'}\n';
+      }
+    }
+    return css;
+  }
+  function buildTextScale() {
+    scaleFrame=null;
+    let css='';
+    for (const sheet of document.styleSheets) {
+      if (!sheet.href) continue;
+      let url;try {url=new URL(sheet.href,global.location.href);} catch {continue;}
+      if (url.origin !== global.location.origin || !/(?:^|\/)(styles|integration|team|preferences)\.css$/.test(url.pathname)) continue;
+      try {css += fontRules(sheet.cssRules);} catch {/* Cross-origin or unavailable stylesheet: preserve its own sizes. */}
+    }
+    let style=$('preferencesTextScale');
+    if (!style) {style=document.createElement('style');style.id='preferencesTextScale';document.head.append(style);}
+    style.textContent='@media screen{'+css+'}';
+  }
+  function scheduleTextScale() {if (scaleFrame===null) scaleFrame=global.requestAnimationFrame(buildTextScale);}
+
+  function fullscreenElement() {return document.fullscreenElement || document.webkitFullscreenElement || null;}
+  function updateFullscreen(announceChange) {
+    const active=Boolean(fullscreenElement());
+    $('fullscreenToggle').setAttribute('aria-pressed',String(active));
+    $('fullscreenToggle').title=active?'Sair da tela cheia · Esc':'Abrir painel em tela cheia';
+    $('fullscreenToggle').setAttribute('aria-label',active?'Sair da tela cheia':'Abrir painel em tela cheia');
+    $('fullscreenLabel').textContent=active?'Sair da tela cheia':'Tela cheia';
+    if (announceChange) announce(active?'Tela cheia ativada. Pressione Esc para sair.':'Tela cheia desativada.');
+  }
+  async function toggleFullscreen() {
+    if (fullscreenBusy) return;
+    const active=Boolean(fullscreenElement()),fn=active?(document.exitFullscreen||document.webkitExitFullscreen):(root.requestFullscreen||root.webkitRequestFullscreen);
+    if (!fn) {announce('A tela cheia não está disponível aqui. Use a opção de tela cheia do navegador.');return;}
+    fullscreenBusy=true;
+    try {await fn.call(active?document:root,active?undefined:{navigationUI:'hide'});updateFullscreen(false);}
+    catch {announce('O navegador não permitiu a tela cheia. Use a opção de tela cheia do próprio navegador.');}
+    finally {fullscreenBusy=false;}
+  }
+
+  function closeProfile(restoreFocus) {const panel=$('profilePanel');if (!panel) return;panel.hidden=true;$('profileButton').setAttribute('aria-expanded','false');if (restoreFocus && !$('profileButton').hidden) $('profileButton').focus();}
+  function updateProfile() {
+    if (!mounted) return;
+    currentProfile=global.MinervaTeam?.getProfile?.() || null;
+    const hosted=global.MINERVA_HOSTED===true,allowed=!hosted||Boolean(currentProfile);
+    $('profileButton').hidden=!allowed;
+    if (!allowed) {
+      closeProfile(false);
+      $('profileButton').setAttribute('aria-label','Perfil indisponível');
+      $('profileButton').removeAttribute('title');
+      $('profilePanelNote').textContent='';
+      for (const id of ['profileName','profileRole','profileAvatar','profilePanelName','profilePanelContact','profilePanelRole']) $(id).textContent='';
+      $('profileSignout').hidden=true;
+      return;
+    }
+    const name=hosted?currentProfile.name:'Prévia local',role=hosted?currentProfile.role==='admin'?(name==='Desenvolvimento'?'Acesso administrativo':'Administradora'):currentProfile.role==='editor'?'Atualizar bases':'Consulta':'Sem perfil conectado';
+    $('profileName').textContent=name;
+    $('profileRole').textContent=role;
+    $('profileAvatar').textContent=hosted?initials(name)||'P':'PL';
+    $('profileButton').setAttribute('aria-label','Perfil: '+name+' · '+role);
+    $('profileButton').title='Perfil em uso: '+name+' · '+role;
+    $('profilePanelName').textContent=name;
+    $('profilePanelRole').textContent=role;
+    $('profilePanelContact').textContent=hosted?currentProfile.email||'':'';
+    $('profilePanelContact').hidden=!hosted||!currentProfile.email;
+    $('profilePanelNote').textContent=hosted?(currentProfile.role==='admin'?'Este acesso pode publicar atualizações e controlar quem consulta o relatório.':currentProfile.role==='editor'?'Este acesso pode importar e publicar as bases e marcar correções. A gestão de acessos continua com a administração.':'Este acesso permite consultar o relatório publicado.'):'Esta é uma prévia local. Nenhum acesso de administradora foi ativado.';
+    $('profileSignout').hidden=!hosted;
+    $('profileSignout').disabled=false;
+  }
+  function openProfile() {
+    updateProfile();if ($('profileButton').hidden) return;
+    const panel=$('profilePanel');if (!panel.hidden) {closeProfile(true);return;}
+    const rect=$('profileButton').getBoundingClientRect();
+    panel.style.top=Math.min(rect.bottom+10,Math.max(12,global.innerHeight-330))+'px';
+    panel.hidden=false;$('profileButton').setAttribute('aria-expanded','true');$('closeProfile').focus();
+  }
+  function mount() {
+    if (mounted) return;
+    const topbar=document.querySelector('.topbar');if (!topbar) return;
+    const toolbar=document.createElement('div');toolbar.id='preferencesToolbar';toolbar.className='preferences-toolbar';toolbar.setAttribute('role','group');toolbar.setAttribute('aria-label','Preferências de visualização');
+    toolbar.innerHTML='<span class="preferences-caption">VISUALIZAÇÃO</span><button id="themeToggle" class="preferences-button" type="button" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14Z"/></svg><span>Modo noturno</span></button><label class="preferences-text-control" for="textSizeSelect"><span aria-hidden="true">Aa</span><span class="sr-only">Tamanho do texto</span><select id="textSizeSelect" title="Aumentar o tamanho do texto"><option value="100">Texto 100%</option><option value="115">Texto 115%</option><option value="130">Texto 130%</option></select></label>';
+    topbar.append(toolbar);
+    const controls=document.createElement('div');controls.className='window-controls';controls.setAttribute('role','group');controls.setAttribute('aria-label','Menu e tela cheia');
+    controls.innerHTML='<button id="menuToggle" class="window-control" type="button" aria-expanded="true" aria-controls="appSidebar" aria-label="Recolher menu lateral" title="Recolher menu lateral"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"/></svg><span id="menuToggleLabel" class="sr-only">Recolher menu</span></button><button id="fullscreenToggle" class="window-control" type="button" aria-pressed="false" aria-label="Abrir painel em tela cheia" title="Abrir painel em tela cheia"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></svg><span id="fullscreenLabel" class="sr-only">Tela cheia</span></button>';
+    const leading=document.createElement('div');leading.className='topbar-leading';leading.append(controls);const breadcrumb=topbar.querySelector('.breadcrumb');if(breadcrumb)leading.append(breadcrumb);topbar.prepend(leading);
+    const sidebar=document.querySelector('.sidebar');if (sidebar) sidebar.id='appSidebar';
+    const profile=document.createElement('button');profile.id='profileButton';profile.type='button';profile.className='profile-button';profile.hidden=global.MINERVA_HOSTED===true;profile.setAttribute('aria-haspopup','dialog');profile.setAttribute('aria-expanded','false');profile.setAttribute('aria-controls','profilePanel');
+    profile.innerHTML='<span id="profileAvatar" class="profile-avatar" aria-hidden="true"></span><span class="profile-label"><small>PERFIL EM USO</small><strong id="profileName"></strong><span id="profileRole"></span></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>';
+    topbar.querySelector('.topbar-actions')?.prepend(profile);
+    const panel=document.createElement('section');panel.id='profilePanel';panel.className='profile-panel';panel.hidden=true;panel.setAttribute('role','dialog');panel.setAttribute('aria-labelledby','profilePanelTitle');
+    panel.innerHTML='<div class="profile-panel-heading"><h2 id="profilePanelTitle">Perfil em uso</h2><button id="closeProfile" class="icon-button" type="button" aria-label="Fechar perfil">×</button></div><strong id="profilePanelName" class="profile-panel-name"></strong><span id="profilePanelContact" class="profile-panel-contact"></span><span id="profilePanelRole" class="profile-panel-role"></span><p id="profilePanelNote"></p><button id="profileSignout" class="button button-outline" type="button">Sair deste perfil</button>';
+    document.body.append(panel);
+    const status=document.createElement('div');status.id='preferencesStatus';status.className='preferences-status';status.hidden=true;status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.setAttribute('aria-atomic','true');document.body.append(status);
+    mounted=true;
+    $('themeToggle').addEventListener('click',()=>setTheme(activeTheme()==='dark'?'light':'dark'));
+    $('textSizeSelect').addEventListener('change',event=>setTextSize(event.target.value));
+    $('menuToggle').addEventListener('click',()=>setMenuCollapsed(!preferences.menuCollapsed));
+    $('fullscreenToggle').addEventListener('click',toggleFullscreen);
+    $('profileButton').addEventListener('click',openProfile);
+    $('closeProfile').addEventListener('click',()=>closeProfile(true));
+    $('profileSignout').addEventListener('click',event=>global.MinervaTeam?.logout(event));
+    document.addEventListener('minerva:session-updated',updateProfile);
+    document.addEventListener('pointerdown',event=>{if (!panel.hidden&&!panel.contains(event.target)&&!profile.contains(event.target)) closeProfile(false);});
+    document.addEventListener('keydown',event=>{if (event.key==='Escape'&&!panel.hidden) {event.preventDefault();closeProfile(true);}});
+    panel.addEventListener('focusout',event=>{if (event.relatedTarget&&!panel.contains(event.relatedTarget)&&event.relatedTarget!==profile) closeProfile(false);});
+    document.addEventListener('fullscreenchange',()=>{closeProfile(false);updateFullscreen(true);});
+    document.addEventListener('webkitfullscreenchange',()=>updateFullscreen(true));
+    global.addEventListener('resize',()=>closeProfile(false));
+    global.addEventListener('beforeprint',()=>closeProfile(false));
+    const onMedia=(media,fn)=>media.addEventListener?media.addEventListener('change',fn):media.addListener(fn);
+    onMedia(darkMedia,()=>{if (preferences.theme==='system') applyPreferences();});
+    document.addEventListener('load',event=>{if (event.target?.tagName==='LINK') scheduleTextScale();},true);
+    applyPreferences();updateProfile();updateFullscreen(false);buildTextScale();
+    global.MinervaPreferences={get:()=>({...preferences,effectiveTheme:activeTheme()}),setTheme,setTextSize,setMenuCollapsed,toggleFullscreen};
+  }
+  if (document.readyState==='loading') document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();
+})(typeof window!=='undefined'?window:globalThis);

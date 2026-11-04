@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Minerva Foods Claims</title>
+  <meta name="theme-color" content="#2E5372">
+  <meta name="application-name" content="Minerva Foods Claims">
+  <meta name="apple-mobile-web-app-title" content="Minerva Foods Claims">
+  <link rel="icon" type="image/png" href="/assets/minerva-favicon.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/minerva-apple-touch-icon.jpg">
+  <link rel="manifest" href="/site.webmanifest">
+  <link rel="stylesheet" href="/access.css">
+  <script src="/access.js" defer></script>
+</head>
+<body>
+  <main class="access-card">
+    <header>
+      <img class="logo" src="/assets/minerva-logo.png" alt="Minerva Foods" width="184" height="78">
+      <span class="eyebrow">SUPPLY CHAIN · EXPORTAÇÃO</span>
+    </header>
+    <div class="accent-line"></div>
+    <section id="accessLoading" aria-live="polite"><h1>Claims e recebimentos.</h1><p>Conferindo seu acesso…</p></section>
+    <section id="accessRequest" hidden>
+      <h1>Solicite seu acesso.</h1>
+      <p>Administração libera a visualização do relatório. Você não precisa criar uma conta.</p>
+      <form id="requestForm">
+        <label for="requestName">Seu nome</label>
+        <input id="requestName" name="name" autocomplete="name" minlength="3" maxlength="100" required placeholder="Nome e sobrenome">
+        <label for="requestEmail">E-mail de contato <span>(opcional)</span></label>
+        <input id="requestEmail" name="email" autocomplete="email" type="email" maxlength="160" placeholder="Seu e-mail">
+        <button type="submit" id="requestSubmit">Solicitar acesso <span aria-hidden="true">→</span></button>
+      </form>
+      <p class="small">O relatório ficará disponível neste navegador após a aprovação.</p>
+    </section>
+    <section id="accessActivate" hidden>
+      <span class="tag">ADMINISTRAÇÃO</span>
+      <h1>Seu painel começa aqui.</h1>
+      <p>Ative seu acesso para atualizar as planilhas e aprovar quem pode consultar os relatórios.</p>
+      <button id="activateButton" type="button">Ativar meu painel <span aria-hidden="true">→</span></button>
+      <p class="small">Este link dá acesso à administração. Guarde-o somente com você.</p>
+    </section>
+    <section id="accessPending" hidden>
+      <span class="tag">SOLICITAÇÃO ENVIADA</span>
+      <h1>Aguardando aprovação.</h1>
+      <p><strong id="pendingName"></strong>, Administração precisa liberar seu acesso.</p>
+      <div class="request-code"><span>SEU CÓDIGO</span><strong id="pendingCode"></strong></div>
+      <p class="small">Informe seu nome e este código à Administração. Assim que ela aprovar, você poderá consultar o painel aqui.</p>
+      <button id="checkAccess" type="button">Verificar liberação <span aria-hidden="true">↻</span></button>
+      <p class="small">Em outro aparelho ou navegador, será necessário solicitar um novo acesso.</p>
+    </section>
+    <section id="accessRevoked" hidden>
+      <span class="tag">ACESSO NÃO LIBERADO</span>
+      <h1>Fale com Administração.</h1>
+      <p>Sua solicitação foi recusada ou seu acesso foi revogado. Administração pode revisar a autorização no painel.</p>
+      <button id="checkRevoked" type="button">Verificar liberação</button>
+    </section>
+    <p id="accessMessage" role="status" aria-live="polite"></p>
+    <footer>Minerva Foods · Claims e recebimentos<br><span>Acesso liberado por Administração.</span></footer>
+  </main>
+</body>
+</html>

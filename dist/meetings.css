@@ -1,0 +1,169 @@
+/* Monthly meeting workspace. Figures stay in the protected report model. */
+.meeting-view{--meeting-font:calc(13px * var(--minerva-text-scale,1));font-size:var(--meeting-font)}
+.meeting-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin:24px 0}.meeting-heading h2{font-size:2.25em;letter-spacing:-.035em;margin:7px 0 10px;line-height:1.18}.meeting-heading p{color:var(--muted);margin:0;max-width:58em;font-size:1em;line-height:1.75}.meeting-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center}.meeting-view .button{font-size:.94em;min-height:42px}.meeting-view .section-kicker{font-size:.7em;line-height:1.7}.meeting-filters{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;padding:20px 22px;margin-bottom:20px}.meeting-filters label{display:grid;gap:8px;color:var(--muted);font-weight:600;font-size:.92em;min-width:180px}.meeting-filters select{min-height:43px;padding:9px 35px 9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font:inherit}.meeting-filters p{margin:0;flex:1;min-width:220px;max-width:620px;font-size:.9em;line-height:1.7;color:var(--muted);padding-bottom:2px}.meeting-composer{padding:21px 24px;display:grid;grid-template-columns:minmax(220px,.8fr) 1.6fr;align-items:center;gap:16px 24px;background:var(--pale);margin-bottom:30px}.meeting-composer h3{font-size:1.1em;margin:4px 0 5px}.meeting-composer p{font-size:.88em;color:var(--muted);margin:0}.meeting-composer fieldset{border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px}.meeting-composer label{display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);font-size:.88em;cursor:pointer}.meeting-composer input{accent-color:#2e5372;width:16px;height:16px;flex-shrink:0}.meeting-composer label:has(input:checked){border-color:var(--blue);color:var(--blue)}.meeting-selected-count{grid-column:2;font-size:.8em;color:var(--muted)}
+.meeting-section-title{margin-bottom:17px}.meeting-section-title h3{font-size:1.4em;line-height:1.4;margin:4px 0 0}.meeting-kpis{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:16px}.meeting-kpi{padding:25px 24px;border:1px solid var(--line);border-radius:15px;background:var(--paper);display:flex;flex-direction:column;justify-content:space-between;gap:15px;min-width:0}.meeting-kpi>span{font-size:.94em;font-weight:500}.meeting-kpi>strong{font-size:calc(clamp(22px,2.25vw,36px) * var(--minerva-text-scale,1));font-weight:750;letter-spacing:-.045em;line-height:1.2;overflow-wrap:anywhere}.meeting-kpi small{font-size:.8em;color:var(--muted);line-height:1.7}.meeting-kpi-primary{background:#2e5372;border-color:#2e5372;color:white}.meeting-kpi-primary small{color:#deedf3}.meeting-comparison{font-size:.93em;color:var(--muted);margin:14px 0 28px;padding-left:2px;line-height:1.7}.meeting-chart-panel{padding:24px;margin-bottom:20px;min-width:0}.meeting-panel-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:22px}.meeting-panel-heading h3{font-size:1.35em;margin:5px 0 7px;line-height:1.35}.meeting-panel-heading p{font-size:.9em;color:var(--muted);margin:0;line-height:1.7}.meeting-month-chart{display:grid;grid-template-columns:repeat(12,minmax(56px,1fr));gap:7px;overflow-x:auto;overscroll-behavior-x:contain;padding:6px 3px 13px;scrollbar-width:thin}.meeting-month{appearance:none;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--ink);font:inherit;display:flex;flex-direction:column;align-items:center;gap:7px;min-width:0;padding:10px 3px;transition:background .15s ease}.meeting-month:hover,.meeting-month:focus-visible{background:var(--pale)}.meeting-month.is-selected{background:var(--pale);border-color:var(--blue)}.meeting-month-value{font-size:.73em;font-weight:600;white-space:nowrap}.meeting-month-track{height:170px;display:flex;align-items:flex-end;justify-content:center;width:100%;border-bottom:1px solid var(--line)}.meeting-month-track>span{display:block;width:65%;max-width:45px;border-radius:5px 5px 0 0;background:#719aaf;min-width:14px}.meeting-month.is-selected .meeting-month-track>span{background:#2f7865}.meeting-month strong{font-size:.87em;font-weight:650}.meeting-month small{font-size:.67em;color:var(--muted)}.meeting-reconciliation{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);padding-top:18px;gap:20px}.meeting-reconciliation>span{color:var(--muted);font-size:.85em;line-height:1.7}.meeting-reconciliation strong{display:block;color:var(--ink);font-size:1.16em;font-weight:650}.meeting-unallocated{background:var(--amber-pale);color:var(--amber);padding:15px 18px;border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:20px}.meeting-unallocated strong{font-size:.9em}.meeting-unallocated p{font-size:.86em;margin:4px 0 0;line-height:1.7}.meeting-unallocated .button{flex-shrink:0}.meeting-chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.meeting-rankings{display:flex;flex-direction:column;gap:5px}.meeting-ranking{display:flex;align-items:center;gap:12px;min-width:0;width:100%;padding:12px 8px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--ink);font:inherit;text-align:left}.meeting-ranking:hover,.meeting-ranking:focus-visible{background:var(--pale);border-color:var(--line)}.meeting-rank-number{color:var(--muted);font-size:.8em;font-weight:650;min-width:23px}.meeting-rank-body{min-width:0;flex:1;display:block}.meeting-rank-label{display:flex;align-items:baseline;justify-content:space-between;gap:15px;min-width:0}.meeting-rank-label strong{font-size:.9em;overflow-wrap:anywhere;font-weight:600;line-height:1.5}.meeting-rank-label b{font-size:.89em;font-weight:700;flex-shrink:0;white-space:nowrap}.meeting-rank-track{display:block;height:7px;border-radius:8px;background:var(--pale);overflow:hidden;margin:9px 0 5px}.meeting-rank-track>span{display:block;height:100%;background:#2f7865;border-radius:8px}.meeting-rank-body small{font-size:.75em;color:var(--muted)}.meeting-chart-grid>section:last-child .meeting-rank-track>span{background:#719aaf}.meeting-footnote{font-size:.85em;color:var(--muted);margin:14px 0 0}.meeting-empty-chart{padding:45px 10px;text-align:center;color:var(--muted);font-size:.94em}.meeting-goal-panel{padding:26px;margin-bottom:22px}.meeting-goal-head{display:flex;justify-content:space-between;align-items:center;gap:24px;margin-bottom:20px}.meeting-goal-head h3{font-size:1.6em;line-height:1.3;margin:5px 0 0}.meeting-goal-head>strong{font-size:3em;line-height:1.2;color:var(--green);font-weight:750;letter-spacing:-.045em}.meeting-goal-track{height:13px;border-radius:20px;background:var(--pale);overflow:hidden}.meeting-goal-track>span{height:100%;display:block;background:#2f7865;border-radius:20px}.meeting-goal>p{font-size:.82em;color:var(--muted);line-height:1.8;margin:12px 0 20px}.meeting-goal-marks{display:grid;grid-template-columns:1fr 1fr;gap:20px}.meeting-goal-marks>div{border:1px solid var(--line);border-radius:12px;padding:18px;display:grid;gap:6px}.meeting-goal-marks span{font-size:.86em;color:var(--muted)}.meeting-goal-marks strong{font-size:1.4em;letter-spacing:-.03em}.meeting-goal-marks small{color:var(--green);font-weight:600;font-size:.85em}.meeting-goal-empty h3{font-size:1.4em}.meeting-goal-empty p{color:var(--muted);margin-bottom:0}.meeting-source{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:24px 0}.meeting-source>div{max-width:850px}.meeting-source strong{font-size:.84em;line-height:1.8}.meeting-source p{font-size:.82em;color:var(--muted);line-height:1.9;margin:6px 0 0}.meeting-source .button{flex-shrink:0}.meeting-status{min-height:1.5em;font-size:.9em;color:var(--green)}.meeting-empty{padding:36px}.meeting-empty h2{font-size:2em;margin:10px 0}.meeting-empty p{max-width:720px;color:var(--muted);line-height:1.9;margin:0}
+.meeting-detail-dialog{width:min(1220px,calc(100vw - 34px));max-width:none;max-height:90dvh;overflow:auto;padding:26px;border:1px solid var(--line);border-radius:18px;background:var(--paper);color:var(--ink);font-size:calc(13px * var(--minerva-text-scale,1))}.meeting-detail-dialog::backdrop{background:#12293699;backdrop-filter:blur(4px)}.meeting-detail-dialog .dialog-heading{padding:0}.meeting-detail-dialog h2{font-size:1.65em;overflow-wrap:anywhere}.meeting-detail-dialog>p{font-size:.94em;color:var(--muted)}.meeting-detail-scroll{max-height:53dvh;overflow:auto;overscroll-behavior:contain;border:1px solid var(--line);border-radius:10px}.meeting-detail-scroll table{border-collapse:collapse;width:100%;min-width:950px;font-size:.87em}.meeting-detail-scroll th{background:var(--pale);position:sticky;top:0;z-index:1;font-size:1em;min-width:120px}.meeting-detail-scroll th,.meeting-detail-scroll td{text-align:center;padding:15px 12px;border-bottom:1px solid var(--line);overflow-wrap:break-word}.meeting-detail-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:18px;font-size:.9em}.meeting-detail-footer>div{display:flex;gap:9px}.meeting-slide{font-size:calc(clamp(14px,1.2vw,20px) * var(--minerva-text-scale,1));width:100%;max-width:1260px;margin:auto}.meeting-slide h2{font-size:2em;line-height:1.2;letter-spacing:-.04em;margin:8px 0 28px}.meeting-slide .meeting-kpi{padding:24px;gap:20px}.meeting-slide .meeting-kpi>strong{font-size:1.8em}.meeting-slide-note{color:var(--muted);font-size:.82em;line-height:1.7;margin:22px 0 0}.meeting-slide .meeting-month-chart{grid-template-columns:repeat(12,minmax(0,1fr))}.meeting-slide .meeting-month-track{height:190px}.meeting-slide .meeting-rankings{gap:4px}.meeting-slide .meeting-ranking{padding-block:10px}.meeting-slide .meeting-goal{padding:16px 0}.meeting-slide .meeting-goal-marks{margin-top:25px}.meeting-slide .meeting-comparison{margin-bottom:0}
+@media(min-width:1700px){.meeting-kpi>strong{font-size:calc(35px * var(--minerva-text-scale,1))}.meeting-month-track{height:220px}}
+@media(max-width:1150px){.meeting-heading{display:block}.meeting-actions{justify-content:flex-start;margin-top:18px}.meeting-kpis{grid-template-columns:repeat(3,1fr)}.meeting-kpi{padding:20px 18px}.meeting-kpi>strong{font-size:1.8em}.meeting-composer{grid-template-columns:1fr}.meeting-selected-count{grid-column:auto}.meeting-chart-grid{grid-template-columns:1fr}.meeting-month-chart{grid-template-columns:repeat(12,minmax(65px,1fr))}.meeting-source{align-items:flex-start;flex-direction:column}}
+@media(max-width:700px){.meeting-view{font-size:calc(12px * var(--minerva-text-scale,1))}.meeting-heading h2{font-size:2em}.meeting-actions{display:grid;grid-template-columns:1fr 1fr}.meeting-actions [data-meeting-action=present]{grid-column:1/-1}.meeting-filters{gap:12px;padding:18px;display:grid;grid-template-columns:1fr 1fr}.meeting-filters label{min-width:0}.meeting-filters button{grid-column:1/-1}.meeting-filters p{grid-column:1/-1;min-width:0}.meeting-composer{padding:18px}.meeting-kpis{grid-template-columns:1fr}.meeting-kpi{padding:22px;gap:13px}.meeting-kpi>strong{font-size:2.25em}.meeting-panel-heading{display:block}.meeting-panel-heading .button{padding-left:0;margin-top:8px}.meeting-chart-panel{padding:18px}.meeting-reconciliation{gap:13px;grid-template-columns:1fr}.meeting-reconciliation>span{display:flex;justify-content:space-between;gap:15px}.meeting-reconciliation strong{font-size:1em;text-align:right}.meeting-unallocated{align-items:flex-start;flex-direction:column;gap:12px;padding:16px}.meeting-rank-label{display:grid;gap:3px}.meeting-rank-label b{font-size:.94em}.meeting-ranking{padding:12px 2px}.meeting-goal-panel{padding:20px}.meeting-goal-head{align-items:flex-start}.meeting-goal-head h3{font-size:1.4em}.meeting-goal-head>strong{font-size:2.4em}.meeting-goal-marks{grid-template-columns:1fr}.meeting-empty{padding:26px}.meeting-detail-dialog{padding:18px;width:calc(100vw - 18px)}.meeting-slide{font-size:calc(14px * var(--minerva-text-scale,1))}.meeting-slide h2{font-size:1.8em}.meeting-slide .meeting-kpis{grid-template-columns:1fr}.meeting-slide .meeting-month-chart{grid-template-columns:repeat(12,minmax(54px,1fr))}.meeting-slide .meeting-kpi{padding:15px}.meeting-slide .meeting-kpi>strong{font-size:1.7em}.meeting-slide .meeting-goal-marks{grid-template-columns:1fr}}
+@media print{.meeting-view{font-size:11px}.meeting-heading,.meeting-filters,.meeting-composer,.meeting-source>.button,.meeting-status,.meeting-detail-dialog{display:none!important}.meeting-slide{font-size:13px;max-width:none}.meeting-slide h2{font-size:28px;margin-bottom:20px}.meeting-slide .meeting-kpis{grid-template-columns:1.3fr 1fr 1fr;gap:12px}.meeting-slide .meeting-kpi{padding:20px;gap:16px}.meeting-slide .meeting-kpi>strong{font-size:24px}.meeting-slide .meeting-month-chart{grid-template-columns:repeat(12,minmax(0,1fr));overflow:visible}.meeting-slide .meeting-month-track{height:165px}.meeting-slide .meeting-reconciliation{grid-template-columns:repeat(3,1fr)}.meeting-slide .meeting-goal-marks{grid-template-columns:1fr 1fr}.meeting-slide .meeting-rank-label{display:flex}.meeting-slide .meeting-ranking{padding:9px}.meeting-slide .meeting-month,.meeting-slide .meeting-kpi,.meeting-slide .meeting-ranking{break-inside:avoid}.meeting-slide .meeting-kpi-primary{-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#2e5372!important;color:white!important}.meeting-slide .meeting-kpi-primary small{color:#deedf3!important}.meeting-slide .meeting-month-track>span,.meeting-slide .meeting-goal-track>span,.meeting-slide .meeting-rank-track>span{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+/* Keep ranked contributors visible on a standard meeting projector. */
+@media screen and (min-width:901px) and (max-height:850px){.meeting-slide h2{font-size:1.8em;margin-bottom:18px}.meeting-slide .meeting-rankings{gap:2px}.meeting-slide .meeting-ranking{padding:6px 8px}.meeting-slide .meeting-rank-label strong{font-size:.85em;line-height:1.35}.meeting-slide .meeting-rank-label b{font-size:.85em}.meeting-slide .meeting-rank-track{height:6px;margin:6px 0 4px}.meeting-slide .meeting-rank-body small{font-size:.7em}.meeting-slide .meeting-slide-note{margin-top:15px;font-size:.78em;line-height:1.6}.meeting-slide .meeting-footnote{margin-top:10px;font-size:.78em}}
+@media print{.presentation-print-page .meeting-slide h2{font-size:25pt;margin:3mm 0 5mm}.presentation-print-page .meeting-slide .meeting-ranking{padding:2mm 1mm}.presentation-print-page .meeting-slide .meeting-rankings{gap:1mm}.presentation-print-page .meeting-slide .meeting-rank-track{height:5px;margin:2mm 0 1mm}.presentation-print-page .meeting-slide .meeting-rank-label strong,.presentation-print-page .meeting-slide .meeting-rank-label b{font-size:10pt;line-height:1.35}.presentation-print-page .meeting-slide .meeting-rank-body small{font-size:8pt;line-height:1.4}.presentation-print-page .meeting-slide .meeting-slide-note,.presentation-print-page .meeting-slide .meeting-footnote{font-size:9pt;line-height:1.6;margin-top:3mm}}
+
+/* Four export actions wrap cleanly without squeezing the report title. */
+.meeting-actions{flex-wrap:wrap;max-width:100%}
+@media(min-width:1151px) and (max-width:1600px){.meeting-heading{flex-direction:column}.meeting-actions{justify-content:flex-start}}
+@media(max-width:700px){.meeting-actions [data-meeting-action=pptx]{grid-column:1/-1}}
+
+/* Minerva committee/report layout: compact headings, flat data blocks. */
+.meeting-view .panel,.meeting-view .meeting-kpi,.meeting-view .meeting-goal-marks>div{border-radius:0;box-shadow:none}
+.meeting-view .meeting-kpi{background:var(--paper);color:var(--ink);border:0;border-top:4px solid var(--blue)}
+.meeting-view .meeting-kpi:nth-child(2){border-top-color:var(--beige)}
+.meeting-view .meeting-kpi:nth-child(3){border-top-color:var(--coral)}
+.meeting-view .meeting-kpi>span,.meeting-view .meeting-kpi small{color:var(--muted)}
+.meeting-view .meeting-kpi>strong{color:var(--blue)}
+.meeting-view .meeting-chart-panel,.meeting-view .meeting-goal-panel{padding:22px;border-top:3px solid var(--blue)}
+.meeting-view .meeting-month-track,.meeting-view .meeting-month-track>span,.meeting-view .meeting-rank-track,.meeting-view .meeting-rank-track>span,.meeting-view .meeting-goal-track,.meeting-view .meeting-goal-track>span{border-radius:0}
+.meeting-view .meeting-rank-track>span,.meeting-view .meeting-goal-track>span{background:var(--blue)}
+.meeting-view .meeting-panel-heading h3,.meeting-view .meeting-section-title h3{font-size:1.45em;letter-spacing:-.02em}
+.meeting-slide{color:#263746;font-size:calc(14px * var(--minerva-text-scale,1));max-width:1260px}
+.meeting-slide h2{font-size:calc(27px * var(--minerva-text-scale,1));color:#2e5372;line-height:1.2;margin:0 0 7px;font-weight:750;letter-spacing:-.02em}
+.meeting-slide-period{font-size:calc(11px * var(--minerva-text-scale,1));color:#637484;margin:0 0 18px;line-height:1.6}
+.meeting-slide .meeting-kpis{gap:16px}
+.meeting-slide .meeting-kpi{border:0;border-top:4px solid #2e5372;border-radius:0;background:#fff;color:#263746;padding:16px;gap:12px}
+.meeting-slide .meeting-kpi:nth-child(2){border-top-color:#bdb58c}
+.meeting-slide .meeting-kpi:nth-child(3){border-top-color:#e84752}
+.meeting-slide .meeting-kpi>strong{color:#2e5372;font-size:calc(27px * var(--minerva-text-scale,1));font-weight:750}
+.meeting-slide .meeting-kpi small,.meeting-slide .meeting-kpi>span{color:#637484;font-size:calc(10px * var(--minerva-text-scale,1));line-height:1.6}
+.meeting-slide .meeting-comparison{font-size:calc(11px * var(--minerva-text-scale,1));padding:10px 0;margin:0;color:#637484}
+.meeting-summary-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:12px 0 0}
+.meeting-summary-columns>section{background:#fff;min-width:0}
+.meeting-summary-columns h3{font-size:calc(10px * var(--minerva-text-scale,1));line-height:1.6;color:#fff;background:#2e5372;padding:7px 10px;margin:0;font-weight:700}
+.meeting-summary-columns dl{padding:8px 10px;margin:0}
+.meeting-summary-columns dl>div{display:flex;align-items:baseline;gap:10px;justify-content:space-between;font-size:calc(11px * var(--minerva-text-scale,1));line-height:1.5;padding:8px 4px;border-bottom:1px solid #d7dfe4}
+.meeting-summary-columns dl>div:nth-child(even){background:#eef1f3}
+.meeting-summary-columns dl>div:last-child{border:0}
+.meeting-summary-columns dt{color:#637484}
+.meeting-summary-columns dd{margin:0;text-align:right;font-weight:650;color:#2e5372}
+.meeting-chart-layout{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(245px,1fr);gap:26px;align-items:start}
+.meeting-chart-layout>div,.meeting-chart-layout>aside{min-width:0}
+.meeting-chart-layout>aside{display:grid;gap:13px}
+.meeting-slide-stat{background:#fff;border-top:4px solid #2e5372;padding:14px 12px;text-align:center;display:grid;gap:6px}
+.meeting-slide-stat>strong{font-size:calc(27px * var(--minerva-text-scale,1));line-height:1.2;color:#2e5372;font-weight:750;white-space:nowrap}
+.meeting-slide-stat>span{font-size:calc(10px * var(--minerva-text-scale,1));line-height:1.6;color:#637484}
+.meeting-slide-stat.beige{border-color:#bdb58c}.meeting-slide-stat.beige>strong{color:#a79f73}
+.meeting-slide-stat.coral{border-color:#e84752}.meeting-slide-stat.coral>strong{color:#e84752}
+.meeting-reading{padding:16px;background:#2e5372;color:#fff}
+.meeting-reading>strong{font-size:calc(10px * var(--minerva-text-scale,1));line-height:1.5;font-weight:750}
+.meeting-reading>p{font-size:calc(11px * var(--minerva-text-scale,1));line-height:1.65;margin:8px 0 0;color:#e1eaf0}
+.meeting-slide .meeting-month-chart{gap:5px;padding:10px 0 0;overflow:visible;grid-template-columns:repeat(12,minmax(0,1fr))}
+.meeting-slide .meeting-month{padding:0 1px;border:0;border-radius:0;min-width:0}
+.meeting-slide .meeting-month-value{font-size:calc(9px * var(--minerva-text-scale,1));font-weight:600;white-space:nowrap;letter-spacing:-.04em}
+.meeting-slide .meeting-month-track{height:200px;border-radius:0;background:none;border-bottom:1px solid #c7d4dc}
+.meeting-slide .meeting-month-track>span{border-radius:0;background:#2e5372;max-width:36px}
+.meeting-slide .meeting-month.is-selected .meeting-month-track>span{background:#bdb58c}
+.meeting-slide .meeting-month>strong{font-size:calc(10px * var(--minerva-text-scale,1));font-weight:500}
+.meeting-slide .meeting-month>small{font-size:calc(8px * var(--minerva-text-scale,1))}
+.meeting-slide .meeting-reconciliation{gap:10px;margin-top:14px;border:0;background:#fff;padding:11px}
+.meeting-slide .meeting-reconciliation>span{font-size:calc(9px * var(--minerva-text-scale,1));line-height:1.6}
+.meeting-slide .meeting-reconciliation strong{font-size:calc(12px * var(--minerva-text-scale,1));line-height:1.5}
+.meeting-slide .meeting-rankings{gap:7px}
+.meeting-slide .meeting-ranking{background:#fff;border-radius:0;border:0;padding:10px 12px}
+.meeting-slide .meeting-rank-label strong,.meeting-slide .meeting-rank-label b{font-size:calc(12px * var(--minerva-text-scale,1));line-height:1.4}
+.meeting-slide .meeting-rank-track{height:9px;border-radius:0;margin:7px 0 5px}
+.meeting-slide .meeting-rank-track>span{background:#2e5372;border-radius:0}
+.meeting-slide .meeting-rank-body small{font-size:calc(9px * var(--minerva-text-scale,1))}
+.meeting-slide .meeting-slide-note,.meeting-slide .meeting-footnote{font-size:calc(10px * var(--minerva-text-scale,1));line-height:1.6;color:#637484;margin:14px 0 0}
+.meeting-slide .meeting-goal{padding:10px 0}
+.meeting-slide .meeting-goal-head h3{font-size:calc(22px * var(--minerva-text-scale,1));margin-top:6px}
+.meeting-slide .meeting-goal-head>strong{font-size:calc(40px * var(--minerva-text-scale,1));color:#2e5372}
+.meeting-slide .meeting-goal-track,.meeting-slide .meeting-goal-track>span{border-radius:0}
+.meeting-slide .meeting-goal-track>span{background:#2e5372}
+.meeting-slide .meeting-goal-marks{gap:16px;margin-top:20px}
+.meeting-slide .meeting-goal-marks>div{background:#fff;border:0;border-top:4px solid #bdb58c;border-radius:0;padding:18px}
+.meeting-slide .meeting-goal-marks>div+div{border-top-color:#e84752}
+.meeting-slide .meeting-goal-marks strong{font-size:calc(21px * var(--minerva-text-scale,1));color:#2e5372}
+.meeting-slide .meeting-goal-marks small{color:#e84752}
+@media(max-width:1000px){.meeting-chart-layout{grid-template-columns:1fr}.meeting-chart-layout>aside{grid-template-columns:repeat(3,minmax(0,1fr))}.meeting-slide-stat>strong{font-size:calc(22px * var(--minerva-text-scale,1))}.meeting-reading{padding:13px}}
+@media(max-width:700px){.meeting-slide h2{font-size:calc(23px * var(--minerva-text-scale,1))}.meeting-summary-columns{grid-template-columns:1fr}.meeting-chart-layout>aside{grid-template-columns:1fr}.meeting-slide .meeting-month-chart{grid-template-columns:repeat(12,minmax(47px,1fr));overflow-x:auto;padding-bottom:8px}.meeting-slide .meeting-reconciliation{grid-template-columns:1fr}.meeting-slide .meeting-goal-marks{grid-template-columns:1fr}.meeting-slide .meeting-rank-label{display:grid;gap:4px}.meeting-slide .meeting-kpi>strong{font-size:calc(27px * var(--minerva-text-scale,1))}.meeting-slide .meeting-month-value{font-size:calc(9px * var(--minerva-text-scale,1))}}
+@media print{
+ .presentation-print-page .meeting-slide h2{font-size:22.5pt;margin:0 0 2mm;line-height:1.2}
+ .presentation-print-page .meeting-slide-period{font-size:9pt;margin:0 0 4mm}
+ .presentation-print-page .meeting-slide .meeting-kpi{padding:4mm;background:#fff!important;color:#263746!important;gap:3mm}
+ .presentation-print-page .meeting-slide .meeting-kpi>strong{font-size:21pt;color:#2e5372!important}
+ .presentation-print-page .meeting-slide .meeting-kpi small,.presentation-print-page .meeting-slide .meeting-kpi>span{font-size:8pt;color:#637484!important}
+ .presentation-print-page .meeting-slide .meeting-comparison{font-size:9pt;padding:3mm 0}
+ .presentation-print-page .meeting-summary-columns{gap:4mm;margin-top:3mm}
+ .presentation-print-page .meeting-summary-columns h3{font-size:8pt;padding:2mm 3mm;background:#2e5372!important;color:#fff!important}
+ .presentation-print-page .meeting-summary-columns dl>div{font-size:9pt;padding:3mm 1mm}
+ .presentation-print-page .meeting-chart-layout{grid-template-columns:minmax(0,2.2fr) minmax(0,1fr);gap:6mm}
+ .presentation-print-page .meeting-chart-layout>aside{display:grid;grid-template-columns:1fr;gap:3mm}
+ .presentation-print-page .meeting-slide-stat{padding:3mm;border-top-width:3px}
+ .presentation-print-page .meeting-slide-stat>strong{font-size:21pt}
+ .presentation-print-page .meeting-slide-stat>span{font-size:8pt}
+ .presentation-print-page .meeting-reading{background:#2e5372!important;color:#fff!important;padding:4mm}
+ .presentation-print-page .meeting-reading>strong{font-size:8pt}
+ .presentation-print-page .meeting-reading>p{font-size:9pt;line-height:1.5;margin-top:2mm;color:#e1eaf0!important}
+ .presentation-print-page .meeting-slide .meeting-month-chart{grid-template-columns:repeat(12,minmax(0,1fr));gap:1mm;overflow:visible;padding-top:4mm}
+ .presentation-print-page .meeting-slide .meeting-month-value{font-size:7pt}
+ .presentation-print-page .meeting-slide .meeting-month-track{height:47mm}
+ .presentation-print-page .meeting-slide .meeting-month>strong{font-size:8pt}
+ .presentation-print-page .meeting-slide .meeting-month>small{font-size:6pt}
+ .presentation-print-page .meeting-slide .meeting-reconciliation{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:4mm;padding:3mm;gap:3mm}
+ .presentation-print-page .meeting-slide .meeting-reconciliation>span{font-size:7pt;display:block}
+ .presentation-print-page .meeting-slide .meeting-reconciliation strong{font-size:9pt;text-align:left}
+ .presentation-print-page .meeting-slide .meeting-rankings{gap:2mm}
+ .presentation-print-page .meeting-slide .meeting-ranking{padding:2.5mm 3mm}
+ .presentation-print-page .meeting-slide .meeting-rank-label{display:flex}
+ .presentation-print-page .meeting-slide .meeting-rank-label strong,.presentation-print-page .meeting-slide .meeting-rank-label b{font-size:10pt;line-height:1.35}
+ .presentation-print-page .meeting-slide .meeting-rank-body small{font-size:7pt}
+ .presentation-print-page .meeting-slide .meeting-rank-track{height:7px;margin:2mm 0 1mm}
+ .presentation-print-page .meeting-slide .meeting-slide-note,.presentation-print-page .meeting-slide .meeting-footnote{font-size:8pt;line-height:1.5;margin-top:3mm}
+ .presentation-print-page .meeting-slide .meeting-goal-head h3{font-size:18pt}
+ .presentation-print-page .meeting-slide .meeting-goal-head>strong{font-size:32pt}
+ .presentation-print-page .meeting-slide .meeting-goal-marks{grid-template-columns:1fr 1fr;gap:4mm;margin-top:5mm}
+ .presentation-print-page .meeting-slide .meeting-goal-marks>div{padding:4mm}
+ .presentation-print-page .meeting-slide .meeting-goal-marks strong{font-size:17pt}
+}
+@media screen and (min-width:901px) and (max-height:850px){.meeting-slide .meeting-rankings{gap:5px}.meeting-slide .meeting-ranking{padding:6px 12px}.meeting-slide .meeting-rank-track{height:7px;margin:5px 0 3px}.meeting-slide .meeting-rank-body small{font-size:calc(9px * var(--minerva-text-scale,1));line-height:1.4}.meeting-slide .meeting-slide-note,.meeting-slide .meeting-footnote{margin-top:10px}.meeting-slide .meeting-rank-label strong,.meeting-slide .meeting-rank-label b{font-size:calc(12px * var(--minerva-text-scale,1));line-height:1.35}}
+/* Keep each value next to the bar it describes, including zero-value months. */
+.meeting-month-chart{padding-top:27px}
+.meeting-month-track{position:relative}
+.meeting-month-track>.meeting-month-value{position:absolute;bottom:calc(var(--month-height,0%) + 5px);left:50%;transform:translateX(-50%);font-weight:600;white-space:nowrap;line-height:1.3;color:var(--ink)}
+.meeting-slide .meeting-month-chart{padding-top:26px}
+@media print{.presentation-print-page .meeting-slide .meeting-month-chart{padding-top:6mm}}
+
+/* Fill the slide's usable height, rather than packing every visual at the top. */
+@media print{
+ .presentation-print-page .meeting-slide{display:flex;flex-direction:column;flex:1;min-height:0;margin:0;max-width:none}
+ .presentation-print-page .meeting-slide h2{font-size:24pt;flex-shrink:0}
+ .presentation-print-page .meeting-slide .report-masthead,.presentation-print-page .meeting-slide-period,.presentation-print-page .meeting-slide-note{flex-shrink:0}
+ .presentation-print-page .meeting-slide .meeting-kpi{padding:5mm;gap:4mm}
+ .presentation-print-page .meeting-slide .meeting-kpi>strong{font-size:24pt}
+ .presentation-print-page .meeting-slide .meeting-kpi small,.presentation-print-page .meeting-slide .meeting-kpi>span{font-size:9pt}
+ .presentation-print-page .meeting-summary-columns{flex:1;min-height:0}
+ .presentation-print-page .meeting-summary-columns>section{display:flex;flex-direction:column}
+ .presentation-print-page .meeting-summary-columns dl{display:flex;flex-direction:column;flex:1}
+ .presentation-print-page .meeting-summary-columns dl>div{flex:1;align-items:center;font-size:10pt}
+ .presentation-print-page .meeting-chart-layout{flex:1;min-height:0;align-items:stretch}
+ .presentation-print-page .meeting-chart-layout>div{display:flex;flex-direction:column;min-height:0}
+ .presentation-print-page .meeting-chart-layout>aside{grid-template-rows:1fr 1fr 1.2fr}
+ .presentation-print-page .meeting-slide-stat{align-content:center;padding:4mm}
+ .presentation-print-page .meeting-slide-stat>strong{font-size:24pt}
+ .presentation-print-page .meeting-slide-stat>span{font-size:9pt}
+ .presentation-print-page .meeting-reading{display:flex;flex-direction:column;justify-content:center;padding:5mm}
+ .presentation-print-page .meeting-reading>strong{font-size:9pt}
+ .presentation-print-page .meeting-reading>p{font-size:10pt}
+ .presentation-print-page .meeting-slide .meeting-month-chart{flex:1;min-height:0}
+ .presentation-print-page .meeting-slide .meeting-month-track{height:auto;min-height:0;flex:1}
+ .presentation-print-page .meeting-slide .meeting-month>small{font-size:7pt}
+ .presentation-print-page .meeting-slide .meeting-rankings{flex:1;min-height:0}
+ .presentation-print-page .meeting-slide .meeting-ranking{flex:1;padding:3mm}
+ .presentation-print-page .meeting-slide .meeting-rank-label strong,.presentation-print-page .meeting-slide .meeting-rank-label b{font-size:11pt}
+ .presentation-print-page .meeting-slide .meeting-rank-body small{font-size:8pt}
+ .presentation-print-page .meeting-slide .meeting-goal{display:flex;flex-direction:column;justify-content:center;flex:1;min-height:0;padding:5mm 0}
+ .presentation-print-page .meeting-slide .meeting-goal-head{margin-bottom:7mm}
+ .presentation-print-page .meeting-slide .meeting-goal-marks{margin-top:7mm}
+ .presentation-print-page .meeting-slide .meeting-goal-marks>div{padding:6mm 4mm}
+}

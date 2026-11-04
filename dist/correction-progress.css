@@ -1,0 +1,17 @@
+.correction-progress-message{margin:0;padding:0 24px 14px;color:var(--muted);font-size:calc(11px * var(--minerva-text-scale,1));line-height:1.7}
+.correction-progress-cell{display:flex;flex-direction:column;align-items:center;gap:5px;margin-top:10px}
+.correction-progress-cell small{font-size:calc(9px * var(--minerva-text-scale,1));line-height:1.6;color:var(--muted);white-space:normal;max-width:230px}
+.correction-progress-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--line);border-radius:7px;padding:6px 9px;background:var(--paper);color:var(--blue);font:inherit;font-size:calc(10px * var(--minerva-text-scale,1));line-height:1.4;cursor:pointer;white-space:normal}
+.correction-progress-button>span{font-size:16px;line-height:1}
+.correction-progress-button:hover:not(:disabled){border-color:var(--blue);background:var(--pale)}
+.correction-progress-button:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.correction-progress-button:disabled{cursor:default}
+.correction-progress-button[aria-busy=true]{opacity:.6;cursor:progress}
+.correction-progress-button[aria-pressed=true]{border-color:#9bc7ad;background:#dfefe4;color:#1d6341;font-weight:600}
+#correctionTable tr.correction-complete>td{background:#edf7f0}
+#correctionTable tr.correction-complete:hover>td{background:#e4f1e9}
+[data-theme=dark] #correctionTable tr.correction-complete>td{background:#173d32}
+[data-theme=dark] #correctionTable tr.correction-complete:hover>td{background:#1a4539}
+[data-theme=dark] .correction-progress-button[aria-pressed=true]{background:#225441;color:#c2f2d6;border-color:#3c8060}
+@media(max-width:760px){.correction-progress-message{padding:0 17px 14px}}
+@media print{.correction-progress-message{display:none}.correction-progress-button{border:0;padding:0;font-size:7pt!important;background:transparent!important;color:#1d6341!important}.correction-progress-cell small{font-size:6pt!important;color:#365544!important}#correctionTable tr.correction-complete>td{background:#edf7f0!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}

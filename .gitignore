@@ -1,0 +1,25 @@
+work/
+build/
+outputs/
+node_modules/
+.env*
+.wrangler/
+.sites-runtime/
+*.xlsx
+*.csv
+*.tar.gz
+*.tgz
+*.png
+*.log
+tests/openxml-validator/bin/
+tests/openxml-validator/obj/
+
+# Dados e materiais locais não devem ser enviados ao repositório.
+private/
+attachments/
+analysis/
+*.xls
+*.xlsm
+*.pdf
+*.pptx
+!dist/assets/*.png

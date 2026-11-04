@@ -1,0 +1,53 @@
+// The public entry shows only an access request form. Report authorization uses
+// private administrator links and server-side approval of browser sessions.
+const apiHandler=createApiHandler({engine:globalThis.ClaimsEngine});
+const BASE_HEADERS={
+ 'X-Content-Type-Options':'nosniff',
+ 'Referrer-Policy':'no-referrer',
+ 'Cache-Control':'private, no-store',
+ 'Permissions-Policy':'camera=(), microphone=(), geolocation=()',
+ 'Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https://minervafoods.com; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+};
+function secured(response){const h=new Headers(response.headers);for(const [k,v]of Object.entries(BASE_HEADERS))h.set(k,v);return new Response(response.body,{status:response.status,headers:h});}
+function staticAsset(key){const asset=STATIC_ASSETS[key];if(!asset)return new Response('Não encontrado',{status:404});const bytes=Uint8Array.from(atob(asset.body),c=>c.charCodeAt(0));return new Response(bytes,{headers:{'Content-Type':asset.type}});}
+// These existing brand assets are declared by the official Minerva Foods site.
+// Fixed sources only: this is not a general-purpose URL proxy.
+const BRAND_ICONS={
+ '/favicon.ico':'https://minervafoods.com/wp-content/themes/infobase-wp-theme/public/img/favicon.png',
+ '/assets/minerva-favicon.png':'https://minervafoods.com/wp-content/themes/infobase-wp-theme/public/img/favicon.png',
+ '/assets/minerva-icon-192.jpg':'https://minervafoods.com/wp-content/uploads/2022/04/cropped-principal-logo-Small-192x192.jpg',
+ '/assets/minerva-apple-touch-icon.jpg':'https://minervafoods.com/wp-content/uploads/2022/04/cropped-principal-logo-Small-180x180.jpg'
+};
+function entryPage(kind){
+ const page=staticAsset('/access.html');
+ return new Response(page.body,{status:kind==='unavailable'?503:200,headers:page.headers});
+}
+export default {
+ async fetch(request,env,ctx){
+  const url=new URL(request.url);
+  try{
+   if(url.pathname.startsWith('/api/'))return secured(await apiHandler(request,env));
+   if(request.method!=='GET'&&request.method!=='HEAD')return secured(new Response('Método não permitido',{status:405}));
+   if(url.pathname==='/assets/minerva-logo.webp'){
+    const logo=await fetch('https://minervafoods.com/wp-content/uploads/2024/08/logo-1024x451.webp',{cf:{cacheTtl:86400,cacheEverything:true}});
+    if(!logo.ok||!/^image\//.test(logo.headers.get('content-type')||''))return secured(new Response('Logo indisponível',{status:502}));
+    return secured(new Response(logo.body,{headers:{'Content-Type':logo.headers.get('content-type')}}));
+   }
+   if(Object.hasOwn(BRAND_ICONS,url.pathname)){
+    const icon=await fetch(BRAND_ICONS[url.pathname],{cf:{cacheTtl:86400,cacheEverything:true}});
+    if(!icon.ok||!/^image\//.test(icon.headers.get('content-type')||''))return secured(new Response('Ícone indisponível',{status:502}));
+    return secured(new Response(icon.body,{headers:{'Content-Type':icon.headers.get('content-type')}}));
+   }
+   if(url.pathname==='/acesso')return secured(entryPage('anonymous'));
+   if(url.pathname==='/'||url.pathname==='/index.html'){
+    const sessionUrl=new URL('/api/session',url);const result=await apiHandler(new Request(sessionUrl,{headers:request.headers}),env);
+    if(result.status>=500)return secured(entryPage('unavailable'));
+    const session=await result.json();
+    if(!session.authenticated)return secured(entryPage('anonymous'));
+    if(!session.approved||!['admin','editor','viewer'].includes(session.role))return secured(entryPage('denied'));
+    return secured(staticAsset('/index.html'));
+   }
+   return secured(staticAsset(url.pathname));
+  }catch(error){return secured(url.pathname.startsWith('/api/')?new Response(JSON.stringify({error:'Não foi possível concluir a solicitação.'}),{status:503,headers:{'Content-Type':'application/json'}}):entryPage('unavailable'));}
+ }
+};
