@@ -1,0 +1,23 @@
+.chart-interaction-note{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 10px;color:var(--muted);font-size:calc(10px * var(--minerva-text-scale,1));line-height:1.6}
+.chart-clear-selection{border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--blue);padding:6px 9px;font:inherit;cursor:pointer;white-space:normal}
+.chart-clear-selection:hover{background:var(--pale)}
+.chart-clear-selection:focus-visible,.month-filter-button:focus-visible,.rank-filter-button:focus-visible{outline:3px solid var(--coral);outline-offset:3px}
+.monthly-bars .month-filter-button{appearance:none;border:0;border-radius:5px;background:transparent;padding:0 2px 3px;cursor:pointer;font-family:inherit;color:var(--muted);min-width:0;flex:1;transition:background .15s;box-sizing:border-box}
+.monthly-bars .month-filter-button:hover,.monthly-bars .month-filter-button[aria-pressed="true"]{background:var(--pale);color:var(--blue)}
+.monthly-bars .month-filter-button[aria-pressed="true"] .month-track span{background:var(--coral)}
+.monthly-bars .month-filter-button .month-track{pointer-events:none}
+.monthly-bars .month-filter-button small{font-size:calc(8px * var(--minerva-text-scale,1));line-height:1.3}
+.monthly-bars .month-filter-button .month-year{font-size:calc(7px * var(--minerva-text-scale,1));line-height:1.3}
+.monthly-bars:has(.month-filter-button){height:225px;padding-top:10px;padding-inline:4px}
+.rank-filter-button{appearance:none;border:1px solid transparent;border-radius:9px;background:transparent;width:100%;padding:8px 7px;text-align:left;font-family:inherit;color:var(--ink);cursor:pointer;box-sizing:border-box}
+.rank-filter-button:hover,.rank-filter-button[aria-pressed="true"]{background:var(--pale);border-color:var(--line)}
+.rank-filter-button:disabled{cursor:progress;opacity:.7}
+.rank-content{min-width:0}
+.rank-name{font-size:calc(10px * var(--minerva-text-scale,1));line-height:1.6;overflow-wrap:anywhere;color:var(--blue);font-weight:600}
+.rank-filter-button .rank-title strong{flex-shrink:0}
+.rank-filter-button .bar-track{display:block}
+.chart-month-selection{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--pale);border:1px solid var(--line);border-radius:10px;padding:13px 16px;margin:14px 0 0;color:var(--blue);font-size:calc(11px * var(--minerva-text-scale,1));line-height:1.7}
+.chart-month-selection[hidden]{display:none}
+.chart-month-selection small{display:block;color:var(--muted);font-size:.9em}
+@media(max-width:760px){.monthly-bars:has(.month-filter-button){overflow-x:auto;gap:5px;justify-content:flex-start}.monthly-bars .month-filter-button{flex:0 0 28px}.chart-interaction-note{font-size:calc(10px * var(--minerva-text-scale,1))}.chart-month-selection{align-items:flex-start}.chart-month-selection .chart-clear-selection{flex-shrink:0}}
+@media print{.chart-clear-selection{display:none!important}.chart-interaction-note{font-size:8px}.chart-month-selection{font-size:8px;margin:8px 0;padding:8px}.monthly-bars:has(.month-filter-button){height:170px;overflow:visible;gap:3px}.monthly-bars .month-filter-button{flex:1 1 0;border:0!important;background:transparent!important;outline:0!important}.rank-filter-button{border:0!important;background:transparent!important;outline:0!important}.rank-name{font-size:8px}}
