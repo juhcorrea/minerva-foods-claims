@@ -4,7 +4,7 @@
 
 ## Abrir a demonstração
 
-**[Abrir demonstração online](https://juhcorrea.github.io/minerva-foods-claims/)** — disponível após a ativação do GitHub Pages no repositório.
+**[Abrir demonstração online](https://juhcorrea.github.io/minerva-foods-claims/)**
 
 Abre diretamente no navegador, sem instalar Python ou baixar o projeto. A demonstração usa somente os exemplos fictícios incluídos no código, com importação de planilhas desativada. Não oferece acesso a bases ou contas reais.
 
