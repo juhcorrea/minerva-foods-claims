@@ -2,7 +2,13 @@
 
 > **DADOS FICTÍCIOS — SEM RESULTADOS REAIS DA EMPRESA.** Os fornecedores, analistas, ordens, valores e metas dos exemplos e testes são sintéticos. Este repositório apresenta as funcionalidades e o visual de um painel de claims e recebimentos.
 
-## Explorar localmente
+## Abrir a demonstração
+
+**[Abrir demonstração online](https://juhcorrea.github.io/minerva-foods-claims/)** — disponível após a ativação do GitHub Pages no repositório.
+
+Abre diretamente no navegador, sem instalar Python ou baixar o projeto. A demonstração usa somente os exemplos fictícios incluídos no código, com importação de planilhas desativada. Não oferece acesso a bases ou contas reais.
+
+## Rodar no próprio computador — opcional
 
 Requer Python 3 para servir a interface. Na pasta deste projeto:
 
@@ -10,7 +16,9 @@ Requer Python 3 para servir a interface. Na pasta deste projeto:
 python3 -m http.server 8080 --directory dist --bind 127.0.0.1
 ```
 
-Abra `http://127.0.0.1:8080` e clique em **Explorar demonstração**. Os exemplos são gerados no navegador, com fornecedores e referências fictícios. A demonstração local não se conecta a bases, contas ou relatórios de produção.
+**Somente depois de executar o comando acima e mantê-lo aberto**, acesse `http://127.0.0.1:8080` no mesmo computador e clique em **Explorar demonstração**. Esse endereço é local: clicar nele sem iniciar o servidor resulta em conexão recusada. Não é o link público do painel.
+
+Os exemplos são gerados no navegador, com fornecedores e referências fictícios. A demonstração local não se conecta a bases, contas ou relatórios de produção.
 
 ## Funcionalidades
 
@@ -39,6 +47,8 @@ node --test tests/*.test.cjs tests/*.test.mjs tests/access-security.mjs
 
 O build gera `build/server/index.js`. Os testes distribuídos usam dados sintéticos; as planilhas, os relatórios e os testes baseados em dados operacionais não são incluídos.
 
+Para gerar somente a demonstração estática, execute `node scripts/build-demo.mjs`. A saída fica em `build/demo/`, com caminhos relativos para publicação em uma subpasta. A branch `gh-pages` recebe apenas esses arquivos; nenhum backend, conta, configuração privada ou planilha operacional faz parte dela. Em Settings → Pages, a origem é **Deploy from a branch → gh-pages → /(root)**.
+
 Os testes de navegador requerem Playwright/Chromium. A pasta `tests/openxml-validator/` permite verificar apresentações geradas usando o Microsoft Open XML SDK. As licenças de terceiros permanecem junto às bibliotecas.
 
 ## Configuração independente
@@ -47,7 +57,7 @@ Os testes de navegador requerem Playwright/Chromium. A pasta `tests/openxml-vali
 
 `ADMIN_LINK_HASHES` recebe dois registros com identificador, nome, contato opcional e hash SHA-256 de cada token administrativo. `OWNER_ADMIN_LINK_HASH` e `DEVELOPER_ADMIN_LINK_HASH` permitem hashes adicionais opcionais. Não versionar valores reais dessas variáveis. A autorização depende de tokens e aprovação no servidor; informar um nome ou e-mail não concede acesso.
 
-Esta cópia não deve ser implantada diretamente sobre uma instalação existente: seus identificadores são genéricos e nenhum estado de acesso ou configuração de produção está incluído. Commits no GitHub não publicam nem atualizam automaticamente qualquer site.
+Esta cópia não deve ser implantada diretamente sobre uma instalação existente: seus identificadores são genéricos e nenhum estado de acesso ou configuração de produção está incluído. O GitHub Pages publica apenas a demonstração estática; não atualiza o painel operacional protegido.
 
 ## Privacidade
 
