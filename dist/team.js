@@ -342,11 +342,15 @@
     } else {
       actions = '<span class="badge neutral">' + escapeHTML(status === 'rejected' || !member.approvedAt ? 'Rejeitado' : 'Revogado') + '</span>';
     }
+    if (id && ['pending','revoked','rejected'].includes(status) && member.role !== 'admin') {
+      actions += '<button class="button team-delete-request" type="button" data-member-action="delete"' + attrs + ' aria-label="Excluir solicitação de ' + escapeHTML(name) + '">Excluir solicitação</button>';
+    }
     return '<div class="team-member-row' + (['revoked','rejected'].includes(status) ? ' is-revoked' : '') + '"><div><strong>' + escapeHTML(name) + '</strong><span>' + escapeHTML(detail.join(' · ')) + '</span></div><div class="team-member-actions">' + actions + '</div></div>';
   }
   function renderMembers(payload) {
     const members = Array.isArray(payload.members) ? payload.members : [];
     const admins = Array.isArray(payload.admins) ? payload.admins : [];
+    const historyOpen = $('teamMembersList').querySelector('.team-closed-accesses')?.open === true;
     $('teamAdminsList').innerHTML = admins.map(admin => '<div class="team-admin-fixed"><div><strong>' + escapeHTML(displayName(admin)) + '</strong><span>' + (admin.id === 'developer' ? 'Acesso administrativo · apoio técnico' : 'Administradora · responsável pelo setor') + '</span></div><span class="badge">Administração</span></div>').join('');
     const lists = {pending:[], approved:[], closed:[]};
     for (const member of members) {
@@ -357,7 +361,7 @@
       else lists.closed.push(member);
     }
     const section = (title, rows, status, empty) => '<section class="team-member-section"><div class="team-list-heading"><strong>' + title + '</strong><span>' + rows.length + '</span></div>' + (rows.length ? rows.map(member => memberRow(member, status || accessStatus(member))).join('') : '<p class="team-list-empty">' + empty + '</p>') + '</section>';
-    $('teamMembersList').innerHTML = section('Solicitações pendentes', lists.pending, 'pending', 'Nenhuma solicitação aguardando aprovação.') + section('Acessos liberados', lists.approved, 'approved', 'Ainda não há acessos liberados.') + (lists.closed.length ? '<details class="team-closed-accesses"><summary>Pedidos rejeitados e acessos revogados (' + lists.closed.length + ')</summary>' + section('Histórico de acessos', lists.closed, null, '') + '</details>' : '');
+    $('teamMembersList').innerHTML = section('Solicitações pendentes', lists.pending, 'pending', 'Nenhuma solicitação aguardando aprovação.') + section('Acessos liberados', lists.approved, 'approved', 'Ainda não há acessos liberados.') + (lists.closed.length ? '<details class="team-closed-accesses"' + (historyOpen ? ' open' : '') + '><summary>Pedidos rejeitados e acessos revogados (' + lists.closed.length + ')</summary>' + section('Histórico de acessos', lists.closed, null, '') + '</details>' : '');
   }
   async function loadMembers() {
     const payload = await api('/api/members');
@@ -381,24 +385,30 @@
   }
   async function changeMemberAccess(event) {
     const button = event.target.closest('[data-member-action]');
-    if (!button || session?.role !== 'admin') return;
+    if (!button || button.disabled || session?.role !== 'admin') return;
     const id = button.dataset.memberId;
     const name = button.dataset.memberName || 'esta pessoa';
     const action = button.dataset.memberAction;
-    if (!id || !['approve','reject','revoke','role'].includes(action)) return;
+    if (!id || !['approve','reject','revoke','role','delete'].includes(action)) return;
+    if (action === 'delete' && !global.confirm('Excluir permanentemente a solicitação de ' + name + '?\n\nEla será removida da lista e do histórico de solicitações. A pessoa poderá enviar um novo pedido de acesso.')) return;
     const actions = button.closest('.team-member-actions');
     const selectedRole = actions?.querySelector('[data-member-role]')?.value;
     if (action === 'role' && !['viewer','editor'].includes(selectedRole)) return;
     const buttons = actions?.querySelectorAll('button,select') || [button];
     buttons.forEach(item => { item.disabled = true; });
-    memberMessage(action === 'role' ? 'Atualizando a permissão…' : action === 'approve' ? 'Liberando acesso…' : action === 'reject' ? 'Rejeitando solicitação…' : 'Revogando acesso…');
+    memberMessage(action === 'delete' ? 'Excluindo solicitação…' : action === 'role' ? 'Atualizando a permissão…' : action === 'approve' ? 'Liberando acesso…' : action === 'reject' ? 'Rejeitando solicitação…' : 'Revogando acesso…');
+    let deleted = false;
     try {
-      if (action === 'role') await api('/api/members/' + encodeURIComponent(id) + '/role', {method:'POST', body:JSON.stringify({role:selectedRole})});
+      if (action === 'delete') { await api('/api/members/' + encodeURIComponent(id) + '/request', {method:'DELETE', body:'{}'}); deleted = true; }
+      else if (action === 'role') await api('/api/members/' + encodeURIComponent(id) + '/role', {method:'POST', body:JSON.stringify({role:selectedRole})});
       else if (action === 'approve') await api('/api/members/' + encodeURIComponent(id) + '/approve', {method:'POST', body:'{}'});
       else await api('/api/members/' + encodeURIComponent(id), {method:'DELETE'});
       await loadMembers();
-      memberMessage(action === 'role' ? 'Permissão de ' + name + ' alterada para ' + (selectedRole === 'editor' ? 'Atualizar bases' : 'Consulta') + '.' : action === 'approve' ? 'Acesso liberado para ' + name + '.' : action === 'reject' ? 'Solicitação de ' + name + ' rejeitada.' : 'Acesso de ' + name + ' revogado.');
-    } catch (error) { memberMessage(error.message, true); buttons.forEach(item => { item.disabled = false; }); }
+      memberMessage(action === 'delete' ? 'Solicitação de ' + name + ' excluída.' : action === 'role' ? 'Permissão de ' + name + ' alterada para ' + (selectedRole === 'editor' ? 'Atualizar bases' : 'Consulta') + '.' : action === 'approve' ? 'Acesso liberado para ' + name + '.' : action === 'reject' ? 'Solicitação de ' + name + ' rejeitada.' : 'Acesso de ' + name + ' revogado.');
+    } catch (error) {
+      memberMessage(deleted ? 'A solicitação foi excluída, mas não foi possível recarregar a lista. Clique em Atualizar pedidos.' : error.message, true);
+      if (!deleted) buttons.forEach(item => { item.disabled = false; });
+    }
   }
   async function logout(event) {
     const button = event?.currentTarget;

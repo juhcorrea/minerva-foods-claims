@@ -97,6 +97,24 @@ async function changeApproval(bucket,access,id,approve){
  for(let n=0;n<4;n++){const{value:acl,etag}=await readAcl(bucket);if(!acl||!acl.members[id])fail(404,'MEMBER_NOT_FOUND','A solicitação não foi encontrada.');const member=acl.members[id];member.status=approve?'approved':'revoked';member.updatedAt=stamp();if(approve){member.approvedAt=stamp();member.approvedBy=access.admin.name;member.approvedById=access.admin.id;}else{member.revokedAt=stamp();member.revokedBy=access.admin.name;member.role='viewer';}appendAudit(acl,{actorId:access.admin.id,actorName:access.admin.name,action:approve?'access_approved':'access_revoked',target:id});if(await putConditional(bucket,ACL_KEY,acl,etag))return{member,revision:acl.revision};}
  fail(409,'ACCESS_CHANGED','Os acessos foram atualizados simultaneamente. Atualize a lista e tente novamente.');
 }
+async function deleteMemberRequest(bucket,access,id){
+ if(ADMIN_IDS.includes(id)||!(/^[a-f0-9-]{36}$/i).test(id))fail(400,'INVALID_MEMBER','Selecione uma solicitação válida. Administradoras não podem ser excluídas aqui.');
+ for(let attempt=0;attempt<4;attempt++){
+  const{value:acl,etag}=await readAcl(bucket);
+  const member=acl?.members[id];
+  if(!member)fail(404,'MEMBER_NOT_FOUND','A solicitação não foi encontrada.');
+  if(member.role==='admin')fail(400,'INVALID_MEMBER','Administradoras não podem ser excluídas aqui.');
+  if(member.status==='approved')fail(409,'MEMBER_STILL_APPROVED','Revogue o acesso antes de excluir a solicitação.');
+  if(!['pending','rejected','revoked'].includes(member.status))fail(409,'MEMBER_STATUS_CHANGED','Atualize a lista e confira a situação da solicitação antes de excluir.');
+  const previousStatus=member.status;
+  delete acl.members[id];
+  // Existing cookies lose access because every request resolves the member in
+  // the current ACL. Keep only the deletion action, without copying its labels.
+  appendAudit(acl,{actorId:access.admin.id,action:'access_request_deleted',target:id,previousStatus});
+  if(await putConditional(bucket,ACL_KEY,acl,etag))return{deleted:true,id,revision:acl.revision};
+ }
+ fail(409,'ACCESS_CHANGED','Os acessos foram atualizados simultaneamente. Atualize a lista e tente novamente.');
+}
 async function changeMemberRole(bucket,access,id,body){
  if(ADMIN_IDS.includes(id)||!(/^[a-f0-9-]{36}$/i).test(id))fail(400,'INVALID_MEMBER','Selecione uma pessoa autorizada. Administradoras não podem ser alteradas aqui.');
  if(Object.keys(body).some(key=>key!=='role')||!['viewer','editor'].includes(body.role))fail(400,'INVALID_ROLE','Selecione Consulta ou Atualizar bases.');
@@ -316,6 +334,8 @@ export function createApiHandler({engine,now=()=>Date.now()}){
    }
    const rolePath=url.pathname.match(/^\/api\/members\/([^/]+)\/role$/);
    if(rolePath&&request.method==='POST')return response(await changeMemberRole(env.BUCKET,access,rolePath[1],await readBody(request,4096)));
+   const deleteRequestPath=url.pathname.match(/^\/api\/members\/([^/]+)\/request$/);
+   if(deleteRequestPath&&request.method==='DELETE')return response(await deleteMemberRequest(env.BUCKET,access,deleteRequestPath[1]));
    const revokePath=url.pathname.match(/^\/api\/members\/([^/]+)$/);
    if(revokePath&&request.method==='DELETE'){
     const result=await changeApproval(env.BUCKET,access,revokePath[1],false);return response(result);

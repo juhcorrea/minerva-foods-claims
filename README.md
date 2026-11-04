@@ -4,7 +4,7 @@
 
 ## Abrir a demonstração
 
-**[Abrir demonstração online](https://juhcorrea.github.io/minerva-foods-claims/)**
+**[Abrir demonstração online](https://juhexample.github.io/minerva-foods-claims/)**
 
 Abre diretamente no navegador, sem instalar Python ou baixar o projeto. A demonstração usa somente os exemplos fictícios incluídos no código, com importação de planilhas desativada. Não oferece acesso a bases ou contas reais.
 
@@ -29,6 +29,7 @@ Os exemplos são gerados no navegador, com fornecedores e referências fictício
 - Reunião de resultados e apresentação do painel, com exportação para Excel, PDF e PowerPoint.
 - Filtros, pesquisa, ordenação, ajuste de colunas, modo noturno e tamanho de fonte.
 - Backend de referência com aprovação de acesso e perfis de consulta, atualização e administração.
+- Exclusão de solicitações pendentes, rejeitadas ou revogadas pela administração, com confirmação. Acessos aprovados precisam ser revogados antes da exclusão.
 
 ## Critérios demonstrados
 
