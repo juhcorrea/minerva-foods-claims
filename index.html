@@ -49,9 +49,12 @@
 
   <aside class="sidebar" aria-label="Navegação principal">
     <div class="brand-lockup">
-      <div class="brand-logo">
-        <img id="brandLogo" src="assets/minerva-logo.png" alt="Minerva Foods" width="156" height="66" onerror="this.hidden=true;document.getElementById('brandFallback').hidden=false">
-        <span id="brandFallback" class="brand-fallback" hidden>Minerva Foods</span>
+      <div class="brand-identity">
+        <div class="brand-logo">
+          <img id="brandLogo" src="assets/minerva-monogram.svg" alt="" width="48" height="34" onerror="this.hidden=true;document.getElementById('brandFallback').hidden=false">
+          <span id="brandFallback" class="brand-fallback" hidden>M</span>
+        </div>
+        <span class="brand-name">Minerva Foods</span>
       </div>
       <div class="product-lockup"><strong>CLAIMS<span></span></strong><small>Gestão de ressarcimentos</small></div>
     </div>
@@ -125,7 +128,7 @@
       </section>
 
       <section id="view-suppliers" class="view-pane" aria-label="Comparativo por fornecedor" hidden>
-        <section class="panel full-table-panel"><div class="panel-heading"><div><span class="section-kicker">RECLAMADO × REALIZADO</span><h2>Comparativo por fornecedor <span id="supplierCount" class="count-text"></span></h2><p class="panel-description">Recebidos separados pelo ano de origem do claim: 2024, 2025 e 2026. O total inclui apenas pagamentos e claims dos anos selecionados. Com 2025 + 2026, recebimentos de claims de 2024 ficam visíveis, mas fora do total. Claims não se repetem a cada parcela.</p></div><label class="search-field"><svg class="icon"><use href="#icon-search"/></svg><input id="supplierSearch" type="search" placeholder="Buscar fornecedor" aria-label="Buscar fornecedor"></label></div><p id="supplierReceiptNote" class="table-note receipt-scope-note"></p><div id="supplierTable" class="table-container" tabindex="0" aria-label="Comparativo completo por fornecedor"><div class="empty-table">Carregue as duas planilhas para consultar o comparativo.</div></div><div class="panel-footnote">% recebido = recebido de claims do período selecionado ÷ reclamado. A coluna de origem 2024 não entra no total quando selecionados 2025 + 2026. O Pareto mostra a participação acumulada no valor reclamado.</div></section>
+        <section class="panel full-table-panel"><div class="panel-heading"><div><span class="section-kicker">RECLAMADO × REALIZADO</span><h2>Comparativo por fornecedor <span id="supplierCount" class="count-text"></span></h2><p class="panel-description">Recebidos separados pelo ano de origem do claim: 2024, 2025 e 2026. O total inclui apenas pagamentos e claims dos anos selecionados. Com 2025 + 2026, recebimentos de claims de 2024 ficam visíveis, mas fora do total. Claims não se repetem a cada parcela.</p></div><label class="search-field"><svg class="icon"><use href="#icon-search"/></svg><input id="supplierSearch" type="search" placeholder="Buscar fornecedor" aria-label="Buscar fornecedor"></label></div><p id="supplierReceiptNote" class="table-note receipt-scope-note"></p><p class="table-note">Saldo em aberto = Dentro do Prazo + Vencido, conforme o status informado no Controle, de todos os anos. O vencido já está incluído no saldo. Clique no fornecedor para conferir as parcelas.</p><div id="supplierTable" class="table-container" tabindex="0" aria-label="Comparativo completo por fornecedor"><div class="empty-table">Carregue as duas planilhas para consultar o comparativo.</div></div><div class="panel-footnote">% recebido = recebido de claims do período selecionado ÷ reclamado. A coluna de origem 2024 não entra no total quando selecionados 2025 + 2026. O Pareto mostra a participação acumulada no valor reclamado.</div></section>
       </section>
 
       <section id="view-installments" class="view-pane" aria-label="Controle de recebimento" hidden>
