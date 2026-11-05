@@ -1,3 +1,6 @@
+import {buildMigrationFiles, MigrationExportError} from './migration.js';
+import {migrationZipResponse} from './zip.js';
+
 /* Minerva Claims shared API — capability links and per-browser approvals.
  * Admin activation links carry 256-bit secrets, supplied only as hashes in env.
  * Sessions are opaque 256-bit cookies; R2 stores their hashes, never raw secrets.
@@ -260,7 +263,7 @@ function redactModel(model) {
 
 
 
-export function createApiHandler({engine,now=()=>Date.now()}){
+export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null}){
  if(!engine?.analyze||!engine?.validateHeaders||!engine?.parseDate||!engine?.today)throw new Error('A reconciliation engine is required.');
  return async function handleApi(request,env){
   const url=new URL(request.url);if(!url.pathname.startsWith('/api/'))return null;let shouldClear=false;
@@ -298,6 +301,13 @@ export function createApiHandler({engine,now=()=>Date.now()}){
    const modifying=!['GET','HEAD'].includes(request.method);
    const editorMutation=access.role==='editor'&&request.method==='POST'&&['/api/report','/api/correction-progress'].includes(url.pathname);
    if(modifying&&access.role!=='admin'&&!editorMutation)fail(403,'ADMIN_REQUIRED','Você não tem permissão para esta alteração. Apenas as administradoras podem gerenciar os acessos.');
+   if(url.pathname==='/api/migration/export'){
+    if(access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode baixar o backup privado.');
+    if(request.method!=='GET')fail(405,'METHOD_NOT_ALLOWED','Use o download do backup privado.');
+    if(!migrationSource)fail(503,'MIGRATION_SOURCE_UNAVAILABLE','O código de restauração ainda não está disponível nesta versão.');
+    const {files}=await buildMigrationFiles({bucket:env.BUCKET,admins,source:migrationSource,now});
+    return migrationZipResponse(files);
+   }
    if(url.pathname==='/api/report/meta'&&request.method==='GET')return response({reportMeta:await reportMeta(env.BUCKET)});
    if(url.pathname==='/api/correction-progress'&&request.method==='POST')return response(await saveCorrectionProgress(env.BUCKET,access,await readBody(request,16384),url,engine));
    if(url.pathname==='/api/report'&&request.method==='GET'){
@@ -341,7 +351,7 @@ export function createApiHandler({engine,now=()=>Date.now()}){
     const result=await changeApproval(env.BUCKET,access,revokePath[1],false);return response(result);
    }
    fail(404,'NOT_FOUND','Esta operação não existe.');
-  }catch(err){const extra=shouldClear?{'set-cookie':clearCookie()}:{};if(err instanceof ApiError)return response({error:err.message,code:err.code},err.status,extra);return response({error:'Não foi possível concluir a operação. Tente novamente.',code:'SERVER_ERROR'},500,extra);}
+  }catch(err){const extra=shouldClear?{'set-cookie':clearCookie()}:{};if(err instanceof ApiError||err instanceof MigrationExportError)return response({error:err.message,code:err.code},err.status,extra);return response({error:'Não foi possível concluir a operação. Tente novamente.',code:'SERVER_ERROR'},500,extra);}
  };
 }
 export const apiConstants=Object.freeze({adminIds:ADMIN_IDS,cookieName:COOKIE,sessionDays:SESSION_DAYS,maxBodyBytes:MAX_BODY});

@@ -39,7 +39,7 @@ A perda do comparativo é `Reclamado − (Recebido + Em negociação)`. O saldo 
 
 ## Build e testes
 
-Requer Node.js 20 ou superior. As bibliotecas do navegador estão em `dist/vendor/`.
+Requer Node.js 22 ou superior. As bibliotecas do navegador estão em `dist/vendor/`.
 
 ```bash
 node build.mjs
@@ -63,3 +63,11 @@ Esta cópia não deve ser implantada diretamente sobre uma instalação existent
 ## Privacidade
 
 Manter o projeto público exclusivamente demonstrativo. Não incluir nomes ou e-mails pessoais, contas reais, URLs pessoais, dados financeiros reais, arquivos de clientes, segredos, links administrativos ou material interno. Atualizações devem preservar esta separação e o aviso de dados fictícios.
+
+## Migração privada — backend de referência
+
+Instalações com backend podem disponibilizar **Controlar acessos → Baixar backup privado** para administradores. O ZIP reúne o código da publicação, as bases publicadas, as marcações de correção e os cadastros/perfis com auditoria, com checksums e instruções de restauração. O download exige autenticação administrativa e não altera os registros. Credenciais, tokens, hashes de ativação, sessões e histórico Git ficam fora do pacote.
+
+A restauração usa um novo projeto e armazenamento vazio, com credenciais novas e nova aprovação dos navegadores. O utilitário `migration/restore-data.mjs` valida o pacote offline e recusa sobrescrever um destino existente. Bases preservadas em JSON não substituem os XLSX originais com fórmulas e formatação.
+
+A demonstração pública não possui backend nem dados ou contas reais e não oferece esse download. Este repositório contém somente o código e testes fictícios da funcionalidade; backups operacionais nunca devem ser adicionados ao GitHub ou aos assets públicos.

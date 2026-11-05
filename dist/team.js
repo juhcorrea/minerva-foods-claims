@@ -87,11 +87,12 @@
     members.id = 'teamMembersDialog';
     members.className = 'team-members-dialog';
     members.setAttribute('aria-labelledby', 'teamMembersTitle');
-    members.innerHTML = '<div class="dialog-heading"><div><span class="section-kicker">COMPARTILHAMENTO DO RELATÓRIO</span><h2 id="teamMembersTitle">Controlar acessos</h2></div><button id="teamCloseMembers" class="icon-button" type="button" aria-label="Fechar controle de acessos">×</button></div><p class="team-member-intro">Compartilhe o link normal do relatório. Cada pessoa informa o nome e solicita acesso; confira o nome e o código do pedido antes de aprovar. O acesso começa como Consulta. Depois da aprovação, você pode liberar Atualizar bases para quem também deve publicar as planilhas.</p><div id="teamAdminsList" class="team-admins-list"></div><div class="team-requests-tip"><span>Atualizar bases permite importar, publicar e marcar correções. Somente a administração controla os acessos. Confira o nome e o código do pedido antes de aprovar.</span><button id="teamRefreshMembers" class="button button-outline" type="button">Atualizar pedidos</button></div><p id="teamMemberMessage" class="team-message" role="status" aria-live="polite"></p><div id="teamMembersList" class="team-members-list"></div>';
+    members.innerHTML = '<div class="dialog-heading"><div><span class="section-kicker">COMPARTILHAMENTO DO RELATÓRIO</span><h2 id="teamMembersTitle">Controlar acessos</h2></div><button id="teamCloseMembers" class="icon-button" type="button" aria-label="Fechar controle de acessos">×</button></div><p class="team-member-intro">Compartilhe o link normal do relatório. Cada pessoa informa o nome e solicita acesso; confira o nome e o código do pedido antes de aprovar. O acesso começa como Consulta. Depois da aprovação, você pode liberar Atualizar bases para quem também deve publicar as planilhas.</p><div id="teamAdminsList" class="team-admins-list"></div><div class="team-requests-tip"><span>Backup privado para migração: código, bases publicadas, correções e perfis. Sem credenciais ou sessões antigas.</span><button id="teamDownloadMigration" class="button button-outline" type="button" hidden>Baixar backup privado</button></div><div class="team-requests-tip"><span>Atualizar bases permite importar, publicar e marcar correções. Somente a administração controla os acessos. Confira o nome e o código do pedido antes de aprovar.</span><button id="teamRefreshMembers" class="button button-outline" type="button">Atualizar pedidos</button></div><p id="teamMemberMessage" class="team-message" role="status" aria-live="polite"></p><div id="teamMembersList" class="team-members-list"></div>';
     body.append(members);
     $('teamCloseMembers').addEventListener('click', () => members.close());
     $('teamMembersList').addEventListener('click', changeMemberAccess);
     $('teamRefreshMembers').addEventListener('click', refreshMemberList);
+    $('teamDownloadMigration').addEventListener('click', downloadMigration);
     $('teamSignout').addEventListener('click', logout);
     $('teamManage').addEventListener('click', openMembers);
     $('teamPublish').addEventListener('click', publishReport);
@@ -216,6 +217,7 @@
     const admin = session.role === 'admin';
     $('teamPublish').hidden = !canUpdateBases();
     $('teamManage').hidden = !admin;
+    $('teamDownloadMigration').hidden = !admin;
     $('teamPublish').disabled = !publishable() || publishing || loadingReport;
     $('teamPublish').textContent = publishing ? 'Publicando…' : 'Publicar atualização';
     $('teamRefresh').disabled = publishing || loadingReport || draft;
@@ -376,6 +378,37 @@
     try { await loadMembers(); memberMessage('Pedidos atualizados. Confira o nome e o código antes de aprovar.'); }
     catch (error) { memberMessage(error.message, true); }
     finally { button.disabled = false; }
+  }
+  async function downloadMigration() {
+    if (session?.role !== 'admin') return;
+    const button = $('teamDownloadMigration');
+    if (button.disabled) return;
+    button.disabled = true;
+    memberMessage('Preparando o ZIP com os dados publicados…');
+    try {
+      const result = await fetch('/api/migration/export', {credentials:'same-origin', cache:'no-store', headers:{Accept:'application/zip'}});
+      if (!result.ok) {
+        const payload = await result.json().catch(() => null);
+        throw new Error(payload?.error || 'Não foi possível preparar o backup privado. Confira seu acesso administrativo e tente novamente.');
+      }
+      if (!/^application\/zip(?:;|$)/i.test(result.headers.get('content-type') || '')) throw new Error('O download não retornou um ZIP válido. Atualize a página e tente novamente.');
+      const blob = await result.blob();
+      if (!blob.size) throw new Error('O backup retornou vazio. Tente novamente.');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'Minerva-Claims-Migracao-Privada.zip';
+      link.hidden = true;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      global.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      memberMessage('Download iniciado. Guarde o ZIP em local privado: ele contém os dados reais e as instruções de restauração.');
+    } catch (error) {
+      memberMessage(error.message || 'Não foi possível baixar o backup privado. Tente novamente.', true);
+    } finally {
+      button.disabled = false;
+    }
   }
   async function openMembers() {
     if (session?.role !== 'admin') return;

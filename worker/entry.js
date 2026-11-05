@@ -1,6 +1,6 @@
 // The public entry shows only an access request form. Report authorization uses
 // private administrator links and server-side approval of browser sessions.
-const apiHandler=createApiHandler({engine:globalThis.ClaimsEngine});
+const apiHandler=createApiHandler({engine:globalThis.ClaimsEngine,migrationSource:{...MIGRATION_SOURCE,get data(){return Uint8Array.from(atob(MIGRATION_SOURCE.base64),c=>c.charCodeAt(0));}}});
 const BASE_HEADERS={
  'X-Content-Type-Options':'nosniff',
  'Referrer-Policy':'no-referrer',

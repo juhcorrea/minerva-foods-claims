@@ -1,0 +1,140 @@
+MINERVA FOODS CLAIMS — MIGRAÇÃO PRIVADA
+
+Este pacote contém dados operacionais e cadastros reais. Mantenha o ZIP em um
+local privado da empresa. Não envie o ZIP, a pasta dados, o upload-plan ou os
+objetos preparados para repositórios públicos, GitHub Pages ou assets do site.
+O download é autenticado, mas o arquivo baixado não tem criptografia por senha.
+
+O SITE ATUAL CONTINUA FUNCIONANDO
+Exportar não altera bases, marcações, acessos, sessões ou links do site atual.
+Restaure em um NOVO projeto com um NOVO armazenamento privado. Não reutilize o
+project_id, o bucket nem o destino de publicação do site de origem. Não faça
+testes de restauração no site atual. A troca de endereço é uma etapa posterior,
+após validar o novo painel; este pacote não faz redirecionamento ou exclusão.
+
+CONTEÚDO
+• codigo-operacional.zip: código, assets, testes e utilitários de restauração
+  correspondentes à revisão source.commitSha do MANIFESTO.json. Não contém
+  histórico Git, variáveis secretas, credenciais ou sessões. A configuração de
+  hospedagem exportada não aponta para o projeto original.
+• dados/bases-publicadas.json: última publicação armazenada, com as linhas BD e
+  Controle, nomes dos arquivos, data de análise, revisão e autoria da publicação.
+• dados/acompanhamento-correcoes.json: marcações de conferência por chave de
+  correção, com autor, data e revisão. As chaves devem ser preservadas exatamente.
+• dados/cadastros-perfis.json: administradores, solicitações, perfis, status e
+  auditoria de acesso preservados, sem segredos de autenticação.
+• MANIFESTO.json: data de captura, revisões, ETags, contagens e checksums SHA-256.
+
+Um objeto que não existia no armazenamento aparece como JSON null e
+present:false no manifesto. Isso representa ausência; não importe um objeto
+com conteúdo null. Marcas de correção podem apontar para revisões anteriores,
+pois são mantidas entre publicações. Isso, por si só, não é erro.
+
+As bases são as linhas efetivamente publicadas no painel, sem recalcular ou
+reescrever a origem. Não são os arquivos XLSX originais: fórmulas, formatação,
+outras abas e metadados dos arquivos Excel que não foram publicados não estão
+armazenados no painel e não podem ser recuperados deste ZIP.
+
+1. EXTRAIR E CONFERIR, SEM PUBLICAR
+Extraia o ZIP principal em uma pasta privada. Dentro dela, extraia
+codigo-operacional.zip em uma subpasta codigo. Use Node.js 22 ou mais recente.
+Na subpasta codigo, execute:
+
+    node migration/restore-data.mjs ..
+
+Esse comando valida todos os checksums e estruturas sem gravar no site e sem
+conectar à internet. O resultado deve conter validated:true e uploaded:false.
+Se houver erro de checksum, arquivo ausente ou estrutura inválida, interrompa
+a migração e obtenha outro ZIP. Não edite o manifesto para contornar erros.
+Os checksums detectam corrupção; não substituem a confiança na origem do ZIP.
+
+Opcionalmente, prepare os três objetos para a ferramenta de armazenamento:
+
+    node migration/restore-data.mjs .. --prepare ../objetos-para-restaurar
+
+A pasta de saída deve ser nova. O comando cria arquivos JSON e upload-plan.json
+com chave, presença, metadados HTTP, metadados da publicação e condição de
+criação. Ele não envia nada para a nuvem. Guarde essa pasta com o mesmo cuidado
+do ZIP e remova as cópias temporárias após concluir a migração.
+
+2. CRIAR UM NOVO DESTINO NA CONTA CORPORATIVA
+Crie um novo projeto Sites a partir do código extraído, com novo project_id e
+binding privado de R2 chamado BUCKET. Preserve as rotas protegidas do backend;
+este painel operacional não deve ser hospedado como HTML estático público.
+O repositório público de demonstração não substitui este código operacional.
+
+Mantenha o destino sem tráfego e sem uso durante a importação. Não ative o
+primeiro link administrativo nem solicite acesso antes de restaurar: essas
+ações criam registros e o importador recusará um bucket que já tenha conteúdo.
+Não conecte a nova aplicação ao bucket original. O mesmo cuidado vale para
+qualquer adaptador de armazenamento utilizado para importar os objetos.
+
+3. IMPORTAR OS DADOS NO NOVO BUCKET VAZIO
+Use uma ferramenta de administração de armazenamento autorizada para o NOVO
+destino, ou o utilitário exportado restoreMigrationObjects. Esse utilitário
+recebe um binding/adaptador R2 com list e put, valida o pacote novamente, exige
+que o bucket inteiro esteja vazio e escreve somente os objetos presentes com
+onlyIf.etagDoesNotMatch='*'. Ele não sobrescreve objetos existentes.
+
+Exemplo para quem implementa a restauração em um ambiente autorizado:
+
+    import {loadMigrationBackup, restoreMigrationObjects}
+      from './migration/restore-data.mjs';
+    const backup = await loadMigrationBackup('/pasta/privada/do/zip-extraido');
+    const resultado = await restoreMigrationObjects(novoBucketR2, backup,
+      {confirmNewEmptyBucket:true});
+
+novoBucketR2 deve ser um binding/adaptador de administração do destino; não é
+uma variável que este ZIP configura sozinho. Não cole credenciais no código,
+em parâmetros de URL ou em arquivos versionados. Use o gerenciador de segredos
+da nova hospedagem. Não exponha o utilitário como endpoint público de importação.
+
+Se usar importação direta pela ferramenta da hospedagem, siga upload-plan.json:
+• private/report-latest-v1.json = bases-publicadas.json; content-type JSON.
+  Recrie os customMetadata: revision, updatedAt, updatedBy, updatedByUserId,
+  bdName, controlName e asOf, exatamente como no plano.
+• private/correction-progress-v1.json = acompanhamento-correcoes.json.
+• private/access-v3.json = cadastros-perfis.json.
+Não crie objetos present:false. Não importe outros caminhos, especialmente
+private/sessions ou private/rates. Não importe ambientes, cookies ou hashes de
+links administrativos antigos. Não disponibilize esses três objetos como assets.
+
+R2 não oferece transação conjunta entre os três objetos. Se uma importação
+falhar depois de escrever parte deles, mantenha o novo destino sem tráfego,
+confira writtenKeys do erro e use outro bucket novo e vazio. O utilitário não
+apaga registros automaticamente nem repete a restauração sobre um bucket parcial.
+Isso evita sobrescrever uma publicação ou alteração concorrente.
+
+4. CRIAR NOVAS CREDENCIAIS E ATIVAR O NOVO PAINEL
+Configure ADMIN_LINK_HASHES separadamente no gerenciador de segredos do NOVO
+projeto, com os IDs administrativos esperados por worker/backend.js e os nomes
+e contatos preservados no cadastro. Gere tokens novos e independentes para os
+administradores; a configuração recebe somente os hashes SHA-256 desses tokens.
+Use geração criptograficamente segura (32 bytes, base64url). Não copie os hashes
+nem os links de ativação do site antigo. Os segredos opcionais de links adicionais
+devem ficar ausentes ou também ser renovados. Nunca grave tokens no GitHub.
+
+Restaure os objetos antes de ativar os novos links. Configure somente as variáveis
+de ambiente necessárias para esta instalação. O pacote não transporta o conjunto
+de variáveis de ambiente do site antigo, nem permissões de workspace/hospedagem.
+
+Cadastros, perfis e aprovações foram preservados como registros. Sessões de login
+não foram migradas. Os links administrativos antigos não entram no novo site.
+Cada pessoa deve gerar uma nova solicitação no novo endereço; a administradora
+confere a identidade e atribui o perfil adequado usando o histórico restaurado.
+Não conceda acesso automaticamente pela coincidência de nome ou email. Registros
+aprovados antigos servem como referência, mas não autenticam um novo navegador.
+
+5. VALIDAR ANTES DE TROCAR O ENDEREÇO DE USO
+Execute node build.mjs no código extraído e os testes aplicáveis. No novo destino,
+confira a revisão e a data da última publicação, as quantidades BD/Controle, os
+indicadores com os mesmos anos/filtros/cenário e as marcações de correção. Confira
+cadastros, perfis e histórico de acesso. Verifique que usuários anônimos, pendentes
+e sem permissão não conseguem consultar os dados privados nem baixar este backup.
+Teste as exportações e uma nova solicitação/aprovação de acesso antes da adoção.
+
+O pacote contém o snapshot na data capturedAt. Atualizações posteriores continuam
+somente no site original. Se houver trabalho no original durante a migração,
+gere um novo backup e restaure em destino vazio antes da mudança definitiva.
+Só depois da validação divulgue o novo endereço. Preserve o site atual até que
+essa decisão seja tomada pelas responsáveis.

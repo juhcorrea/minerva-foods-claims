@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {buildMigrationSource} from './migration/source-archive.mjs';
 const root=path.dirname(new URL(import.meta.url).pathname);
 const output=path.join(root,'build');
 const assets={};
@@ -27,9 +28,10 @@ for(const file of ['index.html','site.webmanifest','access.html','access.css','a
  assets['/'+file]={type:types[path.extname(file)]||'application/octet-stream',body:bytes.toString('base64')};
 }
 const engine=fs.readFileSync(path.join(root,'dist/engine.js'),'utf8');
-const backend=fs.readFileSync(path.join(root,'worker/backend.js'),'utf8');
+const modules=['zip.js','migration.js','backend.js'].map(file=>fs.readFileSync(path.join(root,'worker',file),'utf8').replace(/^import\s+.*?from\s+['"]\.\/[^'"]+['"];?\s*$/gm,''));
+const migrationSource=await buildMigrationSource(root);
 const wrapper=fs.readFileSync(path.join(root,'worker/entry.js'),'utf8');
 fs.mkdirSync(path.join(output,'server'),{recursive:true});fs.mkdirSync(path.join(output,'.openai'),{recursive:true});
-fs.writeFileSync(path.join(output,'server/index.js'),engine+'\n'+backend+'\nconst STATIC_ASSETS='+JSON.stringify(assets)+';\n'+wrapper);
+fs.writeFileSync(path.join(output,'server/index.js'),engine+'\n'+modules.join('\n')+'\nconst MIGRATION_SOURCE='+JSON.stringify(migrationSource)+';\nconst STATIC_ASSETS='+JSON.stringify(assets)+';\n'+wrapper);
 fs.copyFileSync(path.join(root,'.openai/hosting.json'),path.join(output,'.openai/hosting.json'));
 console.log(JSON.stringify({entry:'build/server/index.js',bytes:fs.statSync(path.join(output,'server/index.js')).size,assets:Object.keys(assets).length}));
