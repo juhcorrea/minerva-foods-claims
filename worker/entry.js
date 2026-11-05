@@ -10,6 +10,10 @@ const BASE_HEADERS={
 };
 function secured(response){const h=new Headers(response.headers);for(const [k,v]of Object.entries(BASE_HEADERS))h.set(k,v);return new Response(response.body,{status:response.status,headers:h});}
 function staticAsset(key){const asset=STATIC_ASSETS[key];if(!asset)return new Response('Não encontrado',{status:404});const bytes=Uint8Array.from(atob(asset.body),c=>c.charCodeAt(0));return new Response(bytes,{headers:{'Content-Type':asset.type}});}
+// Only the access form and its brand dependencies are available before approval.
+// Report scripts contain operational configuration and require the same session
+// authorization as the report page, including for direct asset URLs.
+const PUBLIC_ASSETS=new Set(['/access.html','/access.css','/access.js','/site.webmanifest','/assets/minerva-logo.png','/assets/montserrat-latin.woff2']);
 // These existing brand assets are declared by the official Minerva Foods site.
 // Fixed sources only: this is not a general-purpose URL proxy.
 const BRAND_ICONS={
@@ -46,6 +50,15 @@ export default {
     if(!session.authenticated)return secured(entryPage('anonymous'));
     if(!session.approved||!['admin','editor','viewer'].includes(session.role))return secured(entryPage('denied'));
     return secured(staticAsset('/index.html'));
+   }
+   if(!Object.hasOwn(STATIC_ASSETS,url.pathname))return secured(new Response('Não encontrado',{status:404}));
+   if(!PUBLIC_ASSETS.has(url.pathname)){
+    const sessionUrl=new URL('/api/session',url);const result=await apiHandler(new Request(sessionUrl,{headers:request.headers}),env);
+    if(result.status>=500)return secured(new Response('Não foi possível conferir seu acesso.',{status:503}));
+    if(!result.ok)return secured(new Response('Acesso não autorizado.',{status:result.status===401?401:403}));
+    const session=await result.json();
+    if(!session.authenticated)return secured(new Response('Entre no painel para acessar este arquivo.',{status:401}));
+    if(!session.approved||!['admin','editor','viewer'].includes(session.role))return secured(new Response('Seu acesso não está liberado.',{status:403}));
    }
    return secured(staticAsset(url.pathname));
   }catch(error){return secured(url.pathname.startsWith('/api/')?new Response(JSON.stringify({error:'Não foi possível concluir a solicitação.'}),{status:503,headers:{'Content-Type':'application/json'}}):entryPage('unavailable'));}
