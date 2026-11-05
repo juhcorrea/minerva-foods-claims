@@ -1,0 +1,13 @@
+M oficial — painel Minerva Foods Claims
+Data: 05/11/2026
+
+Origem: BRANDBOOK 4.pdf, Brandbook Minerva Foods versão 4.0, página 18 (Grafismo).
+SHA-256 do documento-fonte: d1532262e617f32b5e0371107602df5f3a32c42d7b0201c350f30bee3391d50e
+
+Asset: dist/assets/minerva-monogram.svg.
+Método: extração dos três caminhos vetoriais que compõem o M; coordenadas transladadas para a origem do viewBox. Sem redesenho, recoloração, efeitos ou captura de tela.
+Limites no PDF: x=1153,438 a 1458,139; y=495,634 a 710,000.
+ViewBox: 0 0 304.701000 214.366000.
+Cores RGB originais preservadas em percentuais: (17%,24%,29%), (89.4%,88.6%,71.8%), (92%,46%,50%). Os caminhos do PDF têm estes valores, sem substituição pelos códigos de paleta impressos em outras páginas.
+
+Aplicação: M sobre suporte branco arredondado, em tema claro e noturno, conforme preferência da usuária. O suporte é CSS independente do arquivo de marca. Nome Minerva Foods visível junto ao M e nome CLAIMS preservado. O SVG usa a proporção nativa e não depende de serviço externo.

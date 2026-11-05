@@ -16,7 +16,7 @@ const files = [
   'powerpoint.js', 'portfolio.css', 'portfolio.js', 'meetings.css',
   'meetings.js', 'engine.js', 'app.js', 'vendor/xlsx.full.min.js',
   'vendor/pptxgen.bundle.js', 'vendor/pptxgen.LICENSE.txt',
-  'assets/minerva-logo.png', 'assets/minerva-cover.png',
+  'assets/minerva-logo.png', 'assets/minerva-monogram.svg', 'assets/minerva-cover.png',
   'assets/montserrat-latin.woff2'
 ];
 

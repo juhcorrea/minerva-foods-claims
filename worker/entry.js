@@ -13,7 +13,7 @@ function staticAsset(key){const asset=STATIC_ASSETS[key];if(!asset)return new Re
 // Only the access form and its brand dependencies are available before approval.
 // Report scripts contain operational configuration and require the same session
 // authorization as the report page, including for direct asset URLs.
-const PUBLIC_ASSETS=new Set(['/access.html','/access.css','/access.js','/site.webmanifest','/assets/minerva-logo.png','/assets/montserrat-latin.woff2']);
+const PUBLIC_ASSETS=new Set(['/access.html','/access.css','/access.js','/site.webmanifest','/assets/minerva-logo.png','/assets/minerva-monogram.svg','/assets/montserrat-latin.woff2']);
 // These existing brand assets are declared by the official Minerva Foods site.
 // Fixed sources only: this is not a general-purpose URL proxy.
 const BRAND_ICONS={

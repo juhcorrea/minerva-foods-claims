@@ -634,6 +634,7 @@
     model.claimValueAudit = claimValueAudit(model, bdRows, controlRows);
     appendClaimValueCorrections(model, bdRows);
     applyReceiptCohorts(model, controlRows, index, options);
+    applySupplierOpenBalances(model, controlRows, index, options);
     return model;
   }
   function correctionImpact(rows, scope) {
@@ -888,6 +889,62 @@
       if(issue.kind==='PAYMENT_ON_OTHER_CLAIM_STATUS')issue.detail='Pagamento incluído no recebido por M = Pago, R e T válidos, independentemente da situação do claim na BD.';
     }
     model.controlReport.meta.comparativeReceiptBasis=model.meta.receiptBasis;
+  }
+
+  // Supplier open balances are a Control ledger, independent of claim-year and
+  // claim-eligibility filters. M is authoritative here; the date-derived status
+  // in the comparative and integral Control reports is deliberately unchanged.
+  // openInstallments and supplierOpenReport.installments contain each Control
+  // row once, retaining O precision for traceable detail/export calculations.
+  function applySupplierOpenBalances(model, controlRows, index, options) {
+    const supplierFilter=norm(options.supplier),operationFilter=normalizeStatus(options.operation),useOriginal=model.meta.correctionScenario==='original';
+    const supplierMap=new Map(model.suppliers.map(supplier=>[norm(supplier.name),supplier]));
+    const installments=[],excluded=[];
+    const meta={supplier:text(options.supplier),operation:text(options.operation),correctionScenario:model.meta.correctionScenario,
+      basis:'Saldo de fornecedores: coluna M do Controle igual a Dentro do Prazo ou Vencido; valor previsto USD da coluna O. Total aberto = dentro do prazo + vencido. Todas as parcelas abertas, de todos os anos, contadas uma vez por linha.',
+      supplierBasis:useOriginal?'Fornecedor K original do Controle.':'Fornecedor validado na BD somente com vínculo completo e único; caso contrário, K do Controle.',
+      operationBasis:'Mesmo filtro global de operação dos recebimentos: exportação CTNR/carreta e operação não identificada na visão geral; operação específica exige vínculo completo à operação. Ano, situação e expurgo do claim não excluem parcelas abertas.',
+      statusBasis:'M informado no Controle. A data N é exibida para conferência e não reclassifica este saldo; os demais relatórios mantêm seus próprios critérios de status.',
+      noDueBasis:'Parte do saldo aberto sem data N informada, inclusive quando M informa Vencido.',
+      rounding:'Valores O preservados nas parcelas; cada total é arredondado somente após a soma. Subtotais arredondados podem diferir por centavos do total.'};
+    const reset=supplier=>Object.assign(supplier,{openBalance:0,overdueBalance:0,onTimeBalance:0,noDueBalance:0,overdue:0,onTime:0,openCount:0,missingExpectedAmounts:0,openBalanceIncomplete:false,openInstallments:[]});
+    for(const supplier of model.suppliers)reset(supplier);
+    for(let n=1;n<controlRows.length;n++){
+      const source=controlRows[n];if(!source)continue;
+      const statusKey=normalizeStatus(source[12]);
+      if(statusKey!=='DENTRO DO PRAZO'&&statusKey!=='VENCIDO')continue;
+      const status=statusKey==='VENCIDO'?'Vencido':'Dentro do Prazo',expected=number(source[14]);
+      const {matched,complete,rejected}=controlMatches(source,index);
+      const operationKeys=unique(matched.map(claim=>normalizeStatus(claim.operation))),supplierKeys=unique(matched.map(claim=>norm(claim.supplier)));
+      const knownOperation=complete&&operationKeys.length>0&&operationKeys.every(operation=>!!operation);
+      const eligibleOperation=knownOperation&&operationKeys.every(operation=>OPS.has(operation)&&(!operationFilter||operation===operationFilter));
+      const supplierResolved=complete&&supplierKeys.length===1&&supplierKeys[0]&&supplierKeys[0]!=='(SEM NEGOCIACAO)';
+      const originalSupplier=text(source[10]),activeSupplier=!useOriginal&&supplierResolved?matched[0].supplier:originalSupplier||'(SEM FORNECEDOR)',supplierKey=norm(activeSupplier);
+      if(supplierFilter&&supplierKey!==supplierFilter)continue;
+      if((knownOperation&&!eligibleOperation)||(!knownOperation&&operationFilter)){
+        excluded.push({row:n+1,reference:text(source[7]),supplier:activeSupplier,status,expected,bdRows:matched.map(claim=>claim.row),reason:knownOperation?'Operação validada fora do filtro global selecionado.':'Operação não identificada para o filtro global específico.'});continue;
+      }
+      if(!supplierMap.has(supplierKey)){
+        const supplier=reset({name:activeSupplier,claimed:0,forwarded:0,negotiating:0,otherClaimed:0,received:0,receivedNegotiating:0,receivedOtherStatuses:0,receivedConfirmed:0,balance:0,recoveryRate:null,occurrences:0,recordCount:0,share:0,pareto:0,paid:0,loss:model.meta.lossFormula==='pending'?null:0,lossRate:null,explicitLoss:0,lossInstallments:0,installments:0,reviewCount:0,unmatchedClaims:0,processes:0,settledProcesses:0,receivedLinkedClaims:0,receivedSameYear:0,receivedDifferentYear:0,receivedUnknownYear:0,receivedCount:0,receivedWithoutClaimDetail:0,receivedWithoutClaimDetailCount:0,receivedComparable:0,receivedByClaimYear:{2024:0,2025:0,2026:0,other:0},comparableRecoveryRate:null,comparableLoss:0,comparableLossRate:null});
+        supplierMap.set(supplierKey,supplier);model.suppliers.push(supplier);
+      }
+      const supplier=supplierMap.get(supplierKey),noDueDate=source[13]==null||text(source[13])==='';
+      const claimYears=unique(matched.map(claim=>claim.year)),markets=unique(matched.map(claim=>normalizeMarket(claim.market)));
+      const activeYear=!useOriginal&&complete&&claimYears.length===1&&claimYears[0]!=null?claimYears[0]:source[1]??null;
+      const activeMarket=!useOriginal&&complete&&markets.length===1&&markets[0]?matched[0].market:text(source[3]);
+      const inst={row:n+1,reference:text(source[7]),supplier:supplier.name,originalSupplier,supplierSource:!useOriginal&&supplierResolved?'BD AC — Negociação':'Controle K',correctionScenario:model.meta.correctionScenario,status,originalStatus:text(source[12]),expected,expectedMissing:expected==null,dueDate:parseDate(source[13]),noDueDate,year:activeYear,originalYear:source[1]??null,market:activeMarket,originalMarket:text(source[3]),type:text(source[11])||'Não informado',analysts:unique(matched.map(claim=>claim.analyst)),bdRows:matched.map(claim=>claim.row),rejectedBdRows:rejected.map(claim=>claim.row),contextCollision:rejected.length>0,operations:knownOperation?unique(matched.map(claim=>claim.operation)):[],linkState:!matched.length?'unmatched':complete&&supplierResolved?matched.length>1?'grouped':'matched':'review',isControlRecord:true,openBalanceSource:'Controle M/O'};
+      installments.push(inst);supplier.openInstallments.push(inst);supplier.openCount++;
+      supplier.openBalance+=expected||0;
+      if(status==='Vencido'){supplier.overdue++;supplier.overdueBalance+=expected||0;}else{supplier.onTime++;supplier.onTimeBalance+=expected||0;}
+      if(noDueDate)supplier.noDueBalance+=expected||0;
+      if(expected==null){supplier.missingExpectedAmounts++;supplier.openBalanceIncomplete=true;}
+    }
+    for(const supplier of model.suppliers)for(const field of ['openBalance','overdueBalance','onTimeBalance','noDueBalance'])supplier[field]=money(supplier[field]);
+    model.suppliers.sort((a,b)=>b.claimed-a.claimed||a.name.localeCompare(b.name,'pt-BR'));
+    let cumulative=0;for(const supplier of model.suppliers){supplier.share=ratio(supplier.claimed,model.summary.claimed)||0;cumulative+=supplier.share;supplier.pareto=cumulative;}
+    Object.assign(meta,{openBalance:money(sum(installments,'expected')),overdueBalance:money(sum(installments.filter(row=>row.status==='Vencido'),'expected')),onTimeBalance:money(sum(installments.filter(row=>row.status==='Dentro do Prazo'),'expected')),noDueBalance:money(sum(installments.filter(row=>row.noDueDate),'expected')),openCount:installments.length,overdue:installments.filter(row=>row.status==='Vencido').length,onTime:installments.filter(row=>row.status==='Dentro do Prazo').length,missingExpectedAmounts:installments.filter(row=>row.expectedMissing).length,openBalanceIncomplete:installments.some(row=>row.expectedMissing),excludedCount:excluded.length});
+    model.supplierOpenReport={installments,excluded,meta};
+    model.meta.supplierOpenBalanceBasis=meta.basis+' '+meta.supplierBasis+' '+meta.operationBasis+' '+meta.statusBasis;
   }
 
   return {analyze, validateHeaders, normalizeRef, tokenizeRefs, normalizeMarket, normalizeStatus, parseDate, number, today, version: '1.4.0'};
