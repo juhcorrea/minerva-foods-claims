@@ -23,3 +23,11 @@ analysis/
 *.pdf
 *.pptx
 !dist/assets/*.png
+
+# Migração privada e saída compilada para hospedagem.
+dados/
+objetos-para-restaurar/
+*.zip
+upload-plan.json
+dist/server/
+dist/.openai/

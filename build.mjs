@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {buildMigrationSource} from './migration/source-archive.mjs';
-const root=path.dirname(new URL(import.meta.url).pathname);
+const root=path.dirname(fileURLToPath(import.meta.url));
 const output=path.join(root,'build');
 const assets={};
 const types={'.txt':'text/plain; charset=utf-8','.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.woff2':'font/woff2','.svg':'image/svg+xml','.png':'image/png','.webp':'image/webp','.webmanifest':'application/manifest+json'};
