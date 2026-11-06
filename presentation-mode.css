@@ -4,9 +4,9 @@
 #dashboardFiltersToggle .dashboard-filter-chevron{font-size:calc(12px * var(--minerva-text-scale,1));transition:transform .15s}
 #dashboardFiltersToggle[aria-expanded="false"] .dashboard-filter-chevron{transform:rotate(180deg)}
 body.dashboard-presentation{overflow-x:hidden;background:var(--canvas);min-height:100vh;min-height:100dvh}
-body.dashboard-presentation :is(.sidebar,.topbar,.page-heading,#globalFilterBlock,.receipt-subnav,.app-footer){display:none!important}
+body.dashboard-presentation :is(.sidebar,.topbar,.page-heading,#globalFilterBlock,#teamToolbar,.receipt-subnav,.app-footer){display:none!important}
 body.dashboard-presentation .app-shell{margin-left:0;min-height:100vh;min-height:100dvh;width:100%;max-width:none}
-body.dashboard-presentation main{width:100%;max-width:1920px;margin:0 auto;padding:20px 24px 0;box-sizing:border-box}
+body.dashboard-presentation main#mainContent{width:100%;max-width:none;margin:0;padding:20px 24px 0;box-sizing:border-box}
 body.dashboard-presentation .cc-procurement-root{width:100%;max-width:1840px;margin-inline:auto}
 body.dashboard-presentation .dashboard-presentation-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;z-index:30;min-height:52px;padding:8px 22px;background:var(--paper);color:var(--ink);border-bottom:1px solid var(--line)}
 .dashboard-presentation-brand{display:flex;align-items:center;gap:10px;min-width:0}
@@ -15,7 +15,13 @@ body.dashboard-presentation .dashboard-presentation-bar{display:flex;align-items
 .dashboard-presentation-brand span{font-size:calc(10px * var(--minerva-text-scale,1));color:var(--muted);margin-right:4px}
 #dashboardPresentationExit{font-family:inherit;font-size:calc(11px * var(--minerva-text-scale,1));white-space:nowrap;min-height:34px}
 #dashboardPresentationExit kbd{font:inherit;font-size:calc(9px * var(--minerva-text-scale,1));border:1px solid var(--line);border-radius:3px;padding:2px 4px;margin-left:6px;color:var(--muted)}
+#dashboardPresentationToggle{background:#233f57;color:#fff;border:1px solid #233f57;font-weight:700;box-shadow:0 2px 5px #233f5720;gap:8px}
+#dashboardPresentationToggle:hover{background:#315774;border-color:#315774;color:#fff}
+#dashboardPresentationToggle:focus-visible{outline:3px solid #7da2bf;outline-offset:3px}
+#dashboardPresentationToggle>svg{width:18px;height:18px;flex:0 0 18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.calculation-rules-link{display:inline-flex;margin:14px 0 4px;padding:6px 0;border:0;background:transparent;color:var(--muted);font:inherit;font-size:calc(11px * var(--minerva-text-scale,1));text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.calculation-rules-link:hover{color:var(--ink)}.calculation-rules-link:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
 body.dashboard-presentation .demo-banner{margin-bottom:12px}
-@media(max-width:760px){body.dashboard-presentation .dashboard-presentation-bar{padding:8px 12px;gap:10px}body.dashboard-presentation main{padding:12px 12px 0}.dashboard-presentation-brand span{display:none}.dashboard-presentation-brand strong{font-size:calc(13px * var(--minerva-text-scale,1))}#dashboardPresentationExit kbd{display:none}}
+@media(max-width:760px){body.dashboard-presentation .dashboard-presentation-bar{padding:8px 12px;gap:10px}body.dashboard-presentation main#mainContent{padding:12px 12px 0}.dashboard-presentation-brand span{display:none}.dashboard-presentation-brand strong{font-size:calc(13px * var(--minerva-text-scale,1))}#dashboardPresentationExit kbd{display:none}}
 @media(prefers-reduced-motion:reduce){#dashboardFiltersToggle .dashboard-filter-chevron{transition:none}}
-@media print{.dashboard-presentation-bar,#dashboardFiltersToggle,#dashboardPresentationToggle{display:none!important}body.dashboard-presentation main{padding:0}body.dashboard-presentation .page-heading{display:block!important}}
+@media print{.dashboard-presentation-bar,#dashboardFiltersToggle,#dashboardPresentationToggle,.calculation-rules-link{display:none!important}body.dashboard-presentation main#mainContent{padding:0}body.dashboard-presentation .page-heading{display:block!important}}

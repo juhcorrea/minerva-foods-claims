@@ -82,3 +82,6 @@ html[data-theme=light] .executive-mode :is(.table-container,.table-wrap) td{bord
 /* Numeric columns share one alignment in every table and in print. */
 body.executive-mode table :is(th,td):is(.num,.numeric,.number-cell,[data-numeric],.exec-detail-number){text-align:center;vertical-align:middle;font-variant-numeric:tabular-nums}
 body.executive-mode table th:is(.num,.numeric,.number-cell,[data-numeric]) .column-heading{justify-content:center;text-align:center}
+.scope-load-notice{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:20px 22px;margin:0 0 18px;border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:9px;background:var(--paper);color:var(--ink)}
+.scope-load-notice strong{font-size:calc(14px * var(--minerva-text-scale,1));font-weight:700}.scope-load-notice p{margin:5px 0 0;font-size:calc(12px * var(--minerva-text-scale,1));color:var(--muted)}.scope-load-notice .button{flex-shrink:0}
+@media(max-width:600px){.scope-load-notice{align-items:flex-start;flex-direction:column;padding:16px}}

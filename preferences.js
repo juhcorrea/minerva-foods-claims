@@ -17,7 +17,7 @@
   const $ = id => document.getElementById(id);
   const darkMedia = global.matchMedia('(prefers-color-scheme: dark)');
   let mounted = false, messageTimer = null, scaleFrame = null, fullscreenBusy = false;
-  let currentProfile = null;
+  let currentProfile = null, observedToolbar = null, toolbarObserver = null, toolbarFinder = null;
   const activeTheme = () => preferences.theme === 'system' ? darkMedia.matches ? 'dark' : 'light' : preferences.theme;
   function save() {try {global.localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));} catch {announce('Preferência aplicada. Este navegador não permite salvar a configuração.');}}
   function announce(message) {const el = $('preferencesStatus');if (!el) return;global.clearTimeout(messageTimer);el.textContent=message;el.hidden=false;messageTimer=global.setTimeout(() => {el.hidden=true;el.textContent='';}, 7000);}
@@ -99,11 +99,40 @@
     finally {fullscreenBusy=false;}
   }
 
-  function closeProfile(restoreFocus) {const panel=$('profilePanel');if (!panel) return;panel.hidden=true;$('profileButton').setAttribute('aria-expanded','false');if (restoreFocus && !$('profileButton').hidden) $('profileButton').focus();}
+  function syncOperationalNotice() {
+    const notice=$('profileActivityStatus'),label=$('profileActivityMessage'),message=$('teamMessage');
+    if (!notice||!label) return;
+    const text=message?.textContent?.trim()||'',error=Boolean(message?.classList.contains('is-error'));
+    const relevant=error||/^Publicando\b/i.test(text);
+    const visible=Boolean(currentProfile)&&relevant&&Boolean($('profilePanel')?.hidden);
+    if(label.textContent!==text)label.textContent=text;
+    if(notice.classList.contains('is-error')!==error)notice.classList.toggle('is-error',error);
+    if(notice.hidden===visible)notice.hidden=!visible;
+  }
+  function syncProfileControls() {
+    const host=$('profileControls'),toolbar=$('teamToolbar');
+    if(!host)return;
+    const allowed=global.MINERVA_HOSTED===true&&Boolean(currentProfile);
+    host.hidden=!allowed||!toolbar;
+    if(allowed&&toolbar){
+      if(toolbar.parentElement!==host)host.append(toolbar);
+      const imports=$('openImports'),actions=toolbar.querySelector('.team-actions');
+      if(imports&&actions&&imports.parentElement!==actions)actions.prepend(imports);
+    }
+    if(toolbar&&observedToolbar!==toolbar&&global.MutationObserver){
+      toolbarObserver?.disconnect();observedToolbar=toolbar;
+      toolbarObserver=new global.MutationObserver(syncOperationalNotice);
+      toolbarObserver.observe(toolbar,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class','disabled','hidden']});
+      toolbarFinder?.disconnect();
+    }
+    syncOperationalNotice();
+  }
+  function closeProfile(restoreFocus) {const panel=$('profilePanel');if (!panel) return;panel.hidden=true;$('profileButton').setAttribute('aria-expanded','false');syncOperationalNotice();if (restoreFocus && !$('profileButton').hidden) $('profileButton').focus();}
   function updateProfile() {
     if (!mounted) return;
     currentProfile=global.MinervaTeam?.getProfile?.() || null;
     const hosted=global.MINERVA_HOSTED===true,allowed=!hosted||Boolean(currentProfile);
+    syncProfileControls();
     $('profileButton').hidden=!allowed;
     if ($('sidebarSignout')) $('sidebarSignout').hidden=!hosted||!allowed;
     if ($('sidebarRefresh')) $('sidebarRefresh').hidden=!hosted||!allowed;
@@ -135,6 +164,7 @@
     const panel=$('profilePanel');if (!panel.hidden) {closeProfile(true);return;}
     const rect=$('profileButton').getBoundingClientRect();
     panel.hidden=false;
+    syncOperationalNotice();
     panel.style.right='auto';
     panel.style.left=Math.max(12,Math.min(rect.left,global.innerWidth-panel.offsetWidth-12))+'px';
     panel.style.top=Math.max(12,Math.min(rect.top-panel.offsetHeight-10,global.innerHeight-panel.offsetHeight-12))+'px';
@@ -159,8 +189,10 @@
     placeProfile();global.addEventListener('resize',placeProfile);
     $('sidebarRefresh')?.addEventListener('click',()=>$('teamRefresh')?.click());
     const panel=document.createElement('section');panel.id='profilePanel';panel.className='profile-panel';panel.hidden=true;panel.setAttribute('role','dialog');panel.setAttribute('aria-labelledby','profilePanelTitle');
-    panel.innerHTML='<div class="profile-panel-heading"><h2 id="profilePanelTitle">Perfil em uso</h2><button id="closeProfile" class="icon-button" type="button" aria-label="Fechar perfil">×</button></div><strong id="profilePanelName" class="profile-panel-name"></strong><span id="profilePanelContact" class="profile-panel-contact"></span><span id="profilePanelRole" class="profile-panel-role"></span><p id="profilePanelNote"></p><button id="profileSignout" class="button button-outline" type="button">Sair deste perfil</button>';
+    panel.innerHTML='<div class="profile-panel-heading"><h2 id="profilePanelTitle">Perfil em uso</h2><button id="closeProfile" class="icon-button" type="button" aria-label="Fechar perfil">×</button></div><strong id="profilePanelName" class="profile-panel-name"></strong><span id="profilePanelContact" class="profile-panel-contact"></span><span id="profilePanelRole" class="profile-panel-role"></span><p id="profilePanelNote"></p><section id="profileControls" class="profile-controls" aria-label="Ações do painel" hidden></section><button id="profileSignout" class="button button-outline" type="button">Sair deste perfil</button>';
     document.body.append(panel);
+    const activity=document.createElement('div');activity.id='profileActivityStatus';activity.className='profile-activity-status';activity.hidden=true;activity.setAttribute('role','status');activity.setAttribute('aria-live','polite');
+    activity.innerHTML='<span id="profileActivityMessage"></span><button id="profileActivityOpen" type="button">Ver no perfil</button>';document.body.append(activity);
     const status=document.createElement('div');status.id='preferencesStatus';status.className='preferences-status';status.hidden=true;status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.setAttribute('aria-atomic','true');document.body.append(status);
     mounted=true;
     $('themeToggle').addEventListener('click',()=>setTheme(activeTheme()==='dark'?'light':'dark'));
@@ -170,7 +202,11 @@
     $('profileButton').addEventListener('click',openProfile);
     $('closeProfile').addEventListener('click',()=>closeProfile(true));
     $('profileSignout').addEventListener('click',event=>global.MinervaTeam?.logout(event));
+    $('profileActivityOpen').addEventListener('click',openProfile);
+    panel.addEventListener('click',event=>{const button=event.target?.closest?.('button');if(button&&!button.disabled&&['openImports','emptyImport','teamManage'].includes(button.id))closeProfile(false);},true);
     document.addEventListener('minerva:session-updated',updateProfile);
+    document.addEventListener('minerva:model-updated',syncProfileControls);
+    if(global.MINERVA_HOSTED===true&&global.MutationObserver){toolbarFinder=new global.MutationObserver(()=>{if($('teamToolbar'))syncProfileControls();});toolbarFinder.observe(document.querySelector('main')||document.body,{childList:true,subtree:true});}
     document.addEventListener('pointerdown',event=>{if (!panel.hidden&&!panel.contains(event.target)&&!profile.contains(event.target)) closeProfile(false);});
     document.addEventListener('keydown',event=>{if (event.key==='Escape'&&!panel.hidden) {event.preventDefault();closeProfile(true);}});
     panel.addEventListener('focusout',event=>{if (event.relatedTarget&&!panel.contains(event.relatedTarget)&&event.relatedTarget!==profile) closeProfile(false);});

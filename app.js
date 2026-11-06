@@ -66,6 +66,7 @@
   }
   function view(name){
     if(!document.getElementById('view-'+name))return;
+    window.scrollTo?.({top:0,left:0,behavior:'instant'});
     captureOperation();state.view=name;document.body.dataset.activeView=name;populateOperations();
     document.querySelectorAll('[id^="view-"]').forEach(el=>el.hidden=el.id!==`view-${name}`);
     document.querySelectorAll('[data-view]').forEach(el=>{const active=el.dataset.view===name;el.classList.toggle('active',active);if(active)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
@@ -80,13 +81,48 @@
     document.querySelector('.filters-panel').hidden=independent;$('periodLabel').hidden=independent||name==='procurement';
     document.querySelector('.year-selector').hidden=['suppliers','procurement'].includes(name);$('asOf').closest('label').hidden=name==='procurement';
     document.body.classList.toggle('presentation-workspace',['meeting','portfolio'].includes(name));
-    if(name==='claims')window.MinervaExecutive?.renderClaims(state.model,'claimAnalytics');
-    if(['claims','procurement'].includes(name))window.MinervaClaimControl?.render(state.model);
-    if(name==='analysts')window.MinervaAnalysts?.render(state.model);
-    if(name==='meeting')window.MinervaMeetings?.render(state.model);
-    if(name==='portfolio')window.MinervaPortfolio?.render(state.model);
+    const scopeReady=refreshViewScope();
+    if(scopeReady||!state.model){
+      if(name==='claims')window.MinervaExecutive?.renderClaims(state.model,'claimAnalytics');
+      if(['claims','procurement'].includes(name))window.MinervaClaimControl?.render(state.model);
+      if(name==='analysts')window.MinervaAnalysts?.render(state.model);
+      if(name==='meeting')window.MinervaMeetings?.render(state.model);
+      if(name==='portfolio')window.MinervaPortfolio?.render(state.model);
+    }
     if(!state.model&&!['overview','method','portfolio'].includes(name))say('Importe as duas planilhas para consultar esta visão.');
-    if(!state.restoringView && state.model && Boolean(state.model.meta.allYears)!==(name==='suppliers'))analyze();
+    const activeScope=state.analysisBusy&&state.requestedOptions?state.requestedOptions.allYears:state.model?.meta?.allYears;
+    if(!state.restoringView && state.model && Boolean(activeScope)!==(name==='suppliers'))analyze();
+  }
+  function viewScopeMatches(){
+    if(!state.model||state.scopeRenderPending||Boolean(state.model.meta?.allYears)!==(state.view==='suppliers'))return false;
+    if(state.view==='suppliers')return true;
+    const selected=[...document.querySelectorAll('input[name="year"]:checked')].map(el=>Number(el.value)).sort(),loaded=[...(state.model.meta?.years||[])].map(Number).sort();
+    return selected.join(',')===loaded.join(',');
+  }
+  function refreshViewScope(){
+    const ready=viewScopeMatches(),blocked=Boolean(state.model&&!ready)||Boolean(!state.model&&(state.analysisBusy||state.scopeLoadFailed));
+    document.querySelectorAll('[id^="view-"]').forEach(el=>el.hidden=el.id!=='view-'+state.view||blocked);
+    for(const id of ['exportReport','exportCorrections','exportPdf','exportControl','exportControlPdf','exportRules'])if($(id))$(id).disabled=!ready;
+    let banner=$('viewScopeNotice');
+    if(blocked&&!banner){
+      const main=document.querySelector('main');
+      if(main){
+        banner=document.createElement('section');banner.id='viewScopeNotice';banner.className='scope-load-notice';banner.setAttribute('role','status');banner.setAttribute('aria-live','polite');
+        const copy=document.createElement('div'),title=document.createElement('strong'),text=document.createElement('p'),retry=document.createElement('button');
+        title.id='viewScopeTitle';text.id='viewScopeText';retry.id='viewScopeRetry';retry.type='button';retry.className='button button-outline';retry.textContent='Tentar novamente';retry.addEventListener('click',()=>analyze());
+        copy.append(title,text);banner.append(copy,retry);const anchor=$('receiptViews');main.insertBefore(banner,anchor?.parentElement===main?anchor:main.firstChild);
+      }
+    }
+    if(banner){
+      banner.hidden=!blocked;
+      if(blocked){
+        const waiting=Boolean(state.analysisBusy);
+        if($('viewScopeTitle'))$('viewScopeTitle').textContent=waiting?'Atualizando o período desta aba…':'Não foi possível atualizar este período.';
+        if($('viewScopeText'))$('viewScopeText').textContent=waiting?'Os valores serão exibidos quando a atualização terminar.':'Tente novamente para consultar os valores desta aba.';
+        if($('viewScopeRetry'))$('viewScopeRetry').disabled=waiting;
+      }
+    }
+    return ready;
   }
   const currentScenario = () => state.model?.meta?.correctionScenario || state.appliedGlobal?.correctionScenario || 'corrected';
   const scenarioLabel = () => currentScenario()==='original' ? 'Sem correções · base original do Controle' : 'Com correções da BD';
@@ -132,16 +168,35 @@
       F.clear();state.chartMonth='';state.scenarioFiltersReset=true;
     }
     state.model=model;
+    state.scopeRenderPending=true;
+    state.scopeRefreshPending=false;
     return true;
   }
   function refreshScopeWhenReady(){if(state.scopeRefreshPending&&!state.analysisBusy){state.scopeRefreshPending=false;queueMicrotask(()=>analyze());}}
   async function analyze(){
-    if(state.analysisBusy)return false;
-    state.analysisBusy=true;document.dispatchEvent(new CustomEvent('minerva:analysis-state',{detail:{busy:true}}));
-    const controls=[...document.querySelectorAll('.filters-panel input,.filters-panel select,.filters-panel button,.main-nav button,#receiptViews button,#correctionOriginalToggle')];
-    const prior=controls.map(control=>control.disabled);controls.forEach(control=>control.disabled=true);
-    try{return await performAnalysis();}
-    finally{state.analysisBusy=false;document.dispatchEvent(new CustomEvent('minerva:analysis-state',{detail:{busy:false}}));controls.forEach((control,index)=>{if(control.isConnected)control.disabled=prior[index];});const toggle=$('correctionOriginalToggle');if(toggle)toggle.disabled=false;refreshScopeWhenReady();}
+    const remote=!state.bd&&!state.control&&typeof state.serverLoader==='function';
+    if(state.analysisBusy&&!remote){state.scopeRefreshPending=true;return false;}
+    const version=state.analysisVersion=(state.analysisVersion||0)+1;
+    state.scopeRefreshPending=false;
+    state.scopeLoadFailed=false;
+    if(!state.analysisBusy){
+      const controls=[...document.querySelectorAll('.filters-panel input,.filters-panel select,.filters-panel button,#correctionOriginalToggle')];
+      state.analysisControls=controls.map(control=>({control,disabled:control.disabled}));
+      controls.forEach(control=>control.disabled=true);
+    }
+    state.analysisBusy=true;refreshViewScope();document.dispatchEvent(new CustomEvent('minerva:analysis-state',{detail:{busy:true}}));
+    try{const result=await performAnalysis();if(version===state.analysisVersion)state.scopeLoadFailed=Boolean(remote&&result===false&&!state.model);return result;}
+    catch(error){if(version===state.analysisVersion){state.scopeLoadFailed=Boolean(remote&&!state.model);notice(error.message||'Não foi possível atualizar a análise.',true);}return false;}
+    finally{
+      if(version===state.analysisVersion){
+        state.analysisBusy=false;
+        for(const {control,disabled}of state.analysisControls||[])if(control.isConnected)control.disabled=disabled;
+        state.analysisControls=null;
+        refreshViewScope();
+        document.dispatchEvent(new CustomEvent('minerva:analysis-state',{detail:{busy:false}}));
+        refreshScopeWhenReady();
+      }
+    }
   }
   async function performAnalysis(){
     if(!state.bd||!state.control){if(!state.bd&&!state.control&&state.serverLoader)return state.serverLoader(options());openImports();return;}
@@ -150,7 +205,7 @@
     try{await nextPaint();if(!acceptScenarioModel(E.analyze(state.bd,state.control,opts)))return false;state.appliedGlobal={...opts};state.correctionsPage=state.installmentsPage=state.processesPage=state.issuesPage=1;
       $('emptyState').hidden=true;$('loadedContent').hidden=false;$('demoBanner').hidden=!state.demo;
       if($('importDialog').open)$('importDialog').close();
-      populateSuppliers();render();document.dispatchEvent(new CustomEvent('minerva:model-updated'));
+      populateSuppliers();render();state.scopeRenderPending=false;refreshViewScope();document.dispatchEvent(new CustomEvent('minerva:model-updated'));
       say(`${state.demo?'Demonstração fictícia. ':''}${integer(state.model.summary.recordCount)} registros da BD no recorte; ${integer(state.model.meta.linkedControlRows)} parcelas vinculadas. ${state.model.summary.reviewCount?'Há referências para conferir antes de fechar os totais.':'Conciliação concluída.'}`);
     }catch(e){notice(e.message||'Não foi possível analisar os arquivos.',true);}
     finally{$('loadingOverlay').hidden=true;}
@@ -352,7 +407,7 @@
     worksheet(wb,'Auditoria correcoes',['Ordem agrupada','Arquivo de origem','Aba','Linha Excel','Célula','Referência original','Fornecedor BD','Analista na BD','Campo','Valor original','Valor corrigido','Linhas BD','Data RNC','Regra aplicada'],changes.map(({g,c})=>[g.reference,state.controlName,'Controle Recebimento',c.row,c.cell,c.reference||g.reference,c.supplier||g.supplier,analystText(c),c.field,c.original,c.corrected,(c.bdRows||g.bdRows).join('; '),c.rncDate,c.reason]));
     worksheet(wb,'Conferencias',['Tipo','Linha','Ordem / NF','Fornecedor','Analista na BD','Linhas BD','Valor USD','Detalhe'],issues.map(i=>[i.kind,i.row,i.reference,i.supplier,analystText(i),(i.bdRows||[]).join('; '),i.amount,i.detail]));
   }
-  function makeWorkbook(scope=false){if(scope==='meeting')return window.MinervaMeetings?.exportWorkbook();if(scope==='analysts')return window.MinervaAnalysts.exportWorkbook();if(!state.model)throw new Error('Importe as duas planilhas primeiro.');const m=state.model,wb=XLSX.utils.book_new(),correctionsOnly=scope===true,controlOnly=scope==='control';
+  function makeWorkbook(scope=false){if(!viewScopeMatches())throw new Error('Atualize o período desta aba antes de exportar.');if(scope==='meeting')return window.MinervaMeetings?.exportWorkbook();if(scope==='analysts')return window.MinervaAnalysts.exportWorkbook();if(!state.model)throw new Error('Importe as duas planilhas primeiro.');const m=state.model,wb=XLSX.utils.book_new(),correctionsOnly=scope===true,controlOnly=scope==='control';
     if(['claims','procurement'].includes(scope)){window.MinervaClaimControl.worksheets(wb,worksheet,scope);return wb;}
     if(controlOnly)controlWorksheets(wb);else {correctionWorksheets(wb);window.MinervaCorrectionImpact?.addWorksheets(wb);}
     worksheet(wb,'Criterios',['Critério','Valor'],[['Relatório',controlOnly?'Controle de recebimento':correctionsOnly?'Correções agrupadas por ordem':'Análise completa'],['Responsável','Administração'],['Cenário dos resultados',scenarioLabel()],['Data da análise',m.meta.asOf],['Publicado por',!state.bd&&state.publishedMeta?.updatedBy||'Prévia local — não publicada'],['Atualização (Brasília)',!state.bd&&state.publishedMeta?.updatedAt?new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'short'}).format(new Date(state.publishedMeta.updatedAt)):'—'],['Anos dos claims / recebimentos',m.meta.years.join(', ')],['Fornecedor selecionado',appliedGlobal('supplier')||'Todos'],['Operação selecionada',controlOnly?controlOperationLabel():(appliedGlobal('operation')||'Todas as operações')],['Operação do Controle',controlOperationLabel()],['Escopo de operações do Controle','Controle integral, incluindo operações não identificadas. Recebidos por M/R/T; abertas de todos os anos até quitação. Filtros de fornecedor/operação podem restringir o recorte, sem exigir vínculo ou elegibilidade da BD.'],['Filtro do Controle',controlFilterText()],['Busca de correções',filterValue('correctionSearch').trim()||'Todas as ordens'],['Acompanhamento das correções',progressLabel()],['Marcação de ajuste','Conferência manual compartilhada; não altera os arquivos nem o cálculo financeiro. Novas divergências voltam a pendente.'],['Analista na BD',filterLabel('analystFilter','Todos os analistas')],['Origem do analista','BD!BE; todos os analistas das linhas vinculadas. Não identifica autoria de edição no Controle.'],['BD',state.bdName],['Controle',state.controlName],['Moeda','USD'],['Escopo do reclamado','Todas as situações da BD!G, exceto EM ANALISE, AGUARDANDO CUSTOS e RESPONDIDO-NÃO PROCEDE. Todas as operações, com filtro opcional; exclui INTERFERÊNCIA EXTERNA dos valores reclamados.'],['Em negociação','Somente EM NEGOCIAÇÃO - PROCEDENTE'],['Data de entrada','BD!B — Data RNC'],['Ano do realizado','Controle Recebimento!R — Data compensação'],['Status do realizado','Controle Recebimento!M — somente Pago'],['Data para detalhamento mensal','Controle Recebimento!R — Data compensação; ano e mês vêm desta data'],['Valor realizado','Controle Recebimento!T — Valor Recebido USD'],['Realizado do comparativo','M = Pago, ano da data R no período e T positivo; fornecedor informado no Controle ou validado na BD; todas as operações, inclusive não identificadas, na opção geral; pagamentos sem referências detalhadas são contados uma vez. Inclui claims de outros anos e situações; separa mesmo ano, outros anos e ano a conferir.'],['Recebido confirmado no Controle','Todo o Controle com M = Pago, ano de R no período e T positivo; independente de vínculo, ano RNC, situação ou expurgo da BD. Com todos os fornecedores e operações, coincide com o recebido por analista.'],['Total recebido no comparativo','Somente pagamentos no período selecionado de claims ocorridos nos anos selecionados. Com 2025+2026, um claim de 2025 pago em 2026 entra; claims de 2024 aparecem na coluna de origem mas ficam fora do total. Recebidos por origem 2024/2025/2026 incluem pagamentos dos anos selecionados em R e são apresentados separadamente. Recebido financeiro completo permanece no Controle.'],['Perda',lossFormula()],['Prejuízo por claim','AJ menos AO da BD. AO é confrontado com a soma de O de todas as parcelas, independentemente de status ou ano. Não confundir AO/acordado com T efetivamente pago.'],['Saldo em aberto por fornecedor','Soma de O das linhas com M = Dentro do Prazo ou Vencido, de todos os anos; fornecedor do cenário selecionado e recorte de operações. Vencido é apenas a parte com M = Vencido e já está incluído no aberto. N não reclassifica esses saldos.'],['Status na análise do Controle','O acompanhamento do Controle mantém o status calculado pela data da análise; os saldos por fornecedor usam o status informado em M.'],['Quitação dos acordos','Contagens no filtro; quitação considera todas as parcelas. Percentual acordado = V/U, sem repetir valores por parcela; 100% acordado não significa recebido. Saldo do acordo = V menos T pago em todos os anos; saldo das parcelas = O das parcelas abertas.'],['Ocorrências',m.meta.occurrenceDefinition],['Vínculos','O Controle é a fonte do recebido. Referências sem detalhamento não excluem pagamentos confirmados; nomes/anos originais são preservados quando a BD não permite validar. Operações conhecidas fora do recorte não entram; operação não identificada entra no filtro geral, mas não em uma operação específica.'],['Correções','Uma linha por ordem em Correcoes; auditoria por célula em Auditoria correcoes. Linhas e valores originais preservados.'],['Originais','Os arquivos de origem não foram alterados. Correções aplicadas somente na análise.'],['Demonstração',state.demo?'DADOS FICTÍCIOS':'Não']]);
@@ -390,6 +445,7 @@
     state.bd=[bd,...claims];state.control=[cr,...controls];state.bdName='BD — demonstração fictícia';state.controlName='Controle — demonstração fictícia';state.demo=true;setSelected('supplierFilter',[]);$('asOf').value=demoAsOf;document.querySelectorAll('input[name="year"]').forEach(el=>el.checked=Number(el.value)===2026);analyze();
   }
   function exportPdf(){
+    if(!viewScopeMatches()){refreshViewScope();return;}
     if(state.view==='portfolio')return window.MinervaPortfolio?.exportPdf();
     if(state.view==='meeting')return window.MinervaMeetings?.exportPdf();
     if(!state.model)return;
@@ -437,7 +493,7 @@
   document.querySelector('.year-options').innerHTML=[currentYear-1,currentYear].map(year=>'<label><input type="checkbox" name="year" value="'+year+'"'+(year===currentYear?' checked':'')+'><span>'+year+'</span></label>').join('');
   $('asOf').value=E.today();$('runAnalysis').disabled=true;$('exportReport').disabled=$('exportCorrections').disabled=$('exportPdf').disabled=$('exportControl').disabled=$('exportControlPdf').disabled=true;extraControls();
   document.querySelectorAll('[data-loss-formula],#lossFormula,#lossFormulaShort').forEach(el=>el.textContent=lossFormula());
-  function setPublishedReport(payload){if(!acceptScenarioModel(payload.model)){refreshScopeWhenReady();return false;}state.appliedGlobal={...(state.requestedOptions||options())};state.bdName=payload.files.bd;state.controlName=payload.files.control;state.demo=false;state.publishedMeta={revision:payload.revision,updatedAt:payload.updatedAt,updatedBy:payload.updatedBy};if(payload.model.controlReport?.supplierOptions)state.supplierOptions=payload.model.controlReport.supplierOptions;else if(!$('supplierFilter').value)state.supplierOptions=payload.model.suppliers.map(s=>s.name);state.correctionsPage=state.installmentsPage=state.processesPage=state.issuesPage=1;$('emptyState').hidden=true;$('loadedContent').hidden=false;$('demoBanner').hidden=true;populateSuppliers();render();document.dispatchEvent(new CustomEvent('minerva:model-updated'));say('Relatório compartilhado carregado.');}
+  function setPublishedReport(payload){if(!acceptScenarioModel(payload.model)){refreshScopeWhenReady();return false;}state.appliedGlobal={...(state.requestedOptions||options())};state.bdName=payload.files.bd;state.controlName=payload.files.control;state.demo=false;state.publishedMeta={revision:payload.revision,updatedAt:payload.updatedAt,updatedBy:payload.updatedBy};if(payload.model.controlReport?.supplierOptions)state.supplierOptions=payload.model.controlReport.supplierOptions;else if(!$('supplierFilter').value)state.supplierOptions=payload.model.suppliers.map(s=>s.name);state.correctionsPage=state.installmentsPage=state.processesPage=state.issuesPage=1;$('emptyState').hidden=true;$('loadedContent').hidden=false;$('demoBanner').hidden=true;populateSuppliers();render();state.scopeRenderPending=false;state.scopeLoadFailed=false;refreshViewScope();document.dispatchEvent(new CustomEvent('minerva:model-updated'));say('Relatório compartilhado carregado.');}
   // Saved views contain configuration only; current bases are always reanalyzed.
   function sanitizeView(value={}){
     const raw=value&&typeof value==='object'?value:{},global=raw.global||{},list=input=>[...new Set(asList(input).slice(0,100).map(v=>v.slice(0,200)))],string=input=>String(input||'').slice(0,200);
