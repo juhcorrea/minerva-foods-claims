@@ -51,8 +51,8 @@ test('editor grant enables publishing and correction follow-up without access ma
  const published=await publish(env,member.cookie);assert.equal(published.status,200);assert.equal(published.body.updatedBy,'Analista de operações');
  const saved=JSON.parse(env.BUCKET.objects.get('private/report-latest-v1.json').text);
  assert.equal(saved.updatedByUserId,member.body.userId);assert.equal(saved.updatedBy,'Analista de operações');
- const group=published.body.model.correctionGroups[0];assert(group);
- const marked=await call(env,'/api/correction-progress',member.cookie,{method:'POST',body:{key:group.progress.key,done:true,reportRevision:published.body.revision}});
+ const historical=await call(env,'/api/report?years=2025,2026',member.cookie),group=historical.body.model.correctionGroups[0];assert(group);
+ const marked=await call(env,'/api/correction-progress',member.cookie,{method:'POST',body:{key:group.progress.key,done:true,reportRevision:published.body.revision,options:{years:[2025,2026]}}});
  assert.equal(marked.status,200);assert.equal(marked.body.progress.updatedBy,'Analista de operações');
  const another=await ask(env,'Outra pessoa');
  assert.equal((await call(env,'/api/members',member.cookie)).status,403);
@@ -72,11 +72,11 @@ test('downgrade, revocation and legacy members obey the current ACL on existing 
  assert.equal((await call(env,'/api/session',member.cookie)).body.role,'viewer');
  assert.equal((await call(env,'/api/members',admin.cookie)).body.members[0].role,'viewer');
  await setRole(env,admin,member.body.userId,'editor');const published=await publish(env,member.cookie);assert.equal(published.status,200);
- const group=published.body.model.correctionGroups[0];
+ const group=(await call(env,'/api/report?years=2025,2026',member.cookie)).body.model.correctionGroups[0];
  assert.equal((await setRole(env,admin,member.body.userId,'viewer')).status,200);
  assert.equal((await call(env,'/api/session',member.cookie)).body.role,'viewer');
  assert.equal((await publish(env,member.cookie)).status,403);
- assert.equal((await call(env,'/api/correction-progress',member.cookie,{method:'POST',body:{key:group.progress.key,done:true,reportRevision:published.body.revision}})).status,403);
+ assert.equal((await call(env,'/api/correction-progress',member.cookie,{method:'POST',body:{key:group.progress.key,done:true,reportRevision:published.body.revision,options:{years:[2025,2026]}}})).status,403);
  assert.equal((await call(env,'/api/report',member.cookie)).status,200);
  await setRole(env,admin,member.body.userId,'editor');
  assert.equal((await call(env,'/api/members/'+member.body.userId,admin.cookie,{method:'DELETE',body:{}})).status,200);

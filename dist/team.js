@@ -10,6 +10,7 @@
     const params = new URLSearchParams();
     const opts = options || {};
     if (Array.isArray(opts.years) && opts.years.length) params.set('years', opts.years.map(Number).filter(Number.isInteger).join(','));
+    if (opts.allYears === true) params.set('allYears', '1');
     if (opts.asOf) params.set('asOf', String(opts.asOf));
     if (opts.supplier) params.set('supplier', String(opts.supplier));
     if (opts.operation) params.set('operation', String(opts.operation));

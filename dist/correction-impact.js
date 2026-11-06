@@ -9,7 +9,8 @@
   const label = () => state.original ? 'Sem correções · valores originais do Controle' : 'Com correções · referências da BD';
   const cells = row => [esc(row.supplier || 'Não informado'), esc(row.yearEntry ?? 'Não informado'), esc(row.market || 'Não informado'), amount(row.received), amount(row.receivedCount), amount(row.openBalance), amount(row.openCount), amount(row.orderCount), row.unresolvedRows ? `<span class="badge warning">${amount(row.unresolvedRows)} linhas</span>` : '<span class="badge positive">Conferido</span>'];
   const values = row => [row.supplier, row.yearEntry, row.market, row.received, row.receivedCount, row.openBalance, row.openCount, row.orderCount, row.unresolvedRows];
-  const sourceRows = () => state.model?.[state.original ? 'original' : 'corrected'] || [];
+  const financialRows = (rows,field) => [...(rows||[])].sort((a,b)=>{const first=a[field]==null?null:Number(a[field]),second=b[field]==null?null:Number(b[field]);return first==null||!Number.isFinite(first)?(second==null||!Number.isFinite(second)?0:1):second==null||!Number.isFinite(second)?-1:second-first;});
+  const sourceRows = () => financialRows(state.model?.[state.original ? 'original' : 'corrected'],'received');
   const money = value => value == null || !Number.isFinite(Number(value)) ? '—' : amount(value);
   const claimTableId = () => 'correction-impact-claims-' + (state.original ? 'original' : 'corrected');
   const claimHeaders = original => ['Ordem / referência', 'Fornecedor · BD', original ? 'Integral · Controle U' : 'Integral · BD AJ', original ? 'Acordado · soma Controle O' : 'Acordado · BD AO', original ? 'Prejuízo · U − soma O' : 'Prejuízo · AJ − AO', 'Diferença · soma O − AO', 'Conferência', 'Linhas BD', 'Linhas Controle'];
@@ -28,7 +29,7 @@
   }
   function financialSection() {
     if (!state.audit) return '';
-    const id = claimTableId(), titles = claimHeaders(state.original), source = state.audit.rows || [];
+    const id = claimTableId(), titles = claimHeaders(state.original), source = financialRows(state.audit.rows,state.original?'originalClaimValue':'claimed');
     const rows = filters().prepare(id, titles, source, row => { const result = claimCells(row); result[0] = esc(row.reference); result[6] = esc(row.status || 'A conferir'); return result; }, 'Conferência financeira por claim · ' + label(), {types:['text','text','number','number','number','number','text','text','text'], sortValues:row => claimValues(row)});
     const size = state.printing ? Math.max(rows.length, 1) : 40, pages = Math.max(1, Math.ceil(rows.length / size));
     state.claimPage = Math.min(state.claimPage, pages);
@@ -59,7 +60,7 @@
     if (!state.model) return;
     const xlsx = global.XLSX;
     for (const [key,title] of [['original','Cenario original'],['corrected','Cenario corrigido']]) {
-      const rows = state.model[key];
+      const rows = financialRows(state.model[key],'received');
       const data = [headers, ...rows.map(row => values(row))];
       const sheet = xlsx.utils.aoa_to_sheet(data);
       sheet['!cols'] = headers.map((_,index) => ({wch:index === 0 ? 38 : 24}));
@@ -70,14 +71,14 @@
     if (state.audit) {
       for (const [original,title] of [[true,'Claim original'],[false,'Claim corrigido']]) {
         const titles = [...claimHeaders(original),'Analistas na BD','Valores U encontrados','Motivos da conferência'];
-        const rows = state.audit.rows || [];
+        const rows = financialRows(state.audit.rows,original?'originalClaimValue':'claimed');
         const sheet = xlsx.utils.aoa_to_sheet([titles,...rows.map(row => [...claimValues(row,original),(row.analysts || []).join('; '),(row.originalClaimValues || []).join('; '),(row.reasons || []).join('; ')])]);
         sheet['!cols'] = titles.map((_,index) => ({wch:index < 2 ? 36 : index === 11 ? 65 : 25}));
         if (rows.length) sheet['!autofilter'] = {ref:xlsx.utils.encode_range({r:0,c:0},{r:rows.length,c:titles.length-1})};
         for (let row = 2; row <= rows.length + 1; row++) for (const col of ['C','D','E','F']) if (sheet[col+row]) sheet[col+row].z = '#,##0';
         xlsx.utils.book_append_sheet(workbook, sheet, title);
       }
-      const corrections = state.audit.uCorrections || [];
+      const corrections = financialRows(state.audit.uCorrections,'corrected');
       const titles = ['Ordem / referência','Fornecedor','Analista na BD','Linha Controle','Célula Controle','Campo','Valor original U','Valor correto AJ','Linhas BD','Regra'];
       const sheet = xlsx.utils.aoa_to_sheet([titles,...corrections.map(row => [row.reference,row.supplier,(row.analysts || []).join('; '),row.row,row.cell,row.field,row.original,row.corrected,(row.bdRows || []).join('; '),row.reason])]);
       sheet['!cols'] = titles.map((_,index) => ({wch:index === 9 ? 65 : 26}));

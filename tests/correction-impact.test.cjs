@@ -46,7 +46,7 @@ test('only paid R years and all open years are included; both modes keep the sam
  const m=run(b,c,{years:[2026],supplier:'CLIENTE MI',controlOperation:'COMERCIAL'}),i=m.correctionImpact;
  assert.equal(i.summary.rowCount,2);assert.equal(i.summary.received,100);assert.equal(i.summary.openBalance,75);assert.deepEqual(i.original.flatMap(g=>g.rows).sort(),[2,4]);assert.deepEqual(i.corrected.flatMap(g=>g.rows).sort(),[2,4]);
  assert.deepEqual(i.meta.years,[2026]);assert.equal(i.meta.supplier,'CLIENTE MI');assert.equal(i.meta.operation,'COMERCIAL');
- assert.equal(m.summary.claimed,0);assert.equal(m.summary.received,0,'Comparative export scope remains unchanged');
+ assert.equal(m.summary.claimed,0);assert.equal(m.summary.received,100,'Default global scope includes commercial cash while RNC year still filters claimed amounts');
  assert.equal(run(b,c,{years:[2026],supplier:'CLIENTE MI LTDA',controlOperation:'COMERCIAL'}).correctionImpact.summary.received,100);
 });
 

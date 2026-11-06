@@ -44,7 +44,7 @@ function sampleInput() {
 const PROGRESS_KEY='private/correction-progress-v1.json';
 function twoOrders(){const input=sampleInput();const claim=[...input.bd[1]];Object.assign(claim,{0:'CLAIM-2',22:'SO/SECOND',24:9988});const paid=[...input.control[1]];Object.assign(paid,{7:'SO/SECOND'});input.bd.push(claim);input.control.push(paid);return input;}
 const queryOptions={years:[2025,2026],asOf:'2026-10-30',supplier:'',operation:'',controlOperation:'',lossFormula:'subtract-negotiating'};
-async function publish(env,admin,input=twoOrders(),revision){return call(env,'/api/report',admin.cookie,{method:'POST',body:input,headers:revision?{'if-match':revision}:{}});}
+async function publish(env,admin,input=twoOrders(),revision){const result=await call(env,'/api/report',admin.cookie,{method:'POST',body:input,headers:revision?{'if-match':revision}:{}});return result.status===200?call(env,'/api/report?years=2025,2026',admin.cookie):result;}
 async function mark(env,admin,snapshot,group,done,extra={}){return call(env,'/api/correction-progress',admin.cookie,{method:'POST',body:{key:group.progress.key,done,reportRevision:snapshot.revision,options:queryOptions,...extra}});}
 
 test('correction follow-up persists for viewers across sessions without changing report data',async()=>{
@@ -54,11 +54,11 @@ test('correction follow-up persists for viewers across sessions without changing
  const financialBefore=env.BUCKET.objects.get('private/report-latest-v1.json').text;
  const result=await mark(env,admin,snapshot,g,true);assert.equal(result.status,200);assert.equal(result.body.progress.done,true);assert.equal(result.body.progress.updatedBy,'Owner');assert.equal(result.body.progress.updatedByUserId,undefined);
  assert.equal(result.body.reportRevision,snapshot.revision);assert.equal(env.BUCKET.objects.get('private/report-latest-v1.json').text,financialBefore);
- const reloaded=await call(env,'/api/report',visitor.cookie);const marked=reloaded.body.model.correctionGroups.find(x=>x.progress.key===g.progress.key);
+ const reloaded=await call(env,'/api/report?years=2025,2026',visitor.cookie);const marked=reloaded.body.model.correctionGroups.find(x=>x.progress.key===g.progress.key);
  assert.equal(marked.progress.done,true);assert.equal(marked.progress.updatedAt,result.body.progress.updatedAt);assert.deepEqual(reloaded.body.model.summary,snapshot.model.summary);
  const secondAdmin=await login(env,'developer');const undone=await mark(env,secondAdmin,reloaded.body,marked,false);assert.equal(undone.status,200);assert.equal(undone.body.progress.updatedBy,'Desenvolvimento');
  const stored=JSON.parse(env.BUCKET.objects.get(PROGRESS_KEY).text).entries[g.progress.key];assert.equal(stored.updatedBy,'Developer');assert.equal(stored.updatedByUserId,'developer');
- assert.equal((await call(env,'/api/report',visitor.cookie)).body.model.correctionGroups.find(x=>x.progress.key===g.progress.key).progress.done,false);
+ assert.equal((await call(env,'/api/report?years=2025,2026',visitor.cookie)).body.model.correctionGroups.find(x=>x.progress.key===g.progress.key).progress.done,false);
 });
 
 test('follow-up mutation enforces admin authorization, origin, boolean and current group',async()=>{
@@ -67,7 +67,7 @@ test('follow-up mutation enforces admin authorization, origin, boolean and curre
  assert.equal((await call(env,'/api/correction-progress',null,{method:'POST',body})).status,401);
  assert.equal((await call(env,'/api/correction-progress',visitor.cookie,{method:'POST',body})).status,403);
  assert.equal((await call(env,'/api/correction-progress',admin.cookie,{method:'POST',body,csrf:false})).status,403);
- for(const bad of [{done:'true'},{done:1},{key:'x'},{reportRevision:''},{options:{...queryOptions,years:[2027]}},{options:{supplier:{}}},{updatedBy:'Forged'}])assert.equal((await call(env,'/api/correction-progress',admin.cookie,{method:'POST',body:{...body,...bad}})).status,400);
+ for(const bad of [{done:'true'},{done:1},{key:'x'},{reportRevision:''},{options:{...queryOptions,years:[2101]}},{options:{...queryOptions,allYears:'true'}},{options:{supplier:{}}},{updatedBy:'Forged'}])assert.equal((await call(env,'/api/correction-progress',admin.cookie,{method:'POST',body:{...body,...bad}})).status,400);
  assert.equal((await call(env,'/api/correction-progress',admin.cookie,{method:'POST',body:{...body,key:'f'.repeat(64)}})).status,409);
  assert.equal(env.BUCKET.objects.has(PROGRESS_KEY),false);
 });
@@ -92,21 +92,31 @@ test('two administrators marking different orders concurrently merge without los
  env.BUCKET.put=async(key,...args)=>{if(key===PROGRESS_KEY)attempts++;return originalPut(key,...args);};
  const writes=await Promise.all([mark(env,owner,saved,saved.model.correctionGroups[0],true),mark(env,developer,saved,saved.model.correctionGroups[1],true)]);
  assert(writes.every(x=>x.status===200));assert(attempts>=3,'A failed conditional write is retried');
- const loaded=(await call(env,'/api/report',owner.cookie)).body;assert(loaded.model.correctionGroups.every(g=>g.progress.done));assert.deepEqual(new Set(loaded.model.correctionGroups.map(g=>g.progress.updatedBy)),new Set(['Owner','Desenvolvimento']));
+ const loaded=(await call(env,'/api/report?years=2025,2026',owner.cookie)).body;assert(loaded.model.correctionGroups.every(g=>g.progress.done));assert.deepEqual(new Set(loaded.model.correctionGroups.map(g=>g.progress.updatedBy)),new Set(['Owner','Desenvolvimento']));
 });
 
 test('correction scenarios share the same audit key and accept progress in either view',async()=>{
  const env=environment(),admin=await login(env),snapshot=(await publish(env,admin)).body;
- const original=(await call(env,'/api/report?correctionScenario=original',admin.cookie)).body;
- const corrected=(await call(env,'/api/report?correctionScenario=corrected',admin.cookie)).body;
+ const original=(await call(env,'/api/report?years=2025,2026&correctionScenario=original',admin.cookie)).body;
+ const corrected=(await call(env,'/api/report?years=2025,2026&correctionScenario=corrected',admin.cookie)).body;
  const group=original.model.correctionGroups[0];assert(group,'The original view still includes correction audit records');
  assert(corrected.model.correctionGroups.some(g=>g.progress.key===group.progress.key),'Changing the display scenario does not create another correction identity');
  const before=env.BUCKET.objects.get('private/report-latest-v1.json').text;
  const saved=await mark(env,admin,snapshot,group,true,{options:{...queryOptions,correctionScenario:'original'}});
  assert.equal(saved.status,200);assert.equal(saved.body.progress.done,true);
- const refreshed=(await call(env,'/api/report?correctionScenario=corrected',admin.cookie)).body;
+ const refreshed=(await call(env,'/api/report?years=2025,2026&correctionScenario=corrected',admin.cookie)).body;
  assert.equal(refreshed.model.correctionGroups.find(g=>g.progress.key===group.progress.key).progress.done,true);
  for(const value of ['','bogus',null,true,{}])assert.equal((await mark(env,admin,snapshot,group,false,{options:{...queryOptions,correctionScenario:value}})).status,400);
  assert.equal((await mark(env,admin,snapshot,group,false,{options:{...queryOptions,correctionScenario:'corrected'}})).status,200);
  assert.equal(env.BUCKET.objects.get('private/report-latest-v1.json').text,before);
+});
+
+test('all-years correction follow-up keeps the effective scope and shared audit identity',async()=>{
+ const env=environment(),admin=await login(env);await publish(env,admin);
+ const snapshot=(await call(env,'/api/report?allYears=1',admin.cookie)).body,group=snapshot.model.correctionGroups[0];assert(group);
+ const saved=await mark(env,admin,snapshot,group,true,{options:{...queryOptions,years:[2026],allYears:true}});
+ assert.equal(saved.status,200);assert.equal(saved.body.progress.done,true);
+ const selected=(await call(env,'/api/report?years=2025,2026',admin.cookie)).body;
+ assert.equal(selected.model.correctionGroups.find(g=>g.progress.key===group.progress.key).progress.done,true);
+ assert.equal((await mark(env,admin,snapshot,group,false,{options:{...queryOptions,years:[2026],allYears:false}})).status,409,'Scope cannot mark a correction absent from its selected-year model');
 });

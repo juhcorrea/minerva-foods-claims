@@ -49,9 +49,10 @@ test('global correction scenario and supplier filter govern attribution while M 
 test('global operation rules include unknowns only without a specific filter and ignore claim eligibility',()=>{
  const b=[bd({ref:'CTNR',status:'EM ANALISE',reason:'INTERFERÊNCIA EXTERNA'}),bd({ref:'CAR',nf:2,operation:'EXPORTAÇÃO - CARRETA'}),bd({ref:'LOCAL',nf:3,operation:'COMERCIAL'})];
  const c=[cr({ref:'CTNR',amount:10}),cr({ref:'CAR',amount:20}),cr({ref:'LOCAL',amount:30}),cr({ref:'UNKNOWN',amount:40}),cr({ref:'CTNR; CAR',amount:50}),cr({ref:'CTNR; LOCAL',amount:60})];
- const m=run(b,c);assert.equal(own(m).openBalance,120);assert.equal(m.supplierOpenReport.excluded.length,2);
+ const m=run(b,c);assert.equal(own(m).openBalance,210);assert.equal(m.supplierOpenReport.excluded.length,0);
  const specific=run(b,c,{operation:'EXPORTAÇÃO - CTNR'});assert.equal(own(specific).openBalance,10);assert.equal(specific.supplierOpenReport.meta.openCount,1);
- assert.equal(own(run(b,c,{controlOperation:'COMERCIAL'})).openBalance,120,'Control tab filter does not leak into supplier balances');
+ assert.equal(own(run(b,c,{controlOperation:'COMERCIAL'})).openBalance,210,'Control tab filter does not leak into supplier balances');
+ assert.equal(own(run(b,c,{operation:'COMERCIAL'})).openBalance,30,'Any explicit BD operation is supported');
 });
 
 test('missing O remains visible as incomplete and missing N never excludes explicit open status',()=>{

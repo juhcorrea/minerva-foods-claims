@@ -35,11 +35,11 @@ test('receipt-only suppliers are retained with zero claimed and complete totals'
  assert.equal(m.claims.length,0);assert.equal(m.suppliers.length,1);assert.equal(m.suppliers[0].name,'HISTÓRICO');assert.equal(m.suppliers[0].claimed,0);assert.equal(m.suppliers[0].received,250);assert.equal(m.suppliers[0].recoveryRate,null);assert.equal(m.suppliers[0].loss,-250);assert.equal(m.summary.received,250);
 });
 
-test('default includes export and unknown operations; explicit operation excludes unknown with visible totals',()=>{
+test('default includes every Claim operation and unknowns; explicit operation excludes unknown with visible totals',()=>{
  const b=[bd({order:'CTNR',nf:1}),bd({order:'CAR',nf:2,operation:'EXPORTAÇÃO - CARRETA'}),bd({order:'MI',nf:3,operation:'COMERCIAL'})];
  const c=[cr({ref:'CTNR',received:100}),cr({ref:'CAR',received:200}),cr({ref:'MI',received:300}),cr({ref:'UNKNOWN',received:400})];
- const m=run(b,c);assert.equal(m.summary.received,700);assert.equal(m.controlReport.meta.receivedConfirmed,1000);assert.equal(m.receiptReport.annual.find(x=>x.year===2026).received,1000);
- assert.equal(m.receiptCohorts.meta.outsideOperationAmount,300);assert.equal(m.receiptCohorts.meta.unresolvedAmount,400);
+ const m=run(b,c);assert.equal(m.summary.received,1000);assert.equal(m.controlReport.meta.receivedConfirmed,1000);assert.equal(m.receiptReport.annual.find(x=>x.year===2026).received,1000);
+ assert.equal(m.receiptCohorts.meta.outsideOperationAmount,0);assert.equal(m.receiptCohorts.meta.unresolvedAmount,400);assert.equal(run(b,c,{operation:'COMERCIAL'}).summary.received,300);
  assert.equal(run(b,c,{operation:'EXPORTAÇÃO - CARRETA'}).summary.received,200);const specific=run(b,c,{operation:'EXPORTAÇÃO - CTNR'});assert.equal(specific.summary.received,100);assert.equal(specific.receiptCohorts.meta.excludedUnknownOperationCount,1);assert.equal(specific.receiptCohorts.meta.excludedUnknownOperationAmount,400);
 });
 
@@ -105,9 +105,10 @@ test('unknown references preserve literal supplier names without fuzzy alias inf
  assert.equal(run(b,c,{supplier:'ARMADOR ALFA'}).summary.received,100);assert.equal(run(b,c,{supplier:'ARMADOR ALFA SHIPPING'}).summary.received,50);
 });
 
-test('a fully linked group mixing export and commercial is excluded without allocating its cash',()=>{
+test('a group mixing operations is counted once in all operations and excluded from an individual operation',()=>{
  const b=[bd({order:'EXPORT',nf:1}),bd({order:'LOCAL',nf:2,operation:'COMERCIAL'})],c=[cr({ref:'EXPORT; LOCAL',received:300})];
- const m=run(b,c);assert.equal(m.summary.received,0);assert.equal(m.receiptCohorts.meta.outsideOperationAmount,300);assert.equal(m.receiptCohorts.meta.excludedUnknownOperationAmount,0);assert.equal(m.controlReport.meta.receivedConfirmed,300);
+ const all=run(b,c);assert.equal(all.summary.received,300);assert.equal(all.receiptCohorts.rows.length,1);assert.equal(all.receiptCohorts.meta.outsideOperationAmount,0);
+ const m=run(b,c,{operation:'EXPORTAÇÃO - CTNR'});assert.equal(m.summary.received,0);assert.equal(m.receiptCohorts.meta.outsideOperationAmount,300);assert.equal(m.receiptCohorts.meta.excludedUnknownOperationAmount,0);assert.equal(m.controlReport.meta.receivedConfirmed,300);
 });
 
 test('origin-year columns preserve all cash while comparison includes claim and payment years in the selected set',()=>{

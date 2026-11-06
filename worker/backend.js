@@ -190,18 +190,22 @@ function filename(value, fallback) {
 
 function analysisOptions(url, saved, engine) {
   const rawYears = url.searchParams.get('years');
-  const years = rawYears == null ? [2025, 2026] : rawYears.split(',').map(Number);
-  if (!years.length || years.some(y => y !== 2025 && y !== 2026)) fail(400, 'INVALID_YEARS', 'Selecione 2025, 2026 ou os dois anos.');
+  const years = rawYears == null ? [Number(engine.today().slice(0,4))] : rawYears.split(',').map(Number);
+  if (!years.length || years.length>201 || years.some(y => !Number.isInteger(y) || y<1900 || y>2100)) fail(400, 'INVALID_YEARS', 'Selecione anos inteiros entre 1900 e 2100.');
+  const rawAllYears=url.searchParams.get('allYears');
+  if(rawAllYears!==null&&!['1','0','true','false'].includes(rawAllYears))fail(400,'INVALID_YEAR_SCOPE','Informe um escopo de anos válido.');
+  const allYears=rawAllYears==='1'||rawAllYears==='true';
   const asOf = url.searchParams.get('asOf') || saved.asOf || engine.today();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || !engine.parseDate(asOf)) fail(400, 'INVALID_DATE', 'Informe uma data da análise válida.');
   const supplier = url.searchParams.get('supplier') || '';
   const operation = url.searchParams.get('operation') || '';
   const controlOperation = url.searchParams.get('controlOperation') || '';
   const correctionScenario = url.searchParams.get('correctionScenario') ?? 'corrected';
-  if (supplier.length > 240 || operation.length > 80 || controlOperation.length > 200 || /[\u0000-\u001f]/.test(controlOperation)) fail(400, 'INVALID_FILTER', 'O filtro informado é inválido.');
-  if (operation && !['EXPORTAÇÃO - CTNR', 'EXPORTAÇÃO - CARRETA'].includes(operation)) fail(400, 'INVALID_OPERATION', 'Selecione uma operação de exportação válida.');
+  if (supplier.length > 240 || operation.length > 200 || controlOperation.length > 200 || /[\u0000-\u001f]/.test(operation+controlOperation)) fail(400, 'INVALID_FILTER', 'O filtro informado é inválido.');
+  const operationOptions=new Set(saved.bd.slice(1).map(row=>engine.normalizeStatus(row?.[25])).filter(Boolean));
+  if (operation && !operationOptions.has(engine.normalizeStatus(operation))) fail(400, 'INVALID_OPERATION', 'Selecione uma operação presente na BD.');
   if (!['original', 'corrected'].includes(correctionScenario)) fail(400, 'INVALID_CORRECTION_SCENARIO', 'Selecione Base original ou Com correções.');
-  return {years: [...new Set(years)], asOf, supplier, operation, controlOperation, correctionScenario, lossFormula: 'subtract-negotiating'};
+  return {years: [...new Set(years)], allYears, asOf, supplier, operation, controlOperation, correctionScenario, lossFormula: 'subtract-negotiating'};
 }
 
 // Manual follow-up is stored separately from the uploaded financial snapshot.
@@ -227,9 +231,10 @@ async function hydrateCorrectionProgress(bucket,model) {
 }
 function correctionOptions(value,url,saved,engine) {
  if(value==null)return analysisOptions(new URL('/api/report',url),saved,engine);
- if(typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['years','asOf','supplier','operation','controlOperation','correctionScenario','lossFormula'].includes(key)))fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');
+ if(typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['years','allYears','asOf','supplier','operation','controlOperation','correctionScenario','lossFormula'].includes(key)))fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');
  const query=new URL('/api/report',url);
- if(value.years!==undefined){if(!Array.isArray(value.years)||!value.years.length||value.years.length>2||value.years.some(year=>year!==2025&&year!==2026))fail(400,'INVALID_YEARS','Selecione 2025, 2026 ou os dois anos.');query.searchParams.set('years',value.years.join(','));}
+ if(value.years!==undefined){if(!Array.isArray(value.years)||!value.years.length||value.years.length>201||value.years.some(year=>!Number.isInteger(year)||year<1900||year>2100))fail(400,'INVALID_YEARS','Selecione anos inteiros entre 1900 e 2100.');query.searchParams.set('years',value.years.join(','));}
+ if(value.allYears!==undefined){if(typeof value.allYears!=='boolean')fail(400,'INVALID_YEAR_SCOPE','Informe um escopo de anos válido.');query.searchParams.set('allYears',value.allYears?'1':'0');}
  for(const key of ['asOf','supplier','operation','controlOperation','correctionScenario'])if(value[key]!==undefined){if(typeof value[key]!=='string')fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');query.searchParams.set(key,value[key]);}
  return analysisOptions(query,saved,engine);
 }
@@ -323,7 +328,7 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
     const files={bd:filename(body.files?.bd,'BD.xlsx'),control:filename(body.files?.control,'Controle de Recebimento.xlsx')};
     if(/demonstra[cç][aã]o|fict[ií]ci/i.test(files.bd+' '+files.control))fail(400,'DEMO_NOT_PUBLISHABLE','Dados de demonstração não podem ser publicados para a equipe.');
     const asOf=body.asOf||engine.today();if(typeof asOf!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(asOf)||!engine.parseDate(asOf))fail(400,'INVALID_DATE','Informe a data da análise para a publicação.');
-    let model;try{engine.validateHeaders(body.bd,'BD');engine.validateHeaders(body.control,'Controle Recebimento');model=engine.analyze(body.bd,body.control,{years:[2025,2026],asOf,correctionScenario:'corrected',lossFormula:'subtract-negotiating'});}catch(err){fail(400,'INVALID_REPORT',err.message||'As planilhas não têm o formato esperado.');}
+    let model;try{engine.validateHeaders(body.bd,'BD');engine.validateHeaders(body.control,'Controle Recebimento');model=engine.analyze(body.bd,body.control,{years:[Number(engine.today().slice(0,4))],asOf,correctionScenario:'corrected',lossFormula:'subtract-negotiating'});}catch(err){fail(400,'INVALID_REPORT',err.message||'As planilhas não têm o formato esperado.');}
     const{value:previous,etag}=await jsonObject(env.BUCKET,REPORT_KEY);const expected=request.headers.get('if-match');
     if(expected&&cleanRevision(expected)!==(previous?.revision||'none'))fail(409,'REPORT_CHANGED','Outra atualização já foi publicada. Carregue a versão atual antes de publicar novamente.');
     const actor=access.admin||access.member;

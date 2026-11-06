@@ -348,7 +348,7 @@ test('Control annual and analyst totals aggregate raw precision before independe
 });
 
 
-test('Control includes every BD operation while executive scope and integral AF receipts stay unchanged', () => {
+test('all operations are the default while a separate Control filter leaves global metrics unchanged', () => {
   const b = [
     bd({order:'EXP/1',nf:1}),
     bd({order:'IMP/1',nf:2,operation:'IMPORTAÇÃO - CTNR',supplier:'IMPORTADOR'}),
@@ -361,17 +361,17 @@ test('Control includes every BD operation while executive scope and integral AF 
   const x = run(b,c), filtered = run(b,c,{controlOperation:'COMERCIAL'});
   const omitControl = ({controlReport,correctionImpact,...main})=>main;
   assert.deepEqual(omitControl(x),omitControl(filtered));
-  assert.equal(x.summary.received,100); assert.equal(x.installments.length,1);
+  assert.equal(x.summary.received,2100); assert.equal(x.installments.length,6);
   assert.equal(x.controlReport.installments.length,6);
   assert.equal(x.controlReport.installments.filter(i=>i.includedInConfirmed).reduce((n,i)=>n+i.received,0),2100);
-  assert.equal(x.controlReport.installments.filter(i=>i.includedInRealized).reduce((n,i)=>n+i.received,0),100);
-  assert.equal(x.controlReport.processes.reduce((n,p)=>n+p.received,0),100);
+  assert.equal(x.controlReport.installments.filter(i=>i.includedInRealized).reduce((n,i)=>n+i.received,0),2100);
+  assert.equal(x.controlReport.processes.reduce((n,p)=>n+p.received,0),2100);
   assert.deepEqual(x.controlReport.operationOptions,['COMERCIAL','EXPORTAÇÃO - AEREO','EXPORTAÇÃO - CTNR','IMPORTAÇÃO - CTNR','TRANSFERÊNCIA ARMAZENAGEM']);
   assert(x.controlReport.supplierOptions.includes('CLIENTE MI'));
   assert.deepEqual(x.controlReport.installments.find(i=>i.reference==='ALIAS/1').operations,['IMPORTAÇÃO - CTNR']);
   assert.equal(filtered.controlReport.installments.length,1);
   assert.equal(filtered.controlReport.installments[0].reference,'MI/1');
-  assert.equal(filtered.controlReport.installments[0].includedInRealized,false);
+  assert.equal(filtered.controlReport.installments[0].includedInRealized,true);
   assert.equal(filtered.controlReport.meta.operation,'COMERCIAL');
   assert.equal(filtered.controlReport.receiptReport,undefined);
   assert.deepEqual(x.receiptReport,filtered.receiptReport);
@@ -402,16 +402,16 @@ test('integral Control ignores BD years, excluded situations and war, preserving
   assert.equal(x.controlReport.meta.receivedOutsidePeriod,400);
   assert.equal(x.controlReport.meta.excludedYearUnknownAmount,100);
   assert.equal(x.controlReport.meta.incompatibleStatusExcludedAmount,300);
-  assert.equal(x.summary.claimed,0);
+  assert.equal(x.summary.claimed,1000,'Default global scope includes the eligible commercial claim from the selected RNC year');
 });
 
-test('compound operations can be confirmed in Control without being attributed to the executive comparison', () => {
+test('compound operations enter the default comparison once but are not allocated to a specific operation', () => {
   const x=run([bd({order:'EXP/1',nf:1}),bd({order:'MI/1',nf:2,operation:'COMERCIAL'})],[cr({ref:'EXP/1; MI/1',value:200})]);
-  assert.equal(x.installments[0].linkState,'review'); assert.equal(x.summary.received,0);
+  assert.equal(x.installments[0].linkState,'grouped'); assert.equal(x.summary.received,200);
   assert.equal(x.controlReport.installments[0].linkState,'grouped');
   assert.equal(x.controlReport.installments[0].includedInConfirmed,true);
-  assert.equal(x.controlReport.installments[0].includedInRealized,false);
-  assert.equal(x.controlReport.processes[0].received,0);
+  assert.equal(x.controlReport.installments[0].includedInRealized,true);
+  assert.equal(x.controlReport.processes[0].received,200);
   const filtered=run([bd({order:'EXP/1',nf:1}),bd({order:'MI/1',nf:2,operation:'COMERCIAL'})],[cr({ref:'EXP/1; MI/1',value:200})],{controlOperation:'COMERCIAL'});
   assert.equal(filtered.controlReport.installments.length,0,'Mixed operations are not automatically attributed to an individual operation');
   assert.deepEqual(x.controlReport.installments[0].operations,['SEM OPERAÇÃO IDENTIFICADA']);

@@ -150,11 +150,11 @@ test('public request rate and capacity are bounded without granting access',asyn
 });
 test('publish persists report; approved sessions receive paid Control cash including unmatched references',async()=>{
  const env=environment();const admin=await login(env);const visitor=await ask(env);await approve(env,admin.cookie,visitor.body.userId);
- const published=await call(env,'/api/report',admin.cookie,{method:'POST',body:sampleInput()});assert.equal(published.status,200);assert.equal(published.body.updatedBy,'Owner');assert.equal(published.body.model.summary.claimed,1000);assert.equal(published.body.model.summary.received,1249,'Paid Control cash includes the linked USD 250 and unmatched USD 999');
+ const published=await call(env,'/api/report',admin.cookie,{method:'POST',body:sampleInput()});assert.equal(published.status,200);assert.equal(published.body.updatedBy,'Owner');assert.equal(published.body.model.summary.claimed,0,'Default current year does not include the 2025 claim');assert.equal(published.body.model.summary.received,1249,'Paid Control cash includes the linked USD 250 and unmatched USD 999');
  const result=await call(env,'/api/report',visitor.cookie);assert.equal(result.body.revision,published.body.revision);assert.equal(result.body.bd,undefined);assert.equal(result.body.control,undefined);assert.equal(result.body.model.unmatchedControls,undefined);assert.equal(result.body.model.receiptReport.annual.find(a=>a.year===2026).received,1249);assert(result.body.model.receiptReport.rows.some(r=>r.reference==='UNRELATED-SECRET'));assert(!result.body.model.installments.some(r=>r.reference==='UNRELATED-SECRET'));assert.match(result.headers.get('cache-control'),/no-store/);assert.equal(result.headers.get('access-control-allow-origin'),null);
  const unmatched=result.body.model.receiptCohorts.rows.find(row=>row.reference==='UNRELATED-SECRET');
  assert.equal(unmatched.received,999);assert.equal(unmatched.validationState,'control-only');assert.equal(unmatched.supplier,'OTHER-SECRET');assert.deepEqual(unmatched.bdRows,[]);
- assert.equal(result.body.model.summary.receivedLinkedClaims,250);assert.equal(result.body.model.summary.receivedWithoutClaimDetail,999);
+ assert.equal(result.body.model.summary.receivedLinkedClaims,0,'The paid 2025 claim remains cash but is outside current-year financial claims');assert.equal(result.body.model.summary.receivedWithoutClaimDetail,999);
  assert.equal(result.body.model.summary.receivedCount,2,'The unpaid installment does not enter received cash');
  assert.equal((await call(env,'/api/report')).status,401);assert.equal((await call(env,'/api/report/meta')).status,401);const pending=await ask(env);assert.equal((await call(env,'/api/report',pending.cookie)).status,403);
 });
@@ -192,32 +192,52 @@ test('stale and racing publications cannot replace the current report',async()=>
  const env=environment();const admin=await login(env);const first=await call(env,'/api/report',admin.cookie,{method:'POST',body:sampleInput()});const next=sampleInput();next.bd[1][35]=2000;
  assert.equal((await call(env,'/api/report',admin.cookie,{method:'POST',body:next,headers:{'if-match':'wrong'}})).status,409);
  env.BUCKET.failNextConditional=true;assert.equal((await call(env,'/api/report',admin.cookie,{method:'POST',body:next,headers:{'if-match':first.body.revision}})).status,409);
- assert.equal((await call(env,'/api/report',admin.cookie)).body.model.summary.claimed,1000);
- assert.equal((await call(env,'/api/report',admin.cookie,{method:'POST',body:next,headers:{'if-match':first.body.revision}})).body.model.summary.claimed,2000);
+ assert.equal((await call(env,'/api/report?years=2025,2026',admin.cookie)).body.model.summary.claimed,1000);
+ assert.equal((await call(env,'/api/report',admin.cookie,{method:'POST',body:next,headers:{'if-match':first.body.revision}})).status,200);
+ assert.equal((await call(env,'/api/report?years=2025,2026',admin.cookie)).body.model.summary.claimed,2000);
 });
 test('server-side filters remain constrained and non-API routing is external',async()=>{
  const env=environment();const admin=await login(env);await call(env,'/api/report',admin.cookie,{method:'POST',body:sampleInput()});
- assert.equal((await call(env,'/api/report?years=2025',admin.cookie)).body.model.summary.received,0);assert.equal((await call(env,'/api/report?years=2025,2026',admin.cookie)).body.model.summary.received,1249);assert.equal((await call(env,'/api/report?years=2024',admin.cookie)).status,400);assert.equal((await call(env,'/api/report?asOf=2026-02-31',admin.cookie)).status,400);
+ assert.equal((await call(env,'/api/report?years=2025',admin.cookie)).body.model.summary.received,0);assert.equal((await call(env,'/api/report?years=2025,2026',admin.cookie)).body.model.summary.received,1249);assert.equal((await call(env,'/api/report?years=2024',admin.cookie)).status,200);assert.equal((await call(env,'/api/report?asOf=2026-02-31',admin.cookie)).status,400);
+ for(const years of ['1899','2101','2026.5','','word','2026,'])assert.equal((await call(env,'/api/report?years='+years,admin.cookie)).status,400);
  assert.equal(await handler(new Request(origin+'/index.html'),env),null);
 });
 
+test('all-years requests are isolated from the current-year default and preserve old cash and claim origins',async()=>{
+ const env=environment(),admin=await login(env),input=sampleInput();
+ const old=[...input.bd[1]];Object.assign(old,{0:'OLD-CLAIM',1:'2018-01-01',22:'OLD/1',24:8765,35:300});input.bd.push(old);
+ const payment=[...input.control[1]];Object.assign(payment,{1:2017,7:'OLD/1',17:'2019-03-01',19:70});input.control.push(payment);
+ const unknown=[...input.control[1]];Object.assign(unknown,{1:2016,7:'UNKNOWN/1',19:30});input.control.push(unknown);
+ await call(env,'/api/report',admin.cookie,{method:'POST',body:input});
+ const base=(await call(env,'/api/report',admin.cookie)).body.model;
+ assert.deepEqual(base.meta.years,[Number(engine.today().slice(0,4))]);assert.equal(base.meta.allYears,false);
+ const all=(await call(env,'/api/report?allYears=1',admin.cookie)).body.model;
+ assert.deepEqual(all.meta.years,[2016,2017,2018,2019,2025,2026]);assert.equal(all.meta.allYears,true);assert.equal(all.summary.claimed,1300);assert.equal(all.summary.received,1349);
+ assert.equal((await call(env,'/api/report?allYears=true&years=2026',admin.cookie)).body.model.summary.claimed,1300);
+ for(const query of ['','?allYears=0','?allYears=false'])assert.deepEqual((await call(env,'/api/report'+query,admin.cookie)).body.model.summary,base.summary);
+ for(const value of ['','yes','2','TRUE'])assert.equal((await call(env,'/api/report?allYears='+value,admin.cookie)).status,400);
+ assert.equal((await call(env,'/api/report?allYears=1')).status,401);
+});
 
-test('Control operation query expands only the Control projection and remains authorized',async()=>{
+
+test('all Claim operations are accepted and Control operation remains independent and authorized',async()=>{
  const env=environment(),admin=await login(env),input=sampleInput();
  const domestic=[...input.bd[1]];Object.assign(domestic,{0:'MI-1',22:'MI/1',24:9988,25:'COMERCIAL',28:'CLIENTE DOMESTICO',3:'MI'});input.bd.push(domestic);
  const paid=[...input.control[1]];Object.assign(paid,{7:'MI/1',10:'CLIENTE DOMESTICO',19:700});input.control.push(paid);
  const published=await call(env,'/api/report',admin.cookie,{method:'POST',body:input});assert.equal(published.status,200);
- assert.equal(published.body.model.summary.received,1249,'Paid Control cash includes the linked USD 250 and unmatched USD 999');
+ assert.equal(published.body.model.summary.received,1949,'All-operation cash includes USD 250, commercial USD 700 and unmatched USD 999');
  assert(published.body.model.controlReport.installments.some(i=>i.reference==='MI/1'));
  assert(published.body.model.controlReport.operationOptions.includes('COMERCIAL'));
  assert(published.body.model.controlReport.supplierOptions.includes('CLIENTE DOMESTICO'));
  const selected=await call(env,'/api/report?controlOperation=COMERCIAL',admin.cookie);assert.equal(selected.status,200);
- assert.equal(selected.body.model.summary.received,1249,'Filtering only Control operations does not remove unmatched cash from the executive comparison');
+ assert.equal(selected.body.model.summary.received,1949,'The independent Control filter preserves all-operation executive cash');
  assert.deepEqual(selected.body.model.controlReport.installments.map(i=>i.reference),['MI/1']);
- assert.equal(selected.body.model.controlReport.installments[0].includedInRealized,false);
+ assert.equal(selected.body.model.controlReport.installments[0].includedInRealized,true);
  assert.equal(selected.body.model.controlReport.installments[0].includedInConfirmed,true);
  assert.deepEqual(selected.body.model.receiptReport,published.body.model.receiptReport);
- assert.equal((await call(env,'/api/report?operation=COMERCIAL',admin.cookie)).status,400);
+ const commercial=await call(env,'/api/report?operation=COMERCIAL',admin.cookie);assert.equal(commercial.status,200);assert.equal(commercial.body.model.summary.received,700);
+ assert.equal((await call(env,'/api/report?operation=NOT_IN_BD',admin.cookie)).status,400);
+ assert.equal((await call(env,'/api/report?operation='+encodeURIComponent('COMERCIAL\n'),admin.cookie)).status,400);
  assert.equal((await call(env,'/api/report?controlOperation='+encodeURIComponent('x'.repeat(201)),admin.cookie)).status,400);
  assert.equal((await call(env,'/api/report?controlOperation='+encodeURIComponent('COMERCIAL\n'),admin.cookie)).status,400);
  assert.equal((await call(env,'/api/report?controlOperation=COMERCIAL')).status,401);
