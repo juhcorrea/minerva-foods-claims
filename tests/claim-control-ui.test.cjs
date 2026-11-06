@@ -2,9 +2,9 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../dist/claim-control.js'),'utf8');
 function harness(){
- const hosts={},filters=new Map(),sorts=new Map(),sortMeta=new Map();let modal;
+ const hosts={},filters=new Map(),sorts=new Map(),sortMeta=new Map(),bodyClasses=new Set();let modal;
  for(const id of ['claimRecords','procurementContent','ccProcurementDetail'])hosts[id]={innerHTML:'',classList:{add(){}},listeners:{},addEventListener(k,fn){this.listeners[k]=fn;},querySelector(){return {textContent:''};}};
- const document={getElementById:id=>hosts[id],querySelector:()=>null,body:{append(el){modal=el;}},createElement:()=>({open:false,innerHTML:'',dataset:{},classList:{add(){},remove(){}},listeners:{},setAttribute(){},addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);},showModal(){this.open=true;},close(){this.open=false;}})};
+ const document={getElementById:id=>hosts[id],querySelector:()=>null,body:{append(el){modal=el;},classList:{toggle(name,value){value?bodyClasses.add(name):bodyClasses.delete(name);}}},createElement:()=>({open:false,innerHTML:'',dataset:{},classList:{add(){},remove(){}},listeners:{},setAttribute(){},addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);},showModal(){this.open=true;},close(){this.open=false;}})};
  const F={prepare(id,headers,rows){const result=filters.has(id)?rows.filter(filters.get(id)):[...rows];return sorts.has(id)?result.sort(sorts.get(id)):result;},heading:(id,col,label)=>label,ariaSort:()=> 'none',describe:id=>filters.has(id)?'Filtro de teste':'',has:id=>filters.has(id),hasSort:id=>sorts.has(id),getSort:id=>sortMeta.get(id),clearDetails(){filters.delete('detail-cc-procurement');sorts.delete('detail-cc-procurement');sortMeta.delete('detail-cc-procurement');}};
  class FormDataFake{constructor(form){this.values=form.values;}get(key){return Array.isArray(this.values[key])?this.values[key][0]:this.values[key]??'';}getAll(key){return this.values[key]===undefined?[]:Array.isArray(this.values[key])?this.values[key]:[this.values[key]];}}
  class FixedDate extends Date{constructor(...args){super(...(args.length?args:['2026-11-06T01:00:00Z']));}static now(){return Date.parse('2026-11-06T01:00:00Z');}}
@@ -13,11 +13,16 @@ function harness(){
  const click=(host,dataset)=>hosts[host].listeners.click(event(dataset));
  const submit=(scope,values)=>hosts[scope==='claims'?'claimRecords':'procurementContent'].listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{ccForm:scope},values})}});
  const sheets=(scope,supplier)=>{const output=[];window.MinervaClaimControl.worksheets({},(wb,title,headers,rows)=>output.push({title,headers,rows}),scope,supplier);return JSON.parse(JSON.stringify(output));};
- return {api:window.MinervaClaimControl,hosts,filters,sorts,sortMeta,click,submit,sheets,get modal(){return modal;},get detail(){return hosts.ccProcurementDetail;},toggle(key){click('procurementContent',{ccReason:key});}};
+ return {api:window.MinervaClaimControl,hosts,filters,sorts,sortMeta,bodyClasses,click,submit,sheets,get modal(){return modal;},get detail(){return hosts.ccProcurementDetail;},toggle(key){click('procurementContent',{ccReason:key});}};
 }
 const record=(row,supplier,reason,claimed,extra={})=>({row,sgr:'SGR-'+row,order:'ORDEM-'+row,supplier,reason,claimed,category:'negotiation',included:true,country:'País exemplo',pending:'Aguardando retorno',invoiceDate:'2026-01-01',openingDate:'2026-11-04',nf:'NF-'+row,container:'NF-'+row,originalContainer:'',...extra});
 const model=(rows,claims=[])=>({executiveReport:{controlClaims:claims},procurementReport:{rows,negotiationTotal:100,legalTotal:20,grandTotal:120,meta:{}}});
 const sheet=(sheets,title)=>sheets.find(s=>s.title===title);
+
+test('expanding the FUP area keeps table DOM and filters and persists across renders',()=>{
+ const h=harness(),m=model([record(2,'Fornecedor exemplo','Motivo exemplo',100)]);h.api.render(m);const before=h.detail.innerHTML,label={textContent:'Expandir área'},attributes={};const button={dataset:{ccToggleWidth:''},setAttribute(name,value){attributes[name]=value;},querySelector(){return label;}};const toggle=()=>h.hosts.procurementContent.listeners.click({target:{closest:()=>button}});
+ h.filters.set('detail-cc-procurement',()=>true);h.sortMeta.set('detail-cc-procurement',{column:6,direction:'desc'});toggle();assert(h.bodyClasses.has('cc-fup-wide'));assert.equal(attributes['aria-pressed'],'true');assert.equal(label.textContent,'Restaurar largura');assert.equal(h.detail.innerHTML,before);assert(h.filters.has('detail-cc-procurement'));assert.equal(h.sortMeta.get('detail-cc-procurement').direction,'desc');h.api.render(m);assert(h.detail.innerHTML.includes('data-cc-toggle-width aria-pressed="true"'));const expanded=h.detail.innerHTML;toggle();assert(!h.bodyClasses.has('cc-fup-wide'));assert.equal(attributes['aria-pressed'],'false');assert.equal(label.textContent,'Expandir área');assert.equal(h.detail.innerHTML,expanded);
+});
 
 test('Claim control defaults to descending USD, preserves manual sorting, and paginates fifty rows',()=>{
  const h=harness(),rows=Array.from({length:53},(_,i)=>record(i+2,'Fornecedor exemplo','Motivo exemplo',i===52?null:i,{financialEligible:true,status:'EM ANÁLISE'}));h.api.render(model([],rows));

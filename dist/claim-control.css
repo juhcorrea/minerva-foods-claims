@@ -262,3 +262,13 @@ html[data-theme=light] .cc-procurement-root .cc-inline-table tbody tr td:nth-chi
 .cc-procurement-root .cc-inline-table th{white-space:nowrap}
 .cc-procurement-root .cc-inline-table .cc-status-line{display:block;width:100%;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-align:center}
 }
+
+/* Explicit FUP width control; keep filters, selected supplier and table widths. */
+.cc-procurement-root .cc-area-toggle{display:inline-flex;align-items:center;justify-content:center;gap:6px;margin:6px 0 0 9px;padding:6px 8px;min-height:29px;border:1px solid var(--cc-line);border-radius:5px;background:var(--cc-surface);color:var(--cc-ink);font-family:inherit;font-size:calc(10px * var(--minerva-text-scale,1));font-weight:600;line-height:1.4;white-space:nowrap;cursor:pointer;vertical-align:middle}
+.cc-procurement-root .cc-area-toggle svg{display:block;width:16px;height:16px;flex:0 0 16px}
+.cc-procurement-root .cc-area-toggle:hover{border-color:var(--cc-blue)}
+.cc-procurement-root .cc-area-toggle[aria-pressed=true]{border-color:var(--cc-blue);box-shadow:inset 0 0 0 1px var(--cc-blue)}
+@media screen{body.cc-fup-wide:has(#view-procurement:not([hidden])) main{max-width:none!important}body.cc-fup-wide #view-procurement .cc-procurement-root{max-width:none!important;width:100%}}
+@container cc-fup (min-width:1000px){body.cc-fup-wide .cc-master-detail{grid-template-columns:320px minmax(0,1fr)}}
+@media(max-width:600px){.cc-procurement-root .cc-area-toggle{margin-left:0;margin-right:5px}}
+@media print{.cc-area-toggle{display:none!important}}
