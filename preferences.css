@@ -14,6 +14,9 @@ html[data-text-size="130"]{--minerva-text-scale:1.3}
 .profile-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:17px}.profile-panel-heading h2{font-size:16px;margin:0}.profile-panel-heading .icon-button{width:32px;height:32px;font-size:22px}.profile-panel-name{display:block;font-size:18px;line-height:1.5;overflow-wrap:anywhere}.profile-panel-contact{display:block;font-size:11px;color:var(--muted);overflow-wrap:anywhere;margin:5px 0}.profile-panel-role{display:inline-block;background:var(--pale);color:var(--blue);border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;margin:11px 0}.profile-panel p{font-size:11px;line-height:1.85;color:var(--muted);margin:4px 0 17px}.profile-panel .button{width:100%;font-size:11px}
 .profile-panel{width:min(420px,calc(100vw - 30px));max-height:min(740px,calc(100dvh - 24px));overscroll-behavior:contain}
 .profile-controls{margin:0 0 14px;padding-top:12px;border-top:1px solid var(--line)}
+.profile-resources{padding:10px 0 14px;border-top:1px solid var(--line)}
+.profile-resources[hidden]{display:none!important}
+.profile-resources .calculation-rules-link{margin:0;padding:8px 0;color:var(--ink);font-size:11px;font-weight:600;line-height:1.5;text-align:left}
 .profile-controls .team-toolbar{display:block;margin:0;padding:0;border:0;border-radius:0;background:transparent;color:var(--ink)}
 .profile-controls .team-account{display:none}
 .profile-controls .team-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
