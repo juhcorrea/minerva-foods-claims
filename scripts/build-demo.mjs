@@ -17,10 +17,15 @@ const files = [
   'executive-shell.css', 'executive.css', 'executive.js',
   'claim-control.css', 'claim-control.js', 'calculation-rules.js',
   'presentation-mode.css', 'presentation-mode.js',
+  'section-collapse.css', 'section-collapse.js', 'multi-select.css', 'multi-select.js',
+  'saved-views.css', 'saved-views.js',
+  'receipts-executive.css', 'receipts-executive.js',
   'meetings.js', 'engine.js', 'app.js', 'vendor/xlsx.full.min.js',
   'vendor/pptxgen.bundle.js', 'vendor/pptxgen.LICENSE.txt',
   'assets/minerva-logo.png', 'assets/minerva-monogram.svg', 'assets/minerva-cover.png',
-  'assets/montserrat-latin.woff2'
+  'assets/montserrat-latin.woff2',
+  'assets/flags/br.svg', 'assets/flags/py.svg', 'assets/flags/uy.svg',
+  'assets/flags/co.svg', 'assets/flags/ar.svg', 'assets/flags/LICENSE.txt', 'assets/flags/SOURCE.txt'
 ];
 
 fs.rmSync(output, {recursive: true, force: true});
@@ -81,8 +86,9 @@ fs.writeFileSync(path.join(output, 'demo-start.js'), `
   reset.textContent = 'Reiniciar demonstração';
   reset.addEventListener('click', () => originalButton.click());
   document.querySelector('.topbar-actions').append(reset);
-  document.querySelector('.sidebar-publication > span').textContent = 'Ambiente demonstrativo';
-  document.getElementById('sidebarUpdatedAt').textContent = 'Dados fictícios';
+  document.querySelector('.sidebar-status-heading > span').textContent = 'Ambiente demonstrativo';
+  for (const id of ['sidebarUpdatedAt', 'sidebarControlUpdatedAt']) document.getElementById(id).textContent = 'Dados fictícios';
+  document.getElementById('sidebarLoadLabel').textContent = 'Demonstração';
   document.getElementById('sidebarUpdatedBy').textContent = 'Exemplos ilustrativos';
   originalButton.click();
 })();
@@ -91,10 +97,10 @@ fs.writeFileSync(path.join(output, 'demo-start.js'), `
 // Verify the project-subpath contract without requiring a local browser server.
 // Every linked HTML/CSS asset and every dynamic image must resolve in the bundle.
 const index = fs.readFileSync(path.join(output, 'index.html'), 'utf8');
-for (const id of ['demoButton', 'sidebarUpdatedAt', 'sidebarUpdatedBy']) {
+for (const id of ['demoButton', 'sidebarUpdatedAt', 'sidebarControlUpdatedAt', 'sidebarLoadLabel', 'sidebarUpdatedBy']) {
   if (!index.includes(`id="${id}"`)) throw new Error('Missing demo startup element: ' + id);
 }
-for (const className of ['topbar-actions', 'sidebar-publication']) {
+for (const className of ['topbar-actions', 'sidebar-status-heading']) {
   if (!new RegExp(`class="[^"]*\\b${className}\\b`).test(index)) throw new Error('Missing demo startup container: ' + className);
 }
 for (const match of index.matchAll(/(?:src|href)="([^"#]+)"/g)) {

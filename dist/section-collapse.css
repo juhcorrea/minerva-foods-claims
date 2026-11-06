@@ -1,0 +1,42 @@
+.section-collapse-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.sc-inline-control{margin:0 0 8px;padding:5px 0}
+.sc-heading-control{margin-left:auto;flex-shrink:0;align-self:center}
+.section-collapse-label{font-size:calc(10px * var(--minerva-text-scale,1));font-weight:500;color:var(--muted);line-height:1.5}
+.section-collapse-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--line);border-radius:5px;background:var(--paper);color:var(--ink);font-family:inherit;font-size:calc(10px * var(--minerva-text-scale,1));font-weight:500;line-height:1.4;padding:6px 9px;min-height:29px;cursor:pointer;white-space:nowrap}
+.section-collapse-button:after{content:'−';font-size:calc(13px * var(--minerva-text-scale,1));line-height:1;color:var(--muted)}
+.section-collapse-button[aria-expanded=false]:after{content:'+'}
+.section-collapse-button:hover{background:var(--pale)}
+.section-collapse-button:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.cc-panel>.sc-inline-control,.cc-compact-filters>.sc-inline-control{padding:9px 14px 0;margin-bottom:0}
+.panel-heading>.sc-inline-control{margin:0;flex-basis:100%;padding:0;justify-content:flex-end}
+.panel-heading>.sc-inline-control .section-collapse-label{margin-right:auto}
+.cc-table-heading>.sc-heading-control{margin-left:0}
+.dialog-heading>.sc-heading-control{margin-left:auto}
+.panel-heading:has(>.sc-heading-control){flex-wrap:wrap;align-items:flex-start}
+.panel-heading:has(>.sc-heading-control)>div:first-child:not(.section-collapse-bar){flex:1 1 280px;min-width:0;order:1}
+.panel-heading>.sc-base-control{order:2;flex:0 0 auto;margin-left:auto}
+.panel-heading>.sc-filter-control{order:3;flex:1 1 100%}
+.panel-heading>.correction-tools{order:4;flex:1 1 100%;width:100%;min-width:0}
+.panel-heading:has(>.sc-heading-control) :is(h2,h3){word-break:normal;overflow-wrap:normal}
+.cc-table-heading:has(>.sc-heading-control){flex-wrap:wrap;align-items:center}
+.cc-table-heading:has(>.sc-heading-control)>div:first-child{flex:1 1 260px;min-width:0}
+.dialog-heading:has(>.sc-heading-control){flex-wrap:wrap}
+.dialog-heading:has(>.sc-heading-control)>div:first-child{flex:1 1 230px;min-width:0}
+/* Keep the supplier title independent of its responsive filter row. */
+#view-suppliers .panel-heading.sc-supplier-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:12px 16px;container:sc-supplier / inline-size}
+#view-suppliers .sc-supplier-heading>div:first-child{grid-column:1;grid-row:1;min-width:0}
+#view-suppliers .sc-supplier-heading>.sc-base-control{grid-column:2;grid-row:1;justify-self:end;align-self:start;margin:0}
+#view-suppliers .sc-supplier-heading>.sc-filter-control{grid-column:1/-1;grid-row:2;width:100%;margin:0;padding:10px 0 0;border-top:1px solid var(--line)}
+#view-suppliers .sc-supplier-controls{grid-column:1/-1;grid-row:3;display:grid;grid-template-columns:minmax(200px,1fr) minmax(300px,1.5fr) auto;gap:12px;align-items:end;min-width:0;width:100%}
+#view-suppliers .sc-supplier-controls>.search-field{width:100%;min-width:0;max-width:none!important;align-self:end}
+#view-suppliers .sc-supplier-controls>.search-field input{width:100%;min-width:0}
+#view-suppliers .sc-supplier-controls>.table-tools-extra{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;min-width:0;width:100%}
+#view-suppliers .sc-supplier-controls .table-tools-extra label{min-width:0}
+#view-suppliers .sc-supplier-controls .table-tools-extra select{width:100%;min-width:0}
+#view-suppliers .sc-supplier-controls>.section-filter-apply{margin:0;min-height:36px;align-self:end}
+@container sc-supplier (max-width:740px){#view-suppliers .sc-supplier-controls{grid-template-columns:minmax(0,1fr) auto}#view-suppliers .sc-supplier-controls>.search-field{grid-column:1/-1}#view-suppliers .sc-supplier-controls>.table-tools-extra{grid-column:1}#view-suppliers .sc-supplier-controls>.section-filter-apply{grid-column:2}}
+@container sc-supplier (max-width:480px){#view-suppliers .sc-supplier-controls{grid-template-columns:minmax(0,1fr)}#view-suppliers .sc-supplier-controls>.table-tools-extra,#view-suppliers .sc-supplier-controls>.section-filter-apply{grid-column:1}#view-suppliers .sc-supplier-controls>.section-filter-apply{justify-self:stretch;justify-content:center}}
+@media screen{.section-collapse-target[data-sc-collapsed=true]{display:none!important}}
+body.dashboard-presentation .sc-filter-control,body.dashboard-presentation .sc-global-control,body.dashboard-presentation .section-collapse-target[data-sc-kind=filters]{display:none!important}
+@media(max-width:760px){.section-collapse-bar{gap:8px}.sc-heading-control{margin-left:0}.section-collapse-button{font-size:calc(9px * var(--minerva-text-scale,1));padding:6px 8px}.panel-heading>.sc-heading-control{flex-basis:auto}.section-collapse-label{font-size:calc(9px * var(--minerva-text-scale,1))}}
+@media print{.section-collapse-bar{display:none!important}.section-collapse-target[data-sc-kind=filters]{display:none!important}}

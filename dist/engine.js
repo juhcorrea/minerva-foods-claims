@@ -20,6 +20,15 @@
   const text = v => v == null ? '' : String(v).trim();
   const norm = v => text(v).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ');
   const normalizeStatus = v => norm(v).replace(/\s*[-–—]\s*/g, ' - ');
+  function filterValues(options, plural, singular, normalize) {
+    const input=Object.prototype.hasOwnProperty.call(options,plural)?options[plural]:options[singular],values=Array.isArray(input)?input:[input],seen=new Set();
+    return values.map(text).filter(value=>{const key=normalize(value);if(!key||seen.has(key))return false;seen.add(key);return true;});
+  }
+  function normalizeFilterOptions(options) {
+    const operations=filterValues(options,'operations','operation',normalizeStatus),suppliers=filterValues(options,'suppliers','supplier',norm),controlOperations=filterValues(options,'controlOperations','controlOperation',normalizeStatus);
+    return {...options,operations,suppliers,controlOperations,operation:operations.join(' · '),supplier:suppliers.join(' · '),controlOperation:controlOperations.join(' · ')};
+  }
+  const globalFilterMeta=options=>({supplier:options.suppliers.join(' · '),suppliers:[...options.suppliers],operation:options.operations.join(' · '),operations:[...options.operations]});
   const headerKey = v => norm(v).replace(/[^A-Z0-9]/g, '');
   const unique = values => [...new Set(values)];
   const money = n => Math.round((n + Number.EPSILON * Math.sign(n)) * 100) / 100;
@@ -155,8 +164,8 @@
     const yearSet = new Set(years);
     const asOf = parseDate(options.asOf || today());
     if (!asOf) throw new Error('Informe uma data de análise válida.');
-    const supplierFilter = norm(options.supplier);
-    const operationFilter = normalizeStatus(options.operation);
+    const supplierFilter = new Set(options.suppliers.map(norm));
+    const operationFilter = new Set(options.operations.map(normalizeStatus));
     const lossFormula = options.lossFormula === 'pending' ? 'pending' : options.lossFormula === 'add-negotiating' ? 'add-negotiating' : 'subtract-negotiating';
     const issues = [], corrections = [], installments = [], unmatchedControls = [];
     const all = [];
@@ -175,7 +184,7 @@
       const supplier = text(r[28]) || '(SEM NEGOCIAÇÃO)';
       const keys = unique([...tokenizeRefs(r[22]), ...tokenizeRefs(r[24])]);
       const claimedValue = number(r[35]);
-      const otherFilters = (allOperations || OPS.has(opKey)) && !EXCLUDED_STATUSES.has(statusKey) && (!operationFilter || opKey === operationFilter) && (!supplierFilter || norm(supplier) === supplierFilter);
+      const otherFilters = (allOperations || OPS.has(opKey)) && !EXCLUDED_STATUSES.has(statusKey) && (!operationFilter.size || operationFilter.has(opKey)) && (!supplierFilter.size || supplierFilter.has(norm(supplier)));
       const periodEligible = !!rncDate && yearSet.has(year) && rncDate <= asOf;
       const war = norm(r[10]) === 'INTERFERENCIA EXTERNA';
       const c = {
@@ -495,9 +504,11 @@
     return years.size?[...years].sort((a,b)=>a-b):[Number(today().slice(0,4))];
   }
   function analyze(bdRows, controlRows, options = {}) {
+    options=normalizeFilterOptions(options);
     if(options.allYears===true)options={...options,years:allSourceYears(bdRows,controlRows)};
     const correctionScenario = options.correctionScenario === 'original' ? 'original' : 'corrected', useOriginal = correctionScenario === 'original';
     const model = analyzeScope(bdRows, controlRows, options);
+    Object.assign(model.meta,globalFilterMeta(options),{controlOperation:options.controlOperation,controlOperations:[...options.controlOperations],filterBasis:'OU entre seleções de um filtro; E entre fornecedor e operação. Recebimentos e saldos com operações agrupadas exigem que todas as operações identificadas pertençam à seleção global, sem ratear ou repetir linhas.'});
     model.meta.allYears=options.allYears===true;model.meta.yearScope=model.meta.allYears?'all':'selected';
     model.meta.correctionScenario = correctionScenario;
     model.meta.correctionScenarioNote = useOriginal ? 'Visão original: fornecedor K, ano de entrada B, mercado D e valor integral U do Controle. Reclamado e negociação continuam na BD; datas R e valores recebidos T não mudam.' : 'Visão corrigida: fornecedor e classificação seguem vínculos seguros com a BD; U segue AJ somente para um claim único. Reclamado e negociação continuam na BD; datas R e valores recebidos T não mudam.';
@@ -517,8 +528,8 @@
       }
     }
     for (const installment of model.installments) installment.operations = unique(installment.operations.map(label => labels.get(normalizeStatus(label)) || label));
-    const operation = labels.get(normalizeStatus(options.controlOperation)) || text(options.controlOperation);
-    const operationFilter = normalizeStatus(operation), supplierFilter = norm(options.supplier);
+    const operationsSelected=options.controlOperations.map(value=>labels.get(normalizeStatus(value))||value),operation=operationsSelected.join(' · ');
+    const operationFilter = new Set(operationsSelected.map(normalizeStatus)), supplierFilter = new Set(options.suppliers.map(norm));
     const yearSet = new Set(model.meta.years), asOf = model.meta.asOf;
     const executiveRows = new Set(model.installments.filter(i => i.includedInRealized).map(i => i.row));
     const all = [], issues = [], processMap = new Map(), impactRows = [], activeAttribution = new Map();
@@ -550,7 +561,7 @@
       const status = payment.confirmedPaid ? 'Pago' : payment.markedPaid ? 'Conferir pagamento' : isLoss ? 'Prejuízo Minerva' : !noDueDate && !dueDate ? 'Conferir previsão' : dueDate && dueDate < asOf ? 'Vencido' : 'Dentro do Prazo';
       const inPeriod = payment.confirmedPaid && yearSet.has(payment.compensationYear);
       const inst = {row:n+1, reference:text(row[7]), supplier, originalSupplier, analysts:unique(matched.map(c => c.analyst)), confession:text(row[9]), type:text(row[11]) || 'Não informado', status, originalStatus:text(row[12]), dueDate, compDate:payment.compDate, compensationYear:payment.compensationYear, compensationMonth:payment.compensationMonth, receiptAnalyst:payment.receiptAnalyst, expected, received:payment.received, inPeriod, bdRows:matched.map(c => c.row), rejectedBdRows:rejected.map(c=>c.row), contextCollision:rejected.length>0, year:activeYear, market:activeMarket, originalYear:row[1] ?? null, originalMarket:text(row[3]), noDueDate, expectedMissing:expected == null && ['Vencido','Dentro do Prazo'].includes(status), linkState:!matched.length ? 'unmatched' : safe ? matched.length > 1 ? 'grouped' : 'matched' : 'review', includedInConfirmed:inPeriod, includedInRealized:inPeriod && executiveRows.has(n+1), grouped:matched.length > 1, claimStatus:statuses.length === 1 ? matched[0].status : matched.length ? 'Múltiplas situações' : 'Sem vínculo com a BD', operations, isControlRecord:true};
-      const scoped = (!operationFilter || operations.some(label => normalizeStatus(label) === operationFilter)) && (!supplierFilter || norm(supplier) === supplierFilter || (!useOriginal && norm(originalSupplier) === supplierFilter));
+      const scoped = (!operationFilter.size || operations.some(label => operationFilter.has(normalizeStatus(label)))) && (!supplierFilter.size || supplierFilter.has(norm(supplier)) || (!useOriginal && supplierFilter.has(norm(originalSupplier))));
       if (!scoped) continue;
       if(rejected.length)issues.push(contextCollisionIssue(row,n+1,rejected));
       // Both correction views use exactly the same ledger rows and amounts.
@@ -639,8 +650,9 @@
     for (const receipt of model.receiptReport.rows) { const active=activeAttribution.get(receipt.row); if(active)Object.assign(receipt,{supplier:active.supplier,yearEntry:active.year,market:active.market,originalYear:active.originalYear,originalMarket:active.originalMarket}); }
     model.receiptReport.meta.correctionScenario = correctionScenario;
     model.controlReport = {installments, allInstallments, processes, issues, meta, operationOptions:[...labels.values()].sort((a,b)=>a.localeCompare(b,'pt-BR')), supplierOptions:[...supplierLabels.values()].sort((a,b)=>a.localeCompare(b,'pt-BR'))};
+    Object.assign(meta,{operations:[...operationsSelected],suppliers:[...options.suppliers],comparativeOperations:[...options.operations],filterBasis:'OU entre seleções de fornecedor ou de operação do Controle; E entre os filtros. O filtro de operações do Controle é independente do filtro global. A identificação das operações e a validação dos vínculos permanecem as mesmas.'});
     model.operationOptions=[...labels.values()].filter(label=>normalizeStatus(label)!==normalizeStatus(unknownOperation)).sort((a,b)=>a.localeCompare(b,'pt-BR'));
-    model.meta.allOperationsDefault=true;model.meta.operationScope=text(options.operation)?'selected':'all';
+    model.meta.allOperationsDefault=true;model.meta.operationScope=options.operations.length?'selected':'all';
     model.correctionImpact = correctionImpact(impactRows, meta);
     model.claimValueAudit = claimValueAudit(model, bdRows, controlRows);
     appendClaimValueCorrections(model, bdRows);
@@ -783,7 +795,7 @@
   // Cash follows the compensation date, even when the claim originated in a
   // different year. Claim eligibility still governs claimed/negotiating amounts.
   function applyReceiptCohorts(model,controlRows,index,options){
-    const years=new Set(model.meta.years),supplierFilter=norm(options.supplier),operationFilter=normalizeStatus(options.operation),useOriginal=model.meta.correctionScenario==='original';
+    const years=new Set(model.meta.years),supplierFilter=new Set(options.suppliers.map(norm)),operationFilter=new Set(options.operations.map(normalizeStatus)),useOriginal=model.meta.correctionScenario==='original';
     const rows=[],excluded=[],suppliers=new Map(),annual=new Map(),monthly=new Map(),canonicalSuppliers=new Map(model.suppliers.map(supplier=>[norm(supplier.name),supplier.name]));
     const meta={years:[...years],supplier:text(options.supplier),operation:text(options.operation),scope:'Recebimentos do Controle Claim no período de R. A BD valida a classificação; referência ausente ou incompleta não exclui o caixa. Sem filtro de operação, entram todas as operações e a operação não identificada. Com operação específica, somente a operação validada entra.',sameYearDefinition:'Ano da compensação R igual ao ano único de Data RNC validado na BD, ou ao Ano Entrada B quando não houver validação segura.',differentYearDefinition:'Ano da compensação R diferente do ano único de Data RNC validado na BD, ou do Ano Entrada B quando não houver validação segura.',unknownYearDefinition:'Não há ano de claim seguro na BD nem Ano Entrada B válido no Controle; pagamento mantido em Ano a conferir.',receivedBasis:'M = Pago; R = Data compensação válida; T = Valor Recebido USD positivo. Cada linha do Controle é contada uma vez, inclusive referências agregadas.',unresolvedCount:0,unresolvedAmount:0,outsideOperationCount:0,outsideOperationAmount:0,excludedUnknownOperationCount:0,excludedUnknownOperationAmount:0,receivedWithoutClaimDetailCount:0,receivedWithoutClaimDetail:0};
     const accum=(map,key,base,row)=>{
@@ -800,11 +812,11 @@
       const operations=unique(matched.map(claim=>normalizeStatus(claim.operation))),supplierKeys=unique(matched.map(claim=>norm(claim.supplier)));
       const supplierResolved=complete&&supplierKeys.length===1&&supplierKeys[0]&&supplierKeys[0]!=='(SEM NEGOCIACAO)';
       const knownOperation=complete&&operations.length>0&&operations.every(operation=>!!operation);
-      const eligibleOperation=knownOperation&&operations.every(operation=>!operationFilter||operation===operationFilter);
+      const eligibleOperation=knownOperation&&operations.every(operation=>!operationFilter.size||operationFilter.has(operation));
       const activeSupplier=!useOriginal&&supplierResolved ? matched[0].supplier : text(source[10])||'(SEM FORNECEDOR)',activeSupplierKey=norm(activeSupplier);
-      const supplier=canonicalSuppliers.get(activeSupplierKey)||activeSupplier;if(!canonicalSuppliers.has(activeSupplierKey))canonicalSuppliers.set(activeSupplierKey,supplier);if(supplierFilter&&norm(supplier)!==supplierFilter)continue;
+      const supplier=canonicalSuppliers.get(activeSupplierKey)||activeSupplier;if(!canonicalSuppliers.has(activeSupplierKey))canonicalSuppliers.set(activeSupplierKey,supplier);if(supplierFilter.size&&!supplierFilter.has(norm(supplier)))continue;
       if(knownOperation&&!eligibleOperation){meta.outsideOperationCount++;meta.outsideOperationAmount+=payment.received;excluded.push({row:n+1,reference:text(source[7]),received:payment.received,bdRows:matched.map(claim=>claim.row),reason:'Operação validada fora do filtro selecionado.'});continue;}
-      if(!knownOperation&&operationFilter){meta.excludedUnknownOperationCount++;meta.excludedUnknownOperationAmount+=payment.received;excluded.push({row:n+1,reference:text(source[7]),received:payment.received,bdRows:matched.map(claim=>claim.row),reason:'Operação não identificada; não é possível atribuir o pagamento à operação específica selecionada.'});continue;}
+      if(!knownOperation&&operationFilter.size){meta.excludedUnknownOperationCount++;meta.excludedUnknownOperationAmount+=payment.received;excluded.push({row:n+1,reference:text(source[7]),received:payment.received,bdRows:matched.map(claim=>claim.row),reason:'Operação não identificada; não é possível atribuir o pagamento ao conjunto de operações selecionadas.'});continue;}
       const bdClaimYears=unique(matched.map(claim=>claim.year)),entryYear=number(source[1]),originalClaimYear=Number.isInteger(entryYear)&&entryYear>=1900&&entryYear<=9999?entryYear:null;
       const yearResolved=complete&&bdClaimYears.length===1&&bdClaimYears[0]!=null;
       const claimYear=!useOriginal&&yearResolved?bdClaimYears[0]:originalClaimYear,claimYears=claimYear==null?[]:[claimYear];
@@ -852,6 +864,7 @@
     meta.claimYearColumns='receivedByClaimYear agrupa todo o caixa do período de R pelo ano de origem do claim: 2024, 2025, 2026; other reúne demais anos e ano a conferir. O ano segue o cenário ativo. O resíduo de arredondamento é reconciliado no maior grupo de origem que já contém recebimentos.';
     meta.comparableDefinition='receivedComparable inclui pagamentos cujo ano de compensação R e ano de origem do claim pertencem aos anos selecionados. Com 2025 e 2026 selecionados, claim 2025 pago em 2026 entra no total; claim 2024 permanece visível na coluna de origem 2024, fora desse total. received preserva todo o caixa do recorte. receivedSameYear continua como diagnóstico de igualdade entre os dois anos.';
     meta.comparableLossFormula='Reclamado − (Recebido comparável + Em negociação). Taxas e perda ficam nulas nos grupos sem denominador reclamado, como a série mensal de caixa.';
+    Object.assign(meta,globalFilterMeta(options),{filterBasis:'OU entre fornecedores ou operações selecionados; E entre filtros. Uma parcela com múltiplas operações só entra se o vínculo for completo e todas as operações pertencerem ao conjunto selecionado. Cada linha entra uma vez, sem rateio.'});
     const receiptCohorts={rows,suppliers:finish(suppliers.values()).sort((a,b)=>b.received-a.received||a.name.localeCompare(b.name,'pt-BR')),annual:finish(annual.values()).sort((a,b)=>a.year-b.year),monthly:finish(monthly.values()).sort((a,b)=>a.month.localeCompare(b.month)),excluded,meta};
     for(const key of ['unresolvedAmount','outsideOperationAmount','excludedUnknownOperationAmount','receivedWithoutClaimDetail'])meta[key]=money(meta[key]);
     model.receiptCohorts=receiptCohorts;
@@ -910,7 +923,7 @@
   // openInstallments and supplierOpenReport.installments contain each Control
   // row once, retaining O precision for traceable detail/export calculations.
   function applySupplierOpenBalances(model, controlRows, index, options) {
-    const supplierFilter=norm(options.supplier),operationFilter=normalizeStatus(options.operation),useOriginal=model.meta.correctionScenario==='original';
+    const supplierFilter=new Set(options.suppliers.map(norm)),operationFilter=new Set(options.operations.map(normalizeStatus)),useOriginal=model.meta.correctionScenario==='original';
     const supplierMap=new Map(model.suppliers.map(supplier=>[norm(supplier.name),supplier]));
     const installments=[],excluded=[];
     const meta={supplier:text(options.supplier),operation:text(options.operation),correctionScenario:model.meta.correctionScenario,
@@ -930,11 +943,11 @@
       const {matched,complete,rejected}=controlMatches(source,index);
       const operationKeys=unique(matched.map(claim=>normalizeStatus(claim.operation))),supplierKeys=unique(matched.map(claim=>norm(claim.supplier)));
       const knownOperation=complete&&operationKeys.length>0&&operationKeys.every(operation=>!!operation);
-      const eligibleOperation=knownOperation&&operationKeys.every(operation=>!operationFilter||operation===operationFilter);
+      const eligibleOperation=knownOperation&&operationKeys.every(operation=>!operationFilter.size||operationFilter.has(operation));
       const supplierResolved=complete&&supplierKeys.length===1&&supplierKeys[0]&&supplierKeys[0]!=='(SEM NEGOCIACAO)';
       const originalSupplier=text(source[10]),activeSupplier=!useOriginal&&supplierResolved?matched[0].supplier:originalSupplier||'(SEM FORNECEDOR)',supplierKey=norm(activeSupplier);
-      if(supplierFilter&&supplierKey!==supplierFilter)continue;
-      if((knownOperation&&!eligibleOperation)||(!knownOperation&&operationFilter)){
+      if(supplierFilter.size&&!supplierFilter.has(supplierKey))continue;
+      if((knownOperation&&!eligibleOperation)||(!knownOperation&&operationFilter.size)){
         excluded.push({row:n+1,reference:text(source[7]),supplier:activeSupplier,status,expected,bdRows:matched.map(claim=>claim.row),reason:knownOperation?'Operação validada fora do filtro global selecionado.':'Operação não identificada para o filtro global específico.'});continue;
       }
       if(!supplierMap.has(supplierKey)){
@@ -956,6 +969,7 @@
     model.suppliers.sort((a,b)=>b.claimed-a.claimed||a.name.localeCompare(b.name,'pt-BR'));
     let cumulative=0;for(const supplier of model.suppliers){supplier.share=ratio(supplier.claimed,model.summary.claimed)||0;cumulative+=supplier.share;supplier.pareto=cumulative;}
     Object.assign(meta,{openBalance:money(sum(installments,'expected')),overdueBalance:money(sum(installments.filter(row=>row.status==='Vencido'),'expected')),onTimeBalance:money(sum(installments.filter(row=>row.status==='Dentro do Prazo'),'expected')),noDueBalance:money(sum(installments.filter(row=>row.noDueDate),'expected')),openCount:installments.length,overdue:installments.filter(row=>row.status==='Vencido').length,onTime:installments.filter(row=>row.status==='Dentro do Prazo').length,missingExpectedAmounts:installments.filter(row=>row.expectedMissing).length,openBalanceIncomplete:installments.some(row=>row.expectedMissing),excludedCount:excluded.length});
+    Object.assign(meta,globalFilterMeta(options),{filterBasis:'OU entre fornecedores ou operações selecionados; E entre filtros. Operações agrupadas exigem vínculo completo e cobertura pelo conjunto selecionado, sem repetir ou ratear parcelas.'});
     model.supplierOpenReport={installments,excluded,meta};
     model.meta.supplierOpenBalanceBasis=meta.basis+' '+meta.supplierBasis+' '+meta.operationBasis+' '+meta.statusBasis;
   }
@@ -978,7 +992,7 @@
   // Operational pipeline and SLA events have explicit, separate denominators.
   function applyExecutiveReport(model, bdRows, controlRows, options) {
     const years=[...model.meta.years],yearSet=new Set(years),asOf=model.meta.asOf,agingDate=today();
-    const operationFilter=normalizeStatus(options.operation),supplierFilter=norm(options.supplier);
+    const operationFilter=new Set(options.operations.map(normalizeStatus)),supplierFilter=new Set(options.suppliers.map(norm));
     const negotiating=new Map(),pipeline=new Map(),reasons=new Map(),causes=new Map(),sectors=new Map(),monthly=new Map(),sla=new Map(),claimRows=new Map(),controlClaims=[];
     const financialRows=new Set(model.claims.map(claim=>claim.row));
     const optional={country:[19,'País'],cause:[49,'Causador'],armador:[31,'Cia Maritima'],analysis:[57,'SLA 25 Dias'],analysisDate:[9,'Data Fim Análise'],negotiation:[61,'Prazo Neg. Claims'],negotiationDate:[8,'Data ultima posição'],opening:[62,'Media Abertura Claim'],openingDate:[13,'Abertura claim'],pending:[7,'Pendência'],daysWithoutUpdate:[63,'Dias Sem Atualização']};
@@ -1022,7 +1036,7 @@
     for(let n=1;n<bdRows.length;n++){
       const source=bdRows[n];if(!source||!source.slice(0,36).some(value=>value!=null&&value!==''))continue;
       const operation=normalizeStatus(source[25]),supplier=text(source[28])||'(SEM NEGOCIAÇÃO)';
-      if((operationFilter&&operation!==operationFilter)||(supplierFilter&&norm(supplier)!==supplierFilter))continue;
+      if((operationFilter.size&&!operationFilter.has(operation))||(supplierFilter.size&&!supplierFilter.has(norm(supplier))))continue;
       const rncDate=parseDate(source[1]),statusKey=normalizeStatus(source[6]);
       const row={row:n+1,sgr:text(source[0]),...claimDimensions(bdRows[0],source),status:text(source[6]),statusKey,supplier,claimed:number(source[35]),rncDate,operation:text(source[25])};
       const periodEligible=rncDate&&rncDate<=asOf&&yearSet.has(Number(rncDate.slice(0,4))),war=norm(source[10])==='INTERFERENCIA EXTERNA';
@@ -1049,7 +1063,7 @@
     const openByCountry=[...pipeline.values()].map(({_ids,_negotiating,_inAnalysis,_awaitingCosts,...item})=>({...item,negotiating:_negotiating.size,inAnalysis:_inAnalysis.size,awaitingCosts:_awaitingCosts.size,total:_ids.size,recordCount:item.rows.length})).sort((a,b)=>b.total-a.total||a.country.localeCompare(b.country,'pt-BR'));
     const slaByMonth=[...sla.values()].map(({_analysis,_negotiation,_opening,...item})=>({...item,analysisRate:item.analysisCount?_analysis/item.analysisCount:null,negotiationDays:item.negotiationCount?_negotiation/item.negotiationCount:null,openingDays:item.openingCount?_opening/item.openingCount:null}));
     model.executiveReport={years,monthlyReceipts,negotiationByCountry,openByCountry,reasonRanking:finish(reasons),causeRanking:finish(causes),sectorReceipts:finish(sectors),slaByMonth,claimRows:[...claimRows.values()].sort((a,b)=>a.row-b.row),receiptRows,controlClaims,
-      meta:{asOf,correctionScenario:model.meta.correctionScenario,supplier:text(options.supplier),operation:text(options.operation),available,
+      meta:{asOf,correctionScenario:model.meta.correctionScenario,...globalFilterMeta(options),available,
         receiptBasis:'Caixa do recorte global: mesmos coortes existentes, M = Pago, R válida nos anos selecionados e T positivo. Cada linha do Controle entra uma vez. Setor é A do Controle; não é a operação Z da BD.',
         financialBasis:'Motivo, causador e negociação por país usam os claims financeiros já selecionados. Causador vem de AX da BD, separado do fornecedor em AC. Valores financeiros existentes não são recalculados por este relatório.',
         pipelineBasis:'BD: ano de Data RNC selecionado, Data RNC até a análise, operações e fornecedor do recorte global, sem INTERFERÊNCIA EXTERNA. Situações: EM ANÁLISE, AGUARDANDO CUSTOS e EM NEGOCIAÇÃO - PROCEDENTE. Sem listas manuais de exclusões de pendência do BI. Não representa o saldo de parcelas do Controle.',
@@ -1066,7 +1080,7 @@
   // claims. It is separate from the period-based financial indicators until the
   // user explicitly requests a different financial formula or scope.
   function applyProcurementReport(model, bdRows, options) {
-    const headers=bdRows[0],supplierFilter=norm(options.supplier),operationFilter=normalizeStatus(options.operation),agingDate=today();
+    const headers=bdRows[0],supplierFilter=new Set(options.suppliers.map(norm)),operationFilter=new Set(options.operations.map(normalizeStatus)),agingDate=today();
     const rows=[],groups=new Map(),amounts={negotiation:0,legal:0},ids={negotiation:new Set(),legal:new Set(),included:new Set(),excluded:new Set(),all:new Set()};
     const identity=row=>row.sgr?`SGR:${norm(row.sgr)}`:`ROW:${row.row}`;
     const available={pending:headerKey(headers?.[7])==='PENDENCIA',invoiceDate:headerKey(headers?.[46])==='DATANF',container:headerKey(headers?.[32])==='NOCONTAINER',openingDate:headerKey(headers?.[13])==='ABERTURACLAIM'};
@@ -1074,7 +1088,7 @@
     for(let n=1;n<bdRows.length;n++){
       const source=bdRows[n];if(!source||normalizeStatus(source[6])!==NEGOTIATING)continue;
       const supplier=text(source[28])||'(SEM NEGOCIAÇÃO)',operation=text(source[25]);
-      if((supplierFilter&&norm(supplier)!==supplierFilter)||(operationFilter&&normalizeStatus(operation)!==operationFilter))continue;
+      if((supplierFilter.size&&!supplierFilter.has(norm(supplier)))||(operationFilter.size&&!operationFilter.has(normalizeStatus(operation))))continue;
       const pending=available.pending?text(source[7]):'',excludedFup=norm(pending).includes('FUP SUPRIMENTOS'),category=norm(supplier).includes('JURIDICO')?'legal':'negotiation';
       const row={row:n+1,sgr:text(source[0]),order:text(source[22]),supplier,...claimDimensions(headers,source),...claimFollowUpFields(headers,source,agingDate),pending,claimed:number(source[35]),category,included:!excludedFup,exclusionReason:excludedFup?'Pendência H contém FUP SUPRIMENTOS; fora dos totais':'',operation,status:text(source[6]),statusKey:NEGOTIATING,analyst:text(source[56])||'Não informado',rncDate:parseDate(source[1])};
       const id=identity(row);ids.all.add(id);
@@ -1094,7 +1108,7 @@
     const counts={negotiation:ids.negotiation.size,legal:ids.legal.size,total:ids.included.size,excludedFup:ids.excluded.size,listed:ids.negotiation.size,records:rows.length,listedRecords:rows.length,totalRecords:includedRecords};
     const bySupplier=[...groups.values()].map(({_ids,_excluded,...group})=>({...group,negotiation:money(group.negotiation),legal:money(group.legal),total:money(money(group.negotiation)+money(group.legal)),claimCount:_ids.size,excludedFupCount:_excluded.size})).sort((a,b)=>b.total-a.total||a.supplier.localeCompare(b.supplier,'pt-BR'));
     model.procurementReport={rows,excludedFup:[],negotiationTotal,legalTotal,grandTotal,counts,bySupplier,summary:{negotiation:negotiationTotal,legal:legalTotal,total:grandTotal,claimCount:counts.negotiation},
-      meta:{allYears:true,agingDate,asOf:model.meta.asOf,supplier:text(options.supplier),operation:text(options.operation),correctionScenario:model.meta.correctionScenario,available,criteriaIncomplete:!available.pending,missingAmountCount:missingAmounts,amountIncomplete:missingAmounts>0,excludedFupCount:ids.excluded.size,excludedFupRecords:excludedRecords,excludedFupAmount:money(excludedAmount),legalDetailAvailable:false,
+      meta:{allYears:true,agingDate,asOf:model.meta.asOf,...globalFilterMeta(options),correctionScenario:model.meta.correctionScenario,available,criteriaIncomplete:!available.pending,missingAmountCount:missingAmounts,amountIncomplete:missingAmounts>0,excludedFupCount:ids.excluded.size,excludedFupRecords:excludedRecords,excludedFupAmount:money(excludedAmount),legalDetailAvailable:false,
         scope:'Carteira de negociação aberta da BD, de todos os anos. Os filtros globais de fornecedor e operação se aplicam; anos de Data RNC não retiram casos ainda em negociação.',
         basis:'G = EM NEGOCIAÇÃO - PROCEDENTE. H contendo FUP SUPRIMENTOS, com normalização de acentos e espaços, não entra nos totais. AC contendo JURIDICO forma o subtotal Jurídico; demais linhas incluídas formam Negociações. Valor da coluna AJ. Total geral = Negociações + Jurídico.',
         listBasis:'rows e bySupplier contêm somente Negociações não jurídicas, sem as linhas cuja pendência H contém FUP SUPRIMENTOS. Jurídico é apenas um subtotal; não há linhas nem detalhes jurídicos neste relatório. As exclusões FUP permanecem somente em contadores agregados de auditoria.',
@@ -1105,5 +1119,5 @@
         financialBasis:'Relatório adicional de carteira aberta; não altera reclamado, recebido, negociação ou perda dos indicadores financeiros existentes.'}};
   }
 
-  return {analyze, validateHeaders, normalizeRef, tokenizeRefs, normalizeMarket, normalizeStatus, parseDate, number, today, version: '1.4.0'};
+  return {analyze, validateHeaders, normalizeRef, tokenizeRefs, normalizeMarket, normalizeStatus, normalizeSupplier:norm, parseDate, number, today, version: '1.4.0'};
 });

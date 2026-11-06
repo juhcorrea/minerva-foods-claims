@@ -29,9 +29,9 @@ O painel tem seis áreas:
 - **Correção de base:** cenário original e correções propostas, com rastreabilidade por ordem.
 - **Controle de recebimento:** parcelas, acordos, analistas, metas ilustrativas e reunião de resultados.
 - **Controle de claim:** SLAs, situações operacionais e registros da BD, com pesquisa, filtros e detalhes.
-- **FUP Suprimentos:** carteira aberta de todos os anos; fornecedor → motivo → claims, com grupos recolhíveis e subtotais.
+- **FUP Suprimentos:** carteira aberta de todos os anos; seleção de fornecedor à esquerda e detalhe por motivo na mesma tela, com subtotais e controles para expandir ou recolher todos os motivos.
 
-Filtros pesquisáveis, ordenação, ajuste de colunas, modo noturno, tamanho de fonte e modo de apresentação estão disponíveis. A ordenação inicial prioriza os maiores valores, preservando a ordenação escolhida pelo usuário. Filtros recolhíveis liberam espaço para os gráficos. As exportações incluem Excel, PDF e PowerPoint, além do PDF das regras de cálculo.
+Filtros pesquisáveis com múltipla seleção, ordenação, ajuste de colunas, modo noturno, tamanho de fonte e modo de apresentação estão disponíveis. Vários valores do mesmo campo são combinados por OU; campos diferentes, por E. A ordenação inicial prioriza os maiores valores, preservando a ordenação escolhida pelo usuário. Bases, tabelas e filtros têm controles próprios de recolher e expandir. No comparativo de correções, os critérios ficam recolhidos e continuam disponíveis na impressão. Visões salvas pessoais reutilizam os filtros aplicados neste navegador e recalculam as bases atuais; não guardam planilhas, resultados ou credenciais. As exportações incluem Excel, PDF e PowerPoint, além do PDF das regras de cálculo.
 
 O backend de referência também oferece:
 

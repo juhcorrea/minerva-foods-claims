@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const source=await readFile(new URL('../worker/entry.js',import.meta.url),'utf8');
 const origin='https://claims-assets.example.test';
 const publicPaths=['/access.html','/access.css','/access.js','/site.webmanifest','/assets/minerva-logo.png','/assets/montserrat-latin.woff2'];
-const privatePaths=['/analysts.js','/meetings.js','/engine.js','/app.js','/team.js','/styles.css','/executive.js','/executive.css','/executive-shell.css','/claim-control.js','/claim-control.css','/calculation-rules.js','/presentation-mode.js','/presentation-mode.css','/vendor/pptxgen.bundle.js','/assets/minerva-cover.png','/future-report.js'];
+const privatePaths=['/analysts.js','/meetings.js','/engine.js','/app.js','/team.js','/styles.css','/executive.js','/executive.css','/executive-shell.css','/claim-control.js','/claim-control.css','/calculation-rules.js','/presentation-mode.js','/presentation-mode.css','/section-collapse.js','/section-collapse.css','/multi-select.js','/multi-select.css','/assets/flags/br.svg','/vendor/pptxgen.bundle.js','/assets/minerva-cover.png','/future-report.js'];
 const privateMarker='PRIVATE_REPORT_CONFIGURATION';
 const accessMarker='PUBLIC_ACCESS_FORM';
 const anonymous={authenticated:false,approved:false,role:'visitor'};

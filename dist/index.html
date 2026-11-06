@@ -29,6 +29,10 @@
   <link rel="stylesheet" href="executive.css">
   <link rel="stylesheet" href="claim-control.css">
   <link rel="stylesheet" href="presentation-mode.css">
+  <link rel="stylesheet" href="section-collapse.css">
+  <link rel="stylesheet" href="multi-select.css">
+  <link rel="stylesheet" href="saved-views.css">
+  <link rel="stylesheet" href="receipts-executive.css">
 </head>
 <body class="executive-mode">
   <a class="skip-link" href="#mainContent">Pular para o conteúdo</a>
@@ -68,13 +72,18 @@
 <button class="nav-item" type="button" data-view="installments"><svg class="icon"><use href="#icon-list"/></svg><span>Controle de recebimento</span></button>
 <button class="nav-item" type="button" data-view="claims"><svg class="icon"><use href="#icon-file"/></svg><span>Controle de claim</span></button>
 <button class="nav-item" type="button" data-view="procurement"><svg class="icon"><use href="#icon-building"/></svg><span>FUP suprimentos</span></button></nav>
-    <div class="sidebar-bottom"><span class="sidebar-dot"></span><div><strong>Supply Chain</strong><small id="sidebarScope">Claims · Todas as operações</small><div class="sidebar-publication"><span>Última atualização</span><time id="sidebarUpdatedAt">Ainda não publicada</time><small id="sidebarUpdatedBy">Horário de Brasília</small></div></div></div>
+    <div class="sidebar-bottom sidebar-status">
+      <div class="sidebar-status-heading"><span>Última publicação</span><button id="sidebarRefresh" type="button" aria-label="Atualizar bases publicadas" title="Atualizar bases publicadas" hidden>↻</button></div>
+      <dl class="sidebar-base-dates"><div><dt>BD Claims</dt><dd><time id="sidebarUpdatedAt">—</time></dd></div><div><dt>Recebimentos</dt><dd><time id="sidebarControlUpdatedAt">—</time></dd></div></dl>
+      <div class="sidebar-load-state"><span id="sidebarLoadDot" aria-hidden="true"></span><strong id="sidebarLoadLabel">Prévia local</strong><small id="sidebarUpdatedBy">Horário de Brasília</small></div>
+      <div id="sidebarAccount" class="sidebar-account"></div>
+    </div>
   </aside>
 
   <div class="app-shell">
     <div id="dashboardPresentationBar" class="dashboard-presentation-bar" hidden><div class="dashboard-presentation-brand"><img src="assets/minerva-monogram.svg" alt=""><span>Minerva Foods</span><strong id="dashboardPresentationTitle">Visão geral</strong></div><button id="dashboardPresentationExit" class="button button-outline" type="button">Sair da apresentação<kbd>Esc</kbd></button></div>
     <header class="topbar">
-      <div class="breadcrumb"><span>Supply Chain</span><span class="crumb-divider">/</span><span id="breadcrumbScope">Claims</span><span class="crumb-divider">/</span><strong id="viewLabel">Visão geral</strong></div>
+      <div class="breadcrumb"><span id="breadcrumbScope">Claims</span><span class="crumb-divider">/</span><strong id="viewLabel">Visão geral</strong></div>
       <div class="topbar-actions">
         <button id="auditShortcut" class="button button-quiet audit-shortcut" type="button" data-view="corrections"><svg class="icon"><use href="#icon-check"/></svg><span>Conferir correções</span></button>
         <button id="openImports" class="button button-primary" type="button"><svg class="icon"><use href="#icon-upload"/></svg><span>Carregar planilhas</span></button>
@@ -84,10 +93,10 @@
     <main id="mainContent" tabindex="-1">
       <section class="page-heading">
         <div><h1 id="appTitle">Indicadores Claim</h1></div>
-        <div class="heading-actions"><button id="dashboardFiltersToggle" class="button button-outline" type="button" aria-expanded="true" aria-controls="globalFilterBlock">Filtros<span class="dashboard-filter-chevron" aria-hidden="true">⌃</span></button><button id="dashboardPresentationToggle" class="button button-outline" type="button" aria-pressed="false">Apresentação</button><button id="exportRules" class="button button-outline" type="button">Regras de cálculo · PDF</button><span id="periodLabel" class="period-label">2025 + 2026</span><button id="exportPdf" class="button button-outline" type="button" disabled><svg class="icon"><use href="#icon-download"/></svg><span>Exportar PDF</span></button><button id="exportReport" class="button button-outline" type="button" disabled><svg class="icon"><use href="#icon-download"/></svg><span>Exportar relatório</span></button></div>
+        <div class="heading-actions"><button id="dashboardFiltersToggle" class="button button-outline" type="button" aria-expanded="true" aria-controls="globalFilterBlock">Filtros<span class="dashboard-filter-chevron" aria-hidden="true">⌃</span></button><button id="dashboardPresentationToggle" class="button button-outline" type="button" aria-pressed="false">Apresentação</button><button id="exportRules" class="button button-outline" type="button" title="Imprimir ou salvar as regras como PDF">Regras de cálculo · PDF</button><span id="periodLabel" class="period-label">Ano vigente</span><button id="exportPdf" class="button button-outline" type="button" disabled><svg class="icon"><use href="#icon-download"/></svg><span>Exportar PDF</span></button><button id="exportReport" class="button button-outline" type="button" disabled><svg class="icon"><use href="#icon-download"/></svg><span>Exportar relatório</span></button></div>
       </section>
-      <aside class="public-demo-notice" role="note"><strong>PROJETO DEMONSTRATIVO · DADOS FICTÍCIOS</strong><br>Os exemplos, fornecedores, pessoas, ordens, valores e metas são inventados e não representam resultados reais da empresa.</aside>
 
+      <aside class="public-demo-notice" role="note"><strong>PROJETO DEMONSTRATIVO · DADOS FICTÍCIOS</strong><br>Os exemplos, fornecedores, pessoas, ordens, valores e metas são inventados e não representam resultados reais da empresa.</aside>
       <div id="demoBanner" class="demo-banner" hidden><svg class="icon"><use href="#icon-info"/></svg><span><strong>Demonstração.</strong> Dados fictícios para conhecer o painel. Carregue suas planilhas para analisar os valores reais.</span></div>
       <div id="globalFilterBlock">
       <div id="statusMessage" class="status-message" role="status" aria-live="polite"></div>
@@ -135,6 +144,7 @@
         <div class="section-line receipt-heading"><div><span class="section-kicker">PAGAMENTOS E ACOMPANHAMENTO</span><h2>Controle de recebimento</h2><details class="context-help"><summary>Critérios</summary><p>Controle integral de todas as operações. Recebidos: M = Pago, ano da data de compensação em R e valor em T, sem restrição pelo ano ou pelo vínculo com a BD. Todas as parcelas em aberto permanecem no acompanhamento até a quitação. Os filtros de fornecedor e operação restringem apenas o recorte selecionado.</p></details></div><div class="receipt-actions"><button id="exportControlPdf" class="button button-outline" type="button" disabled>Exportar PDF</button><button id="exportControl" class="button button-primary" type="button" disabled>Baixar controle em Excel</button></div></div>
         <div class="receipt-filters" aria-label="Filtros do Controle de recebimento"><label class="search-field"><svg class="icon"><use href="#icon-search"/></svg><input id="installmentSearch" type="search" placeholder="Buscar ordem, NF, confissão ou fornecedor" aria-label="Buscar parcela por referência, confissão ou fornecedor"></label><label class="toolbar-select"><span>Tipo de negociação</span><select id="typeFilter"><option value="">Todos os tipos</option><option>Boleto</option><option>Depósito</option><option>Desconto</option><option>Rebate</option><option>Não informado</option></select></label><label class="toolbar-select"><span>Status</span><select id="statusFilter"><option value="">Todos os status</option><option>Pago</option><option>Vencido</option><option>Dentro do Prazo</option><option value="Sem previsão">Sem previsão informada</option><option>Prejuízo Minerva</option><option>Conferir pagamento</option><option>Conferir previsão</option></select></label></div>
         <p id="controlFilterSummary" class="receipt-filter-summary" role="status"></p>
+        <div id="receiptsExecutive" aria-label="Visão analítica do Controle de recebimento"></div>
         <div id="processSummary" class="process-summary receipt-summary" aria-label="Indicadores dos pagamentos filtrados"></div>
         <div id="controlReviewNotice" class="receipt-notice" hidden></div>
         <section class="panel"><div class="panel-heading"><div><span class="section-kicker">POR ORDEM / ACORDO</span><h2>Conferência de quitação <span id="processCount" class="count-text"></span></h2><details class="context-help"><summary>Critérios</summary><p>As quantidades abaixo acompanham os filtros. A quitação considera todas as parcelas do acordo. O percentual acordado (V ÷ U) é separado do pagamento: 100% acordado não significa recebido. Abra a ordem para conferir o histórico completo.</p></details></div></div><div id="processTable" class="table-container" tabindex="0" aria-label="Quitação por ordem ou acordo"><div class="empty-table">Os processos aparecerão depois de carregar as bases.</div></div></section>
@@ -144,8 +154,8 @@
       <section id="view-corrections" class="view-pane" aria-label="Correções e conferência da base" hidden>
         <div class="audit-intro"><div class="audit-icon"><svg class="icon"><use href="#icon-check"/></svg></div><div><span class="section-kicker">TRANSPARÊNCIA DA ANÁLISE</span><h2>Conferência da base</h2><p>Divergências por ordem. Abra os detalhes para conferir origem e correção.</p></div><button id="exportCorrections" class="button button-primary" type="button" disabled><svg class="icon"><use href="#icon-download"/></svg>Baixar planilha de correções</button></div>
         <div id="correctionImpact"></div>
-        <section class="panel"><div class="panel-heading"><div><span class="section-kicker">AJUSTES ADOTADOS NO PAINEL</span><h2>Ordens com correções <span id="correctionCount" class="count-pill">0</span></h2><details class="context-help"><summary>Critérios</summary><p>Uma linha por ordem, sem repetir por parcela ou campo. Valores originais, células e linhas de origem ficam preservados no detalhe e na auditoria do Excel. As datas de pagamento e compensação não são alteradas.</p></details></div><div class="correction-tools"><label class="search-field"><svg class="icon"><use href="#icon-search"/></svg><input id="correctionSearch" type="search" placeholder="Buscar ordem, fornecedor, ano ou célula" aria-label="Buscar correções da base"></label><label class="toolbar-select"><span>Analista na BD · coluna BE</span><select id="analystFilter"><option value="">Todos os analistas</option></select></label><label class="toolbar-select"><span>Acompanhamento</span><select id="correctionProgressFilter"><option value="">Todas as ordens</option><option value="pending">Pendentes</option><option value="done">Já ajustadas</option></select></label></div></div><p id="correctionProgressMessage" class="correction-progress-message" role="status">Use “Marcar ajustado” depois de corrigir a ordem na planilha. A marcação é compartilhada e pode ser desfeita; os valores do relatório não mudam.</p><p id="correctionFilterSummary" class="correction-filter-summary" role="status"></p><div id="correctionTable" class="table-container" tabindex="0" aria-label="Correções agrupadas por ordem"><div class="empty-table">As ordens com divergências aparecerão aqui; o detalhe preserva todas as linhas e células do Excel.</div></div></section>
-        <section class="panel review-panel"><div class="panel-heading"><div><span class="section-kicker">PONTOS PARA CONFERÊNCIA</span><h2>Correspondências e pendências <span id="issueCount" class="count-text"></span></h2><details class="context-help"><summary>Critérios</summary><p>Referências sem correspondência ou com mais de uma interpretação ficam sinalizadas. Nenhum rateio é presumido.</p></details></div><svg class="icon warning-icon"><use href="#icon-alert"/></svg></div><div id="issueTable" class="table-container" tabindex="0" aria-label="Pendências de conciliação"><div class="empty-table">Carregue as bases para verificar as correspondências.</div></div></section>
+        <section class="panel correction-review-panel"><div class="panel-heading"><div><span class="section-kicker">FILA ÚNICA</span><h2>Referências para conferir <span id="correctionCount" class="count-pill">0</span></h2><details class="context-help"><summary>Critérios</summary><p>Correções, valores e pendências reunidos pelos vínculos de linhas já identificados. Abra a referência para comparar os valores e consultar cada célula. Sem vínculo seguro, o item permanece separado; não há rateio nem alteração dos arquivos de origem. O valor de referência é o reclamado da BD e não deve ser somado como valor de ajuste.</p></details></div><div class="correction-tools"><label class="search-field"><svg class="icon"><use href="#icon-search"/></svg><input id="correctionSearch" type="search" placeholder="Buscar referência, fornecedor ou divergência" aria-label="Buscar na fila de conferência"></label><label class="toolbar-select"><span>Analista na BD</span><select id="analystFilter"><option value="">Todos os analistas</option></select></label><label class="toolbar-select"><span>Acompanhamento</span><select id="correctionProgressFilter"><option value="">Todas as referências</option><option value="pending">Pendentes</option><option value="done">Já ajustadas</option></select></label></div></div><p id="correctionProgressMessage" class="correction-progress-message" role="status">Marque “Já ajustei” após corrigir a planilha. O acompanhamento é compartilhado e não altera os cálculos.</p><p id="correctionFilterSummary" class="correction-filter-summary" role="status"></p><div id="correctionTable" class="table-container" tabindex="0" aria-label="Fila única de conferência"><div class="empty-table">As referências com divergências aparecerão aqui.</div></div></section>
+        <div id="correctionArchive"></div>
       </section>
 
       <section id="view-claims" class="view-pane" aria-label="Controle de claim" hidden><div id="claimAnalytics"></div><div id="claimRecords"></div></section>
@@ -195,7 +205,11 @@
   <script src="executive.js"></script>
   <script src="claim-control.js"></script>
   <script src="calculation-rules.js"></script>
+  <script src="receipts-executive.js"></script>
   <script src="app.js"></script>
   <script src="presentation-mode.js"></script>
+  <script src="section-collapse.js"></script>
+  <script src="multi-select.js"></script>
+  <script src="saved-views.js"></script>
 </body>
 </html>

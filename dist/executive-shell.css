@@ -1,5 +1,11 @@
 /* Compact workspace chrome; calculation notes remain available on demand. */
 .executive-mode{--radius:10px}
+/* Stronger light-theme hierarchy for tables, controls and presentation screens. */
+html[data-theme=light]{--muted:#526575;--canvas:#edf2f6;--pale:#e0e9f0;--line:#aebfcb}
+html[data-theme=light] .executive-mode :is(.column-layout-toolbar,.table-filter-summary){background:var(--pale);color:var(--muted);border-color:var(--line)}
+html[data-theme=light] .executive-mode :is(.column-layout-hint,.table-note,.cell-subtext,.count-text){color:var(--muted)}
+html[data-theme=light] .executive-mode :is(.table-container,.table-wrap) th{background:var(--pale);color:#3e586c;border-color:var(--line)}
+html[data-theme=light] .executive-mode :is(.table-container,.table-wrap) td{border-bottom-color:var(--line)}
 .executive-mode .topbar{padding:10px 22px;min-height:62px;gap:10px}
 .executive-mode .topbar-actions{gap:8px}
 .executive-mode .preferences-toolbar{width:auto;flex-basis:auto;margin-left:auto;border:0;padding:0;gap:6px}

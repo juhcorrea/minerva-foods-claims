@@ -197,15 +197,18 @@ function analysisOptions(url, saved, engine) {
   const allYears=rawAllYears==='1'||rawAllYears==='true';
   const asOf = url.searchParams.get('asOf') || saved.asOf || engine.today();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || !engine.parseDate(asOf)) fail(400, 'INVALID_DATE', 'Informe uma data da análise válida.');
-  const supplier = url.searchParams.get('supplier') || '';
-  const operation = url.searchParams.get('operation') || '';
-  const controlOperation = url.searchParams.get('controlOperation') || '';
+  const readSelections=(key,maxLength,normalize)=>{const raw=url.searchParams.getAll(key),seen=new Set();if(raw.length>200||raw.some(value=>value.length>maxLength||/[\u0000-\u001f]/.test(value)))fail(400,'INVALID_FILTER','O filtro informado é inválido. Selecione até 200 valores por filtro.');return raw.map(value=>value.trim()).filter(value=>{const key=normalize(value);if(!key||seen.has(key))return false;seen.add(key);return true;});};
+  const suppliers=readSelections('supplier',240,engine.normalizeSupplier),operations=readSelections('operation',200,engine.normalizeStatus),controlOperations=readSelections('controlOperation',200,engine.normalizeStatus);
+  const supplier=suppliers.join(' · '),operation=operations.join(' · '),controlOperation=controlOperations.join(' · ');
   const correctionScenario = url.searchParams.get('correctionScenario') ?? 'corrected';
-  if (supplier.length > 240 || operation.length > 200 || controlOperation.length > 200 || /[\u0000-\u001f]/.test(operation+controlOperation)) fail(400, 'INVALID_FILTER', 'O filtro informado é inválido.');
   const operationOptions=new Set(saved.bd.slice(1).map(row=>engine.normalizeStatus(row?.[25])).filter(Boolean));
-  if (operation && !operationOptions.has(engine.normalizeStatus(operation))) fail(400, 'INVALID_OPERATION', 'Selecione uma operação presente na BD.');
+  const supplierOptions=new Set([...saved.bd.slice(1).map(row=>String(row?.[28]??'').trim()||'(SEM NEGOCIAÇÃO)'),...saved.control.slice(1).map(row=>String(row?.[10]??'').trim()||'(SEM FORNECEDOR)')].map(engine.normalizeSupplier));
+  const controlOperationOptions=new Set([...operationOptions,engine.normalizeStatus('SEM OPERAÇÃO IDENTIFICADA')]);
+  if (operations.some(value=>!operationOptions.has(engine.normalizeStatus(value)))) fail(400, 'INVALID_OPERATION', 'Selecione operações presentes na BD.');
+  if (controlOperations.some(value=>!controlOperationOptions.has(engine.normalizeStatus(value)))) fail(400, 'INVALID_OPERATION', 'Selecione operações disponíveis no Controle.');
+  if (suppliers.some(value=>!supplierOptions.has(engine.normalizeSupplier(value)))) fail(400,'INVALID_SUPPLIER','Selecione fornecedores presentes nas bases.');
   if (!['original', 'corrected'].includes(correctionScenario)) fail(400, 'INVALID_CORRECTION_SCENARIO', 'Selecione Base original ou Com correções.');
-  return {years: [...new Set(years)], allYears, asOf, supplier, operation, controlOperation, correctionScenario, lossFormula: 'subtract-negotiating'};
+  return {years: [...new Set(years)], allYears, asOf, supplier, suppliers, operation, operations, controlOperation, controlOperations, correctionScenario, lossFormula: 'subtract-negotiating'};
 }
 
 // Manual follow-up is stored separately from the uploaded financial snapshot.
@@ -231,11 +234,12 @@ async function hydrateCorrectionProgress(bucket,model) {
 }
 function correctionOptions(value,url,saved,engine) {
  if(value==null)return analysisOptions(new URL('/api/report',url),saved,engine);
- if(typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['years','allYears','asOf','supplier','operation','controlOperation','correctionScenario','lossFormula'].includes(key)))fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');
+ if(typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['years','allYears','asOf','supplier','suppliers','operation','operations','controlOperation','controlOperations','correctionScenario','lossFormula'].includes(key)))fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');
  const query=new URL('/api/report',url);
  if(value.years!==undefined){if(!Array.isArray(value.years)||!value.years.length||value.years.length>201||value.years.some(year=>!Number.isInteger(year)||year<1900||year>2100))fail(400,'INVALID_YEARS','Selecione anos inteiros entre 1900 e 2100.');query.searchParams.set('years',value.years.join(','));}
  if(value.allYears!==undefined){if(typeof value.allYears!=='boolean')fail(400,'INVALID_YEAR_SCOPE','Informe um escopo de anos válido.');query.searchParams.set('allYears',value.allYears?'1':'0');}
- for(const key of ['asOf','supplier','operation','controlOperation','correctionScenario'])if(value[key]!==undefined){if(typeof value[key]!=='string')fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');query.searchParams.set(key,value[key]);}
+ for(const [plural,singular] of [['suppliers','supplier'],['operations','operation'],['controlOperations','controlOperation']]){const input=Object.prototype.hasOwnProperty.call(value,plural)?value[plural]:value[singular];if(input===undefined)continue;const values=Array.isArray(input)?input:[input];if(values.length>200||values.some(item=>typeof item!=='string'))fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');for(const item of values)query.searchParams.append(singular,item);}
+ for(const key of ['asOf','correctionScenario'])if(value[key]!==undefined){if(typeof value[key]!=='string')fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');query.searchParams.set(key,value[key]);}
  return analysisOptions(query,saved,engine);
 }
 async function saveCorrectionProgress(bucket,access,body,url,engine) {

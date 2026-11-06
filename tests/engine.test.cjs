@@ -359,7 +359,7 @@ test('all operations are the default while a separate Control filter leaves glob
   ];
   const c = ['EXP/1','IMP/1','MI/1','TR/1','AIR/1','ALIAS/1'].map((ref,index)=>cr({ref,value:(index+1)*100}));
   const x = run(b,c), filtered = run(b,c,{controlOperation:'COMERCIAL'});
-  const omitControl = ({controlReport,correctionImpact,...main})=>main;
+  const omitControl = ({controlReport,correctionImpact,meta,...main})=>{const {controlOperation,controlOperations,...globalMeta}=meta;return {...main,meta:globalMeta};};
   assert.deepEqual(omitControl(x),omitControl(filtered));
   assert.equal(x.summary.received,2100); assert.equal(x.installments.length,6);
   assert.equal(x.controlReport.installments.length,6);

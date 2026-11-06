@@ -6,7 +6,8 @@
 body.dashboard-presentation{overflow-x:hidden;background:var(--canvas);min-height:100vh;min-height:100dvh}
 body.dashboard-presentation :is(.sidebar,.topbar,.page-heading,#globalFilterBlock,.receipt-subnav,.app-footer){display:none!important}
 body.dashboard-presentation .app-shell{margin-left:0;min-height:100vh;min-height:100dvh;width:100%;max-width:none}
-body.dashboard-presentation main{max-width:none;margin:0;padding:14px 22px 0}
+body.dashboard-presentation main{width:100%;max-width:1920px;margin:0 auto;padding:20px 24px 0;box-sizing:border-box}
+body.dashboard-presentation .cc-procurement-root{width:100%;max-width:1840px;margin-inline:auto}
 body.dashboard-presentation .dashboard-presentation-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;z-index:30;min-height:52px;padding:8px 22px;background:var(--paper);color:var(--ink);border-bottom:1px solid var(--line)}
 .dashboard-presentation-brand{display:flex;align-items:center;gap:10px;min-width:0}
 .dashboard-presentation-brand img{width:32px;height:32px;object-fit:contain;padding:4px;border-radius:7px;background:#fff;flex-shrink:0}

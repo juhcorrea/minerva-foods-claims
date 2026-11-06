@@ -12,9 +12,10 @@
     if (Array.isArray(opts.years) && opts.years.length) params.set('years', opts.years.map(Number).filter(Number.isInteger).join(','));
     if (opts.allYears === true) params.set('allYears', '1');
     if (opts.asOf) params.set('asOf', String(opts.asOf));
-    if (opts.supplier) params.set('supplier', String(opts.supplier));
-    if (opts.operation) params.set('operation', String(opts.operation));
-    if (opts.controlOperation) params.set('controlOperation', String(opts.controlOperation));
+    for(const [key,plural] of [['supplier','suppliers'],['operation','operations'],['controlOperation','controlOperations']]){
+      const value=opts[plural]??opts[key],values=Array.isArray(value)?value:value?[value]:[];
+      for(const selected of values)if(selected)params.append(key,String(selected));
+    }
     params.set('correctionScenario', String(opts.correctionScenario ?? 'corrected'));
     return params.toString();
   }
@@ -224,13 +225,15 @@
     $('teamRefresh').disabled = publishing || loadingReport || draft;
     $('teamRefresh').textContent = loadingReport ? 'Atualizando…' : 'Atualizar visão';
     const publication = $('teamPublication');
-    const sidebarDate = $('sidebarUpdatedAt');
-    if (sidebarDate) {
-      sidebarDate.textContent = publishedMeta?.updatedAt ? timestamp(publishedMeta.updatedAt) : 'Ainda não publicada';
-      if (publishedMeta?.updatedAt) sidebarDate.setAttribute('datetime', publishedMeta.updatedAt);
-      else sidebarDate.removeAttribute('datetime');
-      $('sidebarUpdatedBy').textContent = 'Responsável: Administração · Brasília';
+    for (const id of ['sidebarUpdatedAt','sidebarControlUpdatedAt']) {
+      const el=$(id);if(!el)continue;
+      el.textContent=publishedMeta?.updatedAt?timestamp(publishedMeta.updatedAt):'—';
+      if(publishedMeta?.updatedAt)el.setAttribute('datetime',publishedMeta.updatedAt);else el.removeAttribute('datetime');
     }
+    if($('sidebarRefresh'))$('sidebarRefresh').disabled=publishing||loadingReport||draft;
+    if($('sidebarLoadLabel'))$('sidebarLoadLabel').textContent=publishing?'Publicando…':loadingReport?'Atualizando…':draft?'Prévia não publicada':publishedMeta?.updatedAt?'Bases publicadas':'Aguardando bases';
+    if($('sidebarLoadDot'))$('sidebarLoadDot').classList.toggle('is-published',Boolean(publishedMeta?.updatedAt&&!draft&&!publishing&&!loadingReport));
+    if($('sidebarUpdatedBy'))$('sidebarUpdatedBy').textContent='Horário de Brasília';
     publication.replaceChildren();
     const text = document.createElement('span');
     if (publishedMeta?.updatedAt) text.textContent = 'Responsável: Administração · Publicado por ' + (publishedMeta.updatedBy || 'administração') + ' em ' + timestamp(publishedMeta.updatedAt) + ' · horário de Brasília.';
@@ -277,7 +280,7 @@
         setMessage(canUpdateBases() ? 'Carregue e analise as duas planilhas. Depois clique em Publicar atualização para disponibilizar o relatório.' : 'Nenhum relatório publicado. Aguarde a administração.');
         return true;
       }
-      app.setPublishedReport(payload);
+      if(app.setPublishedReport(payload)===false)return false;
       setMessage('Você está consultando a última versão publicada do relatório.');
       return true;
     } catch (error) {
@@ -521,6 +524,6 @@
   }
 
   createUI();
-  global.MinervaTeam = {refresh:() => loadReport(app.getOptions()), setCorrectionProgress, openMembers, copyLink, logout, getProfile:() => publicProfile(session)};
+  global.MinervaTeam = {refresh:() => loadReport(app.getOptions()), setCorrectionProgress, openMembers, copyLink, logout, getProfile:() => {const profile=publicProfile(session);return profile?{...profile,id:session.userId||''}:null;}};
   boot();
 })(typeof window !== 'undefined' ? window : globalThis);

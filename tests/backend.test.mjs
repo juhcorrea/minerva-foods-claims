@@ -266,3 +266,28 @@ test('correction scenario is forwarded explicitly while published spreadsheet ro
  assert.equal(new URLSearchParams(reportQuery({})).get('correctionScenario'),'corrected');
  for(const scenario of ['original','corrected'])assert.equal(new URLSearchParams(reportQuery({correctionScenario:scenario,years:[2026],supplier:'Fornecedor QA'})).get('correctionScenario'),scenario);
 });
+
+test('repeated global filters use OR within each selection and AND across selections with local engine parity',async()=>{
+ const env=environment(),admin=await login(env),input=sampleInput();
+ const domestic=[...input.bd[1]];Object.assign(domestic,{0:'MI-CASE',22:'MI/1',24:7654,25:'COMERCIAL',28:'FORNECEDOR DOMESTICO',35:600});input.bd.push(domestic);
+ const payment=[...input.control[1]];Object.assign(payment,{7:'MI/1',10:'FORNECEDOR DOMESTICO',19:70});input.control.push(payment);
+ const grouped=[...input.control[1]];Object.assign(grouped,{7:'SO/DEMO-4; MI/1',10:'CONSOLIDACAO FICTICIA',19:40});input.control.push(grouped);
+ await call(env,'/api/report',admin.cookie,{method:'POST',body:input});
+ const query=new URLSearchParams({years:'2025,2026',asOf:input.asOf});for(const value of ['EXPORTAÇÃO - CARRETA','COMERCIAL'])query.append('operation',value);for(const value of ['FORNECEDOR TESTE','FORNECEDOR DOMESTICO'])query.append('supplier',value);for(const value of ['COMERCIAL','SEM OPERAÇÃO IDENTIFICADA'])query.append('controlOperation',value);
+ const response=await call(env,'/api/report?'+query,admin.cookie);assert.equal(response.status,200);
+ const local=engine.analyze(input.bd,input.control,{years:[2025,2026],asOf:input.asOf,operations:['EXPORTAÇÃO - CARRETA','COMERCIAL'],suppliers:['FORNECEDOR TESTE','FORNECEDOR DOMESTICO'],controlOperations:['COMERCIAL','SEM OPERAÇÃO IDENTIFICADA']});
+ for(const field of ['summary','suppliers','receiptCohorts','supplierOpenReport','executiveReport','procurementReport','controlReport'])assert.deepEqual(response.body.model[field],local[field],field);
+ assert.equal(response.body.model.summary.received,320);assert.equal(response.body.model.summary.claimed,1600);assert.deepEqual(response.body.model.meta.operations,['EXPORTAÇÃO - CARRETA','COMERCIAL']);assert.deepEqual(response.body.model.meta.suppliers,['FORNECEDOR TESTE','FORNECEDOR DOMESTICO']);
+ const noSupplier=new URLSearchParams(query);noSupplier.delete('supplier');const combined=await call(env,'/api/report?'+noSupplier,admin.cookie);assert.equal(combined.body.model.summary.received,360,'Grouped multi-operation payment is retained once when both operations are selected');
+ const before=env.BUCKET.objects.get('private/report-latest-v1.json').text;await call(env,'/api/report',admin.cookie);assert.equal(env.BUCKET.objects.get('private/report-latest-v1.json').text,before);
+});
+
+test('every repeated filter value is validated and bounded before analysis',async()=>{
+ const env=environment(),admin=await login(env);await call(env,'/api/report',admin.cookie,{method:'POST',body:sampleInput()});
+ const valid={operation:'EXPORTAÇÃO - CARRETA',supplier:'FORNECEDOR TESTE',controlOperation:'EXPORTAÇÃO - CARRETA'};
+ for(const [key,value] of Object.entries(valid)){
+  for(const invalid of ['NOT IN SOURCE','bad\nvalue']){const query=new URLSearchParams();query.append(key,value);query.append(key,invalid);assert.equal((await call(env,'/api/report?'+query,admin.cookie)).status,400,key);}
+  const tooMany=new URLSearchParams();for(let i=0;i<201;i++)tooMany.append(key,value);assert.equal((await call(env,'/api/report?'+tooMany,admin.cookie)).status,400,key+' limit');
+  const duplicates=new URLSearchParams();for(let i=0;i<200;i++)duplicates.append(key,value);const result=await call(env,'/api/report?'+duplicates,admin.cookie);assert.equal(result.status,200);assert.equal(result.body.model.meta[{operation:'operations',supplier:'suppliers',controlOperation:'controlOperations'}[key]].length,1);
+ }
+});

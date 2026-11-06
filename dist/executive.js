@@ -13,6 +13,8 @@
   const date=value=>value?String(value).slice(0,10).split('-').reverse().join('/'):'—';
   const sum=(rows,key)=>rows.reduce((total,row)=>total+(number(row[key])||0),0);
   const safeList=value=>Array.isArray(value)?value:[];
+  const COUNTRY_FLAGS={BRA:['br','Brasil'],PRY:['py','Paraguai'],URY:['uy','Uruguai'],COL:['co','Colômbia'],ARG:['ar','Argentina']};
+  const countryFlag=value=>{const flag=COUNTRY_FLAGS[String(value||'').trim().toUpperCase()];return flag?'<img class="exec-country-flag" src="assets/flags/'+flag[0]+'.svg" width="24" height="18" alt="Bandeira: '+flag[1]+'">':'';};
   const comparable=row=>number(row?.receivedComparable??row?.receivedSameYear??row?.received);
   let model=null,referenceYear=null,referenceMonth=null,claimsHost=null,detailItems=new Map(),detailOwner='dashboard',detailSequence=0;
   const mounted=new WeakSet();
@@ -45,7 +47,7 @@
   function renderCountries(report){
     const rows=safeList(report.negotiationByCountry),total=sum(rows,'amount');
     if(!rows.length)return empty('Nenhum claim em negociação');
-    return'<div class="exec-country-grid">'+rows.map(row=>{const attr=detailAttr('claim','Em negociação · '+row.country,row.rows,'USD '+exact(row.amount)+' · '+integer(row.count)+' claims');return'<button type="button" class="exec-country" '+attr+'><span class="exec-country-code">'+esc(row.country||'N/I')+'</span><strong>'+money(row.amount)+'</strong><span>'+integer(row.count)+' claims <b>'+pct(total?row.amount/total:0)+'</b></span></button>';}).join('')+'</div>';
+    return'<div class="exec-country-grid">'+rows.map(row=>{const attr=detailAttr('claim','Em negociação · '+row.country,row.rows,'USD '+exact(row.amount)+' · '+integer(row.count)+' claims');return'<button type="button" class="exec-country" '+attr+'><span class="exec-country-code">'+countryFlag(row.country)+esc(row.country||'N/I')+'</span><strong>'+money(row.amount)+'</strong><span>'+integer(row.count)+' claims <b>'+pct(total?row.amount/total:0)+'</b></span></button>';}).join('')+'</div>';
   }
   function renderOpen(report){
     const rows=safeList(report.openByCountry),max=Math.max(1,...rows.map(row=>number(row.total)||0));

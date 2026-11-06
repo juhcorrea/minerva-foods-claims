@@ -99,5 +99,5 @@
   });
   document.addEventListener('minerva:model-updated', () => render(global.MinervaApp?.state.model || null));
   document.addEventListener('minerva:session-updated', event => { if (global.MINERVA_HOSTED && !event.detail) clear(); });
-  global.MinervaAnalysts = {render, handlesTable, handleFilter, exportWorkbook, filterText, clear, beforePrint: () => { state.printing = true; render(); }, afterPrint: () => { state.printing = false; render(); }};
+  global.MinervaAnalysts = {getViewState:()=>({year:state.year}),setViewState:value=>{if(Number.isInteger(value?.year)){state.year=state.draftYear=value.year;state.page=1;}},render, handlesTable, handleFilter, exportWorkbook, filterText, clear, beforePrint: () => { state.printing = true; render(); }, afterPrint: () => { state.printing = false; render(); }};
 })(window);

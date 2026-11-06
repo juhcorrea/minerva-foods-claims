@@ -120,3 +120,14 @@ test('all-years correction follow-up keeps the effective scope and shared audit 
  assert.equal(selected.model.correctionGroups.find(g=>g.progress.key===group.progress.key).progress.done,true);
  assert.equal((await mark(env,admin,snapshot,group,false,{options:{...queryOptions,years:[2026],allYears:false}})).status,409,'Scope cannot mark a correction absent from its selected-year model');
 });
+
+test('correction progress accepts plural and legacy array filters with plural precedence',async()=>{
+ const env=environment(),admin=await login(env),input=twoOrders();input.bd[2][25]='COMERCIAL';input.bd[2][28]='OUTRO FORNECEDOR FICTICIO';
+ await publish(env,admin,input);const query=new URLSearchParams({allYears:'1'});for(const value of ['EXPORTAÇÃO - CARRETA','COMERCIAL'])query.append('operation',value);for(const value of ['FORNECEDOR TESTE','OUTRO FORNECEDOR FICTICIO'])query.append('supplier',value);
+ const snapshot=(await call(env,'/api/report?'+query,admin.cookie)).body,group=snapshot.model.correctionGroups[0];assert(group);
+ const filters={...queryOptions,allYears:true,operations:['EXPORTAÇÃO - CARRETA','COMERCIAL'],suppliers:['FORNECEDOR TESTE','OUTRO FORNECEDOR FICTICIO'],controlOperations:[]};
+ assert.equal((await mark(env,admin,snapshot,group,true,{options:filters})).status,200);
+ const legacy={...queryOptions,allYears:true,operation:filters.operations,supplier:filters.suppliers,controlOperation:[]};assert.equal((await mark(env,admin,snapshot,group,false,{options:legacy})).status,200);
+ assert.equal((await mark(env,admin,snapshot,group,true,{options:{...filters,operation:'INVALID IGNORED LEGACY',supplier:'INVALID IGNORED LEGACY'}})).status,200);
+ for(const extra of [{suppliers:['FORNECEDOR TESTE',{}]},{operations:['EXPORTAÇÃO - CARRETA','INVALID']},{controlOperations:['INVALID']},{suppliers:Array(201).fill('FORNECEDOR TESTE')}])assert.equal((await mark(env,admin,snapshot,group,true,{options:{...filters,...extra}})).status,400);
+});

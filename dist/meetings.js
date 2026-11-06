@@ -189,5 +189,5 @@
   });
   document.addEventListener('minerva:model-updated',()=>render(global.MinervaApp?.state.model||null));
   document.addEventListener('minerva:session-updated',event=>{if(global.MINERVA_HOSTED&&!event.detail)clear();});
-  global.MinervaMeetings={render,clear,aggregate,exportWorkbook,exportPdf,present,handlesTable,handleFilter,filterText:period,presentationPayload,powerPointPayload,exportPowerPoint};
+  global.MinervaMeetings={getViewState:()=>({year:state.year,month:state.month}),setViewState:value=>{if(Number.isInteger(value?.year)){state.year=state.draftYear=value.year;state.month=state.draftMonth=Number.isInteger(value.month)?value.month:0;state.page=1;}},render,clear,aggregate,exportWorkbook,exportPdf,present,handlesTable,handleFilter,filterText:period,presentationPayload,powerPointPayload,exportPowerPoint};
 })(typeof window!=='undefined'?window:globalThis);

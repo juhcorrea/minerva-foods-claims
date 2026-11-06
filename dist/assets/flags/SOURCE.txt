@@ -1,0 +1,4 @@
+Source: https://github.com/lipis/flag-icons
+Files: flags/4x3/br.svg, py.svg, uy.svg, co.svg, ar.svg
+License: MIT; original notice in LICENSE.txt.
+Local copies used to display the existing BRA, PRY, URY, COL and ARG country labels.
