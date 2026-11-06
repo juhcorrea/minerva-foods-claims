@@ -9,8 +9,9 @@
   const date = value => { if (!value) return '—'; const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/); return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value); };
   const report = () => state.model?.receiptReport;
   const years = () => [...new Set((report()?.years || []).map(Number).filter(Number.isFinite))].sort((a, b) => b - a);
+  const currentYear = () => Number(new Intl.DateTimeFormat('en', {timeZone: 'America/Sao_Paulo', year: 'numeric'}).format(new Date()));
   const annual = () => report()?.annual?.find(row => Number(row.year) === state.year) || {received: 0, count: 0, monthlyUnallocated: 0};
-  const sourceRows = () => (report()?.rows || []).filter(row => Number(row.compensationYear) === state.year);
+  const sourceRows = () => (report()?.rows || []).filter(row => Number(row.compensationYear) === state.year).sort((a,b)=>Number(b.received)-Number(a.received)||Number(a.row)-Number(b.row));
   const F = () => global.MinervaTableFilters;
   function heading(id, headers, numeric) {
     return '<thead><tr>' + headers.map((label, index) => `<th scope="col" class="${numeric.includes(index) ? 'num' : 'text-cell'}" aria-sort="${F()?.ariaSort(id, index) || 'none'}">${F() ? F().heading(id, index, esc(label)) : esc(label)}</th>`).join('') + '</tr></thead>';
@@ -46,7 +47,7 @@
       return;
     }
     const available = years();
-    if (!available.includes(state.year)) { state.year = available.includes(TARGET_YEAR) ? TARGET_YEAR : available[0] || TARGET_YEAR; state.draftYear = state.year; state.page = 1; }
+    if (!available.includes(state.year)) { const year = currentYear(); state.year = available.includes(year) ? year : available[0] || year; state.draftYear = state.year; state.page = 1; }
     if (!available.includes(state.draftYear)) state.draftYear = state.year;
     const {summaryHeaders, summaryCells, paymentHeaders, paymentCells} = prepareTables();
     const current = annual(), received = Number(current.received || 0), count = Number(current.count || 0);
@@ -98,5 +99,5 @@
   });
   document.addEventListener('minerva:model-updated', () => render(global.MinervaApp?.state.model || null));
   document.addEventListener('minerva:session-updated', event => { if (global.MINERVA_HOSTED && !event.detail) clear(); });
-  global.MinervaAnalysts = {render, handlesTable, handleFilter, exportWorkbook, filterText, clear, beforePrint: () => { state.printing = true; render(); }, afterPrint: () => { state.printing = false; render(); }};
+  global.MinervaAnalysts = {getViewState:()=>({year:state.year}),setViewState:value=>{if(Number.isInteger(value?.year)){state.year=state.draftYear=value.year;state.page=1;}},render, handlesTable, handleFilter, exportWorkbook, filterText, clear, beforePrint: () => { state.printing = true; render(); }, afterPrint: () => { state.printing = false; render(); }};
 })(window);

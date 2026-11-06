@@ -9,8 +9,9 @@
   reset.textContent = 'Reiniciar demonstração';
   reset.addEventListener('click', () => originalButton.click());
   document.querySelector('.topbar-actions').append(reset);
-  document.querySelector('.sidebar-publication > span').textContent = 'Ambiente demonstrativo';
-  document.getElementById('sidebarUpdatedAt').textContent = 'Dados fictícios';
+  document.querySelector('.sidebar-status-heading > span').textContent = 'Ambiente demonstrativo';
+  for (const id of ['sidebarUpdatedAt', 'sidebarControlUpdatedAt']) document.getElementById(id).textContent = 'Dados fictícios';
+  document.getElementById('sidebarLoadLabel').textContent = 'Demonstração';
   document.getElementById('sidebarUpdatedBy').textContent = 'Exemplos ilustrativos';
   originalButton.click();
 })();

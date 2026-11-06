@@ -105,6 +105,8 @@
     currentProfile=global.MinervaTeam?.getProfile?.() || null;
     const hosted=global.MINERVA_HOSTED===true,allowed=!hosted||Boolean(currentProfile);
     $('profileButton').hidden=!allowed;
+    if ($('sidebarSignout')) $('sidebarSignout').hidden=!hosted||!allowed;
+    if ($('sidebarRefresh')) $('sidebarRefresh').hidden=!hosted||!allowed;
     if (!allowed) {
       closeProfile(false);
       $('profileButton').setAttribute('aria-label','Perfil indisponível');
@@ -132,8 +134,11 @@
     updateProfile();if ($('profileButton').hidden) return;
     const panel=$('profilePanel');if (!panel.hidden) {closeProfile(true);return;}
     const rect=$('profileButton').getBoundingClientRect();
-    panel.style.top=Math.min(rect.bottom+10,Math.max(12,global.innerHeight-330))+'px';
-    panel.hidden=false;$('profileButton').setAttribute('aria-expanded','true');$('closeProfile').focus();
+    panel.hidden=false;
+    panel.style.right='auto';
+    panel.style.left=Math.max(12,Math.min(rect.left,global.innerWidth-panel.offsetWidth-12))+'px';
+    panel.style.top=Math.max(12,Math.min(rect.top-panel.offsetHeight-10,global.innerHeight-panel.offsetHeight-12))+'px';
+    $('profileButton').setAttribute('aria-expanded','true');$('closeProfile').focus();
   }
   function mount() {
     if (mounted) return;
@@ -147,7 +152,12 @@
     const sidebar=document.querySelector('.sidebar');if (sidebar) sidebar.id='appSidebar';
     const profile=document.createElement('button');profile.id='profileButton';profile.type='button';profile.className='profile-button';profile.hidden=global.MINERVA_HOSTED===true;profile.setAttribute('aria-haspopup','dialog');profile.setAttribute('aria-expanded','false');profile.setAttribute('aria-controls','profilePanel');
     profile.innerHTML='<span id="profileAvatar" class="profile-avatar" aria-hidden="true"></span><span class="profile-label"><small>PERFIL EM USO</small><strong id="profileName"></strong><span id="profileRole"></span></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>';
-    topbar.querySelector('.topbar-actions')?.prepend(profile);
+    const account=$('sidebarAccount');
+    if(account){account.append(profile);const signout=document.createElement('button');signout.id='sidebarSignout';signout.type='button';signout.className='sidebar-icon-button';signout.hidden=true;signout.title='Sair deste perfil';signout.setAttribute('aria-label','Sair deste perfil');signout.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v16h5m5-13 5 5-5 5M9 12h10"/></svg>';signout.addEventListener('click',event=>global.MinervaTeam?.logout(event));account.append(signout);}
+    else topbar.querySelector('.topbar-actions')?.prepend(profile);
+    const placeProfile=()=>{const target=global.innerWidth<=760?topbar.querySelector('.topbar-actions'):account;if(target&&profile.parentElement!==target)target.prepend(profile);};
+    placeProfile();global.addEventListener('resize',placeProfile);
+    $('sidebarRefresh')?.addEventListener('click',()=>$('teamRefresh')?.click());
     const panel=document.createElement('section');panel.id='profilePanel';panel.className='profile-panel';panel.hidden=true;panel.setAttribute('role','dialog');panel.setAttribute('aria-labelledby','profilePanelTitle');
     panel.innerHTML='<div class="profile-panel-heading"><h2 id="profilePanelTitle">Perfil em uso</h2><button id="closeProfile" class="icon-button" type="button" aria-label="Fechar perfil">×</button></div><strong id="profilePanelName" class="profile-panel-name"></strong><span id="profilePanelContact" class="profile-panel-contact"></span><span id="profilePanelRole" class="profile-panel-role"></span><p id="profilePanelNote"></p><button id="profileSignout" class="button button-outline" type="button">Sair deste perfil</button>';
     document.body.append(panel);
