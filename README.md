@@ -36,6 +36,7 @@ Filtros pesquisáveis com múltipla seleção, ordenação, ajuste de colunas, m
 O backend de referência também oferece:
 
 - Backend de referência com aprovação de acesso e perfis de consulta, atualização e administração.
+- Controles de importação, publicação e acesso dentro do perfil, preservando as permissões de cada pessoa. A troca de abas mantém a navegação disponível e mostra os valores somente quando o período solicitado estiver pronto.
 - Exclusão de solicitações pendentes, rejeitadas ou revogadas pela administração, com confirmação. Acessos aprovados precisam ser revogados antes da exclusão.
 
 ## Critérios demonstrados

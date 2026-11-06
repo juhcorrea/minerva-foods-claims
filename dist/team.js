@@ -274,6 +274,8 @@
     const controller = new AbortController();
     reportController = controller;
     const requestVersion = ++loadVersion;
+    let timedOut = false;
+    const timeout = global.setTimeout(() => { timedOut = true; controller.abort(); }, 30000);
     loadingReport = true;
     refreshControls();
     try {
@@ -289,7 +291,11 @@
       setMessage('Você está consultando a última versão publicada do relatório.');
       return true;
     } catch (error) {
-      if (error.name === 'AbortError') return false;
+      if (requestVersion !== loadVersion) return false;
+      if (error.name === 'AbortError') {
+        if (timedOut) setMessage('A atualização demorou mais de 30 segundos. Tente novamente em Atualizar visão.', true);
+        return false;
+      }
       if (error.status === 404) {
         publishedMeta = null;
         showEmptyReport();
@@ -299,6 +305,7 @@
       setMessage(error.message, true);
       return false;
     } finally {
+      global.clearTimeout(timeout);
       if (requestVersion === loadVersion) { loadingReport = false; reportController = null; refreshControls(); }
     }
   }

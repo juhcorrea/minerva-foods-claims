@@ -35,7 +35,7 @@ function harness({layout='current',approved=true,code=source}={}){
     const wrapper=document.createElement('div');filters.parentElement.insertBefore(wrapper,filters);wrapper.append(filters);
   }
   const firstChild=main.firstChild,requests=[],loaded=[];
-  window.MINERVA_HOSTED=true;window.setInterval=()=>1;window.clearInterval=()=>{};
+  window.MINERVA_HOSTED=true;window.setInterval=()=>1;window.clearInterval=()=>{};window.setTimeout=()=>1;window.clearTimeout=()=>{};
   window.MinervaApp={state:{},getOptions:()=>({years:[2026],asOf:'2026-11-06'}),setServerLoader(fn){this.loader=fn;},setPublishedReport(payload){loaded.push(payload);return true;},view(){}};
   class CustomEvent{constructor(type,options={}){this.type=type;this.detail=options.detail;}}
   const fetch=async url=>{requests.push(url);return {ok:true,status:200,json:async()=>url==='/api/session'?{authenticated:true,approved,role:'admin',status:approved?'approved':'pending',name:'Pessoa exemplo',userId:'test-person'}:{revision:'test-revision',model:{summary:{}}}};};

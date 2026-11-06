@@ -36,7 +36,7 @@ test('storage failure is reported and a changed profile cannot save or apply ano
 });
 test('saved views enable after initial analysis finishes without polling',async()=>{
  const savedSource=fs.readFileSync(require.resolve('../dist/saved-views.js'),'utf8'),analyzeSource=source.slice(source.indexOf('  async function analyze(){'),source.indexOf('  async function performAnalysis(){')),refreshSource=savedSource.match(/  function refresh\(\)\{[^\n]+/)[0];
- const state={model:null},button={disabled:true},history=[],context={state,button,app:{state},global:{MINERVA_HOSTED:false},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},refreshScopeWhenReady(){},$:()=>null};
+ const state={model:null},button={disabled:true},history=[],context={state,button,app:{state},global:{MINERVA_HOSTED:false},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},refreshScopeWhenReady(){},refreshViewScope(){},$:()=>null};
  context.document={querySelectorAll:()=>[],dispatchEvent:event=>{if(['minerva:model-updated','minerva:analysis-state'].includes(event.type)){context.refresh();history.push({busy:Boolean(state.analysisBusy),disabled:button.disabled});}}};context.performAnalysis=async()=>{state.model={meta:{}};context.document.dispatchEvent({type:'minerva:model-updated'});};
  vm.createContext(context);vm.runInContext(refreshSource+'\n'+analyzeSource,context);await context.analyze();assert.equal(button.disabled,false);assert.deepEqual(history.map(row=>row.disabled),[true,true,false]);assert.equal(state.analysisBusy,false);
 });

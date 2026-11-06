@@ -12,6 +12,24 @@ html[data-text-size="130"]{--minerva-text-scale:1.3}
 .profile-button:hover{border-color:var(--blue)}.profile-avatar{width:33px;height:33px;display:grid;place-items:center;border-radius:50%;background:#2e5372;color:#fff;font-size:11px;font-weight:650;flex-shrink:0}.profile-label{min-width:0;display:block;line-height:1.35}.profile-label small{display:block;font-size:7px;font-weight:650;letter-spacing:.7px;color:var(--muted)}.profile-label strong{display:block;font-size:11px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}.profile-label>span{display:block;font-size:8px;color:var(--blue);font-weight:550}.profile-button>svg{width:14px;height:14px;margin-left:5px}
 .profile-panel{position:fixed;z-index:120;right:24px;top:86px;width:min(350px,calc(100vw - 30px));max-height:calc(100vh - 24px);overflow:auto;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:21px;box-shadow:0 14px 45px #122b3d33}
 .profile-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:17px}.profile-panel-heading h2{font-size:16px;margin:0}.profile-panel-heading .icon-button{width:32px;height:32px;font-size:22px}.profile-panel-name{display:block;font-size:18px;line-height:1.5;overflow-wrap:anywhere}.profile-panel-contact{display:block;font-size:11px;color:var(--muted);overflow-wrap:anywhere;margin:5px 0}.profile-panel-role{display:inline-block;background:var(--pale);color:var(--blue);border-radius:6px;padding:4px 8px;font-size:10px;font-weight:600;margin:11px 0}.profile-panel p{font-size:11px;line-height:1.85;color:var(--muted);margin:4px 0 17px}.profile-panel .button{width:100%;font-size:11px}
+.profile-panel{width:min(420px,calc(100vw - 30px));max-height:min(740px,calc(100dvh - 24px));overscroll-behavior:contain}
+.profile-controls{margin:0 0 14px;padding-top:12px;border-top:1px solid var(--line)}
+.profile-controls .team-toolbar{display:block;margin:0;padding:0;border:0;border-radius:0;background:transparent;color:var(--ink)}
+.profile-controls .team-account{display:none}
+.profile-controls .team-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
+.profile-controls .team-actions .button{font-size:11px;line-height:1.45;min-height:39px;padding:9px 10px;margin:0;white-space:normal}
+.profile-controls .team-actions #openImports,.profile-controls .team-actions #teamPublish{grid-column:1/-1;margin:0}
+.profile-controls .team-publication{margin-top:12px;padding-top:10px;border-color:var(--line);font-size:10px;color:var(--muted);gap:4px 10px}
+.profile-controls .team-message{margin:10px 0 0;font-size:11px;line-height:1.6;color:var(--ink)}
+.profile-controls .team-message.is-error{color:var(--red);background:var(--paper);border-color:var(--red)}
+.profile-controls .team-copy-fallback{margin-top:10px;padding:10px;background:var(--paper);border-color:var(--line)}
+.profile-controls .team-copy-fallback input{min-width:0;width:100%;flex-basis:100%;background:var(--paper);color:var(--ink)}
+.profile-controls[hidden],.profile-controls [hidden],.profile-activity-status[hidden]{display:none!important}
+.profile-activity-status{position:fixed;z-index:110;right:18px;bottom:18px;display:flex;align-items:center;gap:12px;max-width:min(520px,calc(100vw - 36px));padding:11px 14px;border:1px solid var(--line);border-radius:9px;background:var(--paper);color:var(--ink);box-shadow:0 7px 24px #122b3d22;font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+.profile-activity-status.is-error{border-color:var(--red)}
+.profile-activity-status button{flex-shrink:0;border:0;background:transparent;color:var(--blue);font:inherit;font-weight:650;text-decoration:underline;cursor:pointer}
+body.dashboard-presentation #profilePanel,body.dashboard-presentation .profile-activity-status,body.team-session-pending #profilePanel,body.team-denied #profilePanel,body.team-session-pending .profile-activity-status,body.team-denied .profile-activity-status{display:none!important}
+@media print{.profile-activity-status{display:none!important}}
 .team-session-pending #profileButton,.team-denied #profileButton,.team-session-pending #profilePanel,.team-denied #profilePanel{display:none!important}
 .sidebar .sidebar-status{display:block;padding:14px 18px 12px;border-top:1px solid #ffffff24;margin-top:auto;color:#d8e4ed}
 .sidebar-status-heading{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:9px;text-transform:uppercase;letter-spacing:.8px;font-weight:650}
