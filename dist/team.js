@@ -82,7 +82,12 @@
     toolbar.innerHTML = '<div class="team-account"><span class="team-account-dot" aria-hidden="true"></span><div><strong id="teamEmail"></strong><span id="teamRole"></span></div><button id="teamSignout" class="team-signout" type="button">Sair</button></div><div class="team-actions"><button id="teamRefresh" class="button button-outline" type="button">Atualizar visão</button><button id="teamCopyLink" class="button button-outline" type="button">Copiar link</button><button id="teamManage" class="button button-outline" type="button" hidden>Controlar acessos</button><button id="teamPublish" class="button button-primary" type="button" hidden disabled>Publicar atualização</button></div><div id="teamPublication" class="team-publication"></div><p id="teamMessage" class="team-message" role="status" aria-live="polite"></p><div id="teamCopyFallback" class="team-copy-fallback" hidden><label for="teamLinkInput">Copie este link e compartilhe com as pessoas autorizadas</label><input id="teamLinkInput" type="text" readonly><button id="teamCloseCopy" class="button button-text" type="button">Fechar</button></div>';
     const main = document.querySelector('main');
     const filters = document.querySelector('.filters-panel');
-    if (main) main.insertBefore(toolbar, filters || main.firstChild);
+    if (main) {
+      // Filters may be nested inside the collapsible block; insertBefore needs a direct child.
+      let anchor = filters;
+      while (anchor && anchor.parentElement !== main) anchor = anchor.parentElement;
+      main.insertBefore(toolbar, anchor || main.firstChild);
+    }
     else shell.append(toolbar);
 
     const members = document.createElement('dialog');
