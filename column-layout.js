@@ -44,7 +44,7 @@
     table.classList.add('columns-sized');table.style.width = values.reduce((sum,value) => sum + value * ratio,0) + 'px';
     headers(table).forEach((cell,index) => {const handle = cell.querySelector('.column-resize-handle');if (handle) {handle.setAttribute('aria-valuenow',String(Math.round(values[index] * ratio)));handle.setAttribute('aria-valuemin',String(Math.round(minimum(table,index) * ratio)));handle.setAttribute('aria-valuemax',String(Math.round(MAX * ratio)));}});
     const toolbar = table.previousElementSibling;
-    if (toolbar?.classList.contains('column-layout-toolbar')) toolbar.querySelector('[data-column-action="reset"]').disabled = false;
+    if (toolbar?.classList.contains('column-layout-toolbar')) {const button=toolbar.querySelector('[data-column-action="reset"]');if(button?.disabled)button.disabled=false;}
     syncTools(table);
   }
   function save(table,values) {widths.set(key(table),values.map((value,index) => clamp(value,minimum(table,index))));apply(table);}
@@ -106,8 +106,13 @@
       values[index] = clamp(values[index] + direction * step,minimum(table,index));save(table,values);announce('Largura '+Math.round(values[index]*scale())+' pixels.');
     } else if (event.key === 'Escape' && drag) {event.preventDefault();finishDrag(true);}
   }
+  function markNumericColumns(table) {
+    const numeric=new Set(headers(table).flatMap((cell,index)=>cell.classList.contains('num')||cell.querySelector('.column-heading[data-column-type="number"]')?[index]:[]));
+    for(const row of Array.from(table.rows||[])){let index=0;for(const cell of Array.from(row.cells)){const span=cell.colSpan||1;if(span===1&&numeric.has(index)&&!cell.classList.contains('num'))cell.classList.add('num');index+=span;}}
+  }
   function mount(table) {
     if (!table.tHead || !key(table)) return;
+    markNumericColumns(table);
     if (!table.previousElementSibling?.classList.contains('column-layout-toolbar')) {
       const toolbar = document.createElement('div');toolbar.className = 'column-layout-toolbar';toolbar.dataset.tableControls = key(table);
       const hint = document.createElement('span');hint.className = 'column-layout-hint';hint.textContent = 'Arraste a borda do título para ajustar a coluna.';
@@ -136,7 +141,7 @@
   }
   function syncTools(table) {
     const container = table.closest('.table-container,.table-wrap'),toolbar = table.previousElementSibling;
-    if (container && toolbar?.classList.contains('column-layout-toolbar')) {container.style.setProperty('--column-tools-height',toolbar.getBoundingClientRect().height+'px');for (const button of toolbar.querySelectorAll('[data-column-scroll]')) button.disabled = container.scrollWidth <= container.clientWidth+1;}
+    if (container && toolbar?.classList.contains('column-layout-toolbar')) {const height=toolbar.getBoundingClientRect().height+'px',disabled=container.scrollWidth<=container.clientWidth+1;if(container.style.getPropertyValue('--column-tools-height')!==height)container.style.setProperty('--column-tools-height',height);for (const button of toolbar.querySelectorAll('[data-column-scroll]'))if(button.disabled!==disabled)button.disabled=disabled;}
   }
   function refresh() {queued = false;if (drag && !drag.table.isConnected) finishDrag(true);tables().forEach(mount);}
   function schedule() {if (!queued) {queued = true;requestAnimationFrame(refresh);}}

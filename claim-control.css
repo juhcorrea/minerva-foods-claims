@@ -100,13 +100,13 @@ html:not([data-theme=dark]) .cc-procurement-root .cc-editorial-strip strong{colo
 .cc-procurement-root .cc-inline-table th:nth-child(7){width:21%}
 .cc-procurement-root .cc-inline-table :is(th,td):first-child{padding-left:2px}
 .cc-procurement-root .cc-inline-table :is(th,td):last-child{padding-right:2px;white-space:normal}
-.cc-procurement-root .cc-inline-table :is(th,td):nth-child(5),.cc-procurement-root .cc-inline-table :is(th,td):nth-child(6){text-align:right!important;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cc-procurement-root .cc-inline-table :is(th,td):nth-child(5),.cc-procurement-root .cc-inline-table :is(th,td):nth-child(6){text-align:center!important;white-space:nowrap;font-variant-numeric:tabular-nums}
 .cc-procurement-root .cc-inline-table td:nth-child(6){font-weight:600}
 .cc-procurement-root .cc-inline-table td:nth-child(7){font-size:calc(10px * var(--minerva-text-scale,1));color:var(--cc-muted);line-height:1.6}
 .cc-procurement-root .cc-inline-table tbody tr:last-child td{border-bottom:0}
 .cc-procurement-root .cc-inline-table .column-heading{display:flex;justify-content:flex-start;align-items:center;gap:3px;text-align:left}
 .cc-procurement-root .cc-inline-table .column-heading>span:first-child{min-width:0;white-space:normal;text-align:inherit}
-.cc-procurement-root .cc-inline-table th:nth-child(5) .column-heading,.cc-procurement-root .cc-inline-table th:nth-child(6) .column-heading{justify-content:flex-end;text-align:right}
+.cc-procurement-root .cc-inline-table th:nth-child(5) .column-heading,.cc-procurement-root .cc-inline-table th:nth-child(6) .column-heading{justify-content:center;text-align:center}
 .cc-procurement-root .column-filter-trigger{flex-basis:19px;width:19px;height:23px;min-height:23px;padding:2px;flex-shrink:0}
 .cc-procurement-root .column-filter-trigger svg{width:12px;height:12px}
 .cc-procurement-root .cc-inline-table .column-sort-indicator{font-size:calc(9px * var(--minerva-text-scale,1))}
@@ -212,4 +212,53 @@ html[data-theme=light] .cc-procurement-root .cc-editorial-strip .cc-summary-icon
 html[data-theme=light] .cc-procurement-root .cc-editorial-legal .cc-summary-icon{background:#e9e0c8;color:#5b4c27}
 html[data-theme=light] .cc-procurement-root .cc-editorial-strip>.cc-editorial-total>.cc-summary-icon{background:#bdb58c;color:#233f57}
 @container cc-fup (max-width:650px){html[data-theme=light] .cc-procurement-root .cc-editorial-strip{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}html[data-theme=light] .cc-procurement-root .cc-editorial-strip>.cc-editorial-total{grid-column:1/-1}html[data-theme=light] .cc-procurement-root .cc-editorial-strip>div{padding-left:13px;padding-right:48px}html[data-theme=light] .cc-procurement-root .cc-editorial-strip .cc-summary-icon{right:10px;width:29px;height:29px}html[data-theme=light] .cc-procurement-root .cc-editorial-strip .cc-summary-icon svg{width:22px;height:22px}html[data-theme=light] .cc-procurement-root .cc-editorial-strip strong{font-size:calc(23px * var(--minerva-text-scale,1))}}
+}
+
+/* Projector contrast: navy navigation / headers and alternating white-grey rows. */
+@media screen{
+html[data-theme=light] .cc-procurement-root .cc-master{background:#233f57!important;color:#fff;border-right-color:#233f57}
+html[data-theme=light] .cc-procurement-root .cc-master :is(.cc-master-heading h3,.cc-master-heading small,.cc-master-sort,.cc-master-name,.cc-master-value,.cc-master-item>small,.cc-master-footer,.cc-master-footer strong,.cc-table-criteria,.cc-pagination){color:#fff}
+html[data-theme=light] .cc-procurement-root .cc-master .cc-master-item{background:transparent;border-bottom-color:#ffffff33}
+html[data-theme=light] .cc-procurement-root .cc-master .cc-master-item:hover{background:#315774;box-shadow:inset 3px 0 #bdb58c}
+html[data-theme=light] .cc-procurement-root .cc-master .cc-master-item.cc-master-active{background:#dce7ef;box-shadow:none}
+html[data-theme=light] .cc-procurement-root .cc-master .cc-master-item.cc-master-active:hover{background:#d3e1eb}
+html[data-theme=light] .cc-procurement-root .cc-master .cc-master-item.cc-master-active :is(.cc-master-name,.cc-master-value,small){color:#233f57;font-weight:650}
+html[data-theme=light] .cc-procurement-root .cc-master .cc-master-active:before{background:#bdb58c}
+html[data-theme=light] .cc-procurement-root .cc-master .cc-master-bar{background:#ffffff33}
+html[data-theme=light] .cc-procurement-root .cc-master .cc-master-bar>i{background:#d7e4ed;opacity:1}
+html[data-theme=light] .cc-procurement-root .cc-master .cc-master-active .cc-master-bar{background:#bccdda}
+html[data-theme=light] .cc-procurement-root .cc-master .cc-master-active .cc-master-bar>i{background:#233f57}
+html[data-theme=light] .cc-procurement-root .cc-master :is(.button,.column-filter-trigger,.column-sort-indicator,.cc-table-criteria>button){color:#fff}
+html[data-theme=light] .cc-procurement-root .cc-master .cc-empty{color:#fff}
+html[data-theme=light] .cc-procurement-root .cc-master .column-filter-trigger:is(.is-filtered,.is-sorted){background:#315774;color:#fff;border-color:#ffffff70}
+html[data-theme=light] .cc-procurement-root .cc-master .button{background:transparent;border-color:#ffffff70}
+html[data-theme=light] .cc-procurement-root .cc-master .column-filter-trigger:hover,html[data-theme=light] .cc-procurement-root .cc-master .column-filter-trigger:focus-visible{background:#fff;color:#233f57;border-color:#fff}
+html[data-theme=light] .cc-procurement-root .cc-master :is(.cc-master-sort,.cc-master-footer){border-color:#ffffff33}
+html[data-theme=light] .cc-procurement-root .cc-master-footer{border-top:1px solid #ffffff33}
+html[data-theme=light] .cc-procurement-root .cc-reason-summary,html[data-theme=light] .cc-procurement-root .cc-reason-summary[aria-expanded=true]{background:#233f57!important;border-color:#233f57;color:#fff}
+html[data-theme=light] .cc-procurement-root .cc-reason-card .cc-reason-summary *{color:#fff}
+html[data-theme=light] .cc-procurement-root .cc-reason-summary:hover{background:#2e5372}
+html[data-theme=light] .cc-procurement-root .cc-inline-table thead th{background:#233f57;color:#fff;border-color:#ffffff40;font-weight:700}
+html[data-theme=light] .cc-procurement-root .cc-inline-table thead :is(.column-filter-trigger,.column-sort-indicator){color:#fff}
+html[data-theme=light] .cc-procurement-root .cc-inline-table thead .column-filter-trigger:is(.is-filtered,.is-sorted){background:#315774;color:#fff;border-color:#ffffff70}
+html[data-theme=light] .cc-procurement-root .cc-inline-table thead .column-filter-trigger:is(:hover,:focus-visible){background:#fff;color:#233f57;border-color:#fff}
+html[data-theme=light] .cc-procurement-root .cc-inline-table tbody tr:nth-child(odd) td{background:#fff;color:#233f57;font-weight:600;border-bottom-color:#c2ced7}
+html[data-theme=light] .cc-procurement-root .cc-inline-table tbody tr:nth-child(even) td{background:#e4e7eb;color:#233f57;font-weight:600;border-bottom-color:#c2ced7}
+html[data-theme=light] .cc-procurement-root .cc-inline-table tbody tr:hover td{background:#d7e2ea;color:#233f57}
+html[data-theme=light] .cc-procurement-root .cc-inline-table tbody tr td:nth-child(6){font-weight:750}
+}
+/* Consistent columns and single-line status across every reason group. */
+@media screen{
+.cc-procurement-root .cc-inline-table:not(.columns-sized){table-layout:fixed;width:100%;min-width:980px}
+.cc-procurement-root .cc-inline-table:not(.columns-sized) th:nth-child(1){width:13%}
+.cc-procurement-root .cc-inline-table:not(.columns-sized) th:nth-child(2){width:12%}
+.cc-procurement-root .cc-inline-table:not(.columns-sized) th:nth-child(3){width:15%}
+.cc-procurement-root .cc-inline-table:not(.columns-sized) th:nth-child(4){width:12%}
+.cc-procurement-root .cc-inline-table:not(.columns-sized) th:nth-child(5){width:7%}
+.cc-procurement-root .cc-inline-table:not(.columns-sized) th:nth-child(6){width:13%}
+.cc-procurement-root .cc-inline-table:not(.columns-sized) th:nth-child(7){width:28%}
+.cc-procurement-root .cc-inline-table :is(th,td){text-align:center!important;vertical-align:middle;word-break:normal;overflow-wrap:normal}
+.cc-procurement-root .cc-inline-table .column-heading{justify-content:center;text-align:center}
+.cc-procurement-root .cc-inline-table th{white-space:nowrap}
+.cc-procurement-root .cc-inline-table .cc-status-line{display:block;width:100%;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-align:center}
 }
