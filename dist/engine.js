@@ -883,8 +883,11 @@
       target.balance=money(target.claimed-target.received-target.negotiating);target.loss=model.meta.lossFormula==='pending'?null:money(target.claimed-target.received+(model.meta.lossFormula==='add-negotiating'?target.negotiating:-target.negotiating));target.lossRate=target.loss==null?null:ratio(target.loss,target.claimed);
       comparableAmounts(target,cohort);
     };
+    // Index once; retain each supplier's original receipt order and precision.
+    const rowsBySupplier=new Map();
+    for(const row of rows){const key=norm(row.supplier);if(!rowsBySupplier.has(key))rowsBySupplier.set(key,[]);rowsBySupplier.get(key).push(row);}
     for(const supplier of model.suppliers){
-      const ownRows=rows.filter(row=>norm(row.supplier)===norm(supplier.name));
+      const ownRows=rowsBySupplier.get(norm(supplier.name))||[];
       addAmounts(supplier,suppliers.get(norm(supplier.name)));
       supplier.receivedNegotiating=money(sum(ownRows.filter(row=>normalizedStatus(row)===NEGOTIATING),'received'));
       supplier.receivedOtherStatuses=money(sum(ownRows.filter(row=>![FORWARDED,NEGOTIATING].includes(normalizedStatus(row))),'received'));

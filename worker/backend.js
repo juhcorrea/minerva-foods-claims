@@ -224,12 +224,16 @@ async function readCorrectionProgress(bucket) {
  if(found.value&&(found.value.schemaVersion!==1||!found.value.entries||typeof found.value.entries!=='object'||Array.isArray(found.value.entries)))fail(503,'CORRECTION_PROGRESS_INVALID','O acompanhamento das correções precisa ser conferido.');
  return found;
 }
+// Legacy snapshots have no application revision. Their R2 ETag still changes
+// atomically with the entries and keeps the browser's in-memory report honest.
+const correctionProgressRevision = found => found.value ? String(found.value.revision || found.etag || 'none') : 'none';
 function publicCorrectionProgress(key,entry) {
  return {key,done:entry?.done===true,updatedAt:typeof entry?.updatedAt==='string'?entry.updatedAt:null,updatedBy:typeof entry?.updatedBy==='string'?actorLabel(entry.updatedBy,entry.updatedByUserId):null};
 }
 async function hydrateCorrectionProgress(bucket,model) {
- const {value}=await readCorrectionProgress(bucket);
+ const found=await readCorrectionProgress(bucket),{value}=found;
  await Promise.all((model.correctionGroups||[]).map(async group=>{const key=await correctionProgressKey(group);group.progress=publicCorrectionProgress(key,value?.entries[key]);}));
+ model.meta={...model.meta,correctionProgressRevision:correctionProgressRevision(found)};
  return model;
 }
 function correctionOptions(value,url,saved,engine) {
@@ -256,9 +260,9 @@ async function saveCorrectionProgress(bucket,access,body,url,engine) {
   if((await reportMeta(bucket))?.revision!==body.reportRevision)fail(409,'REPORT_CHANGED','O relatório foi atualizado. Atualize a visão antes de marcar a correção.');
   const actor=access.admin||access.member;
   const entry={done:body.done,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,reportRevision:body.reportRevision};
-  const next={schemaVersion:1,entries:{...(value?.entries||{}),[body.key]:entry}};
+  const next={schemaVersion:1,revision:uuid(),entries:{...(value?.entries||{}),[body.key]:entry}};
   await confirmEditorPermission(bucket,access);
-  if(await putConditional(bucket,CORRECTION_PROGRESS_KEY,next,etag))return {progress:publicCorrectionProgress(body.key,entry),reportRevision:body.reportRevision};
+  if(await putConditional(bucket,CORRECTION_PROGRESS_KEY,next,etag))return {progress:publicCorrectionProgress(body.key,entry),reportRevision:body.reportRevision,correctionProgressRevision:next.revision};
  }
  fail(409,'CORRECTION_PROGRESS_CHANGED','Outra marcação foi salva ao mesmo tempo. Tente novamente.');
 }
@@ -317,7 +321,10 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
     const {files}=await buildMigrationFiles({bucket:env.BUCKET,admins,source:migrationSource,now});
     return migrationZipResponse(files);
    }
-   if(url.pathname==='/api/report/meta'&&request.method==='GET')return response({reportMeta:await reportMeta(env.BUCKET)});
+   if(url.pathname==='/api/report/meta'&&request.method==='GET'){
+    const [metadata,progress]=await Promise.all([reportMeta(env.BUCKET),readCorrectionProgress(env.BUCKET)]);
+    return response({reportMeta:metadata,correctionProgressRevision:correctionProgressRevision(progress),agingDate:engine.today()});
+   }
    if(url.pathname==='/api/correction-progress'&&request.method==='POST')return response(await saveCorrectionProgress(env.BUCKET,access,await readBody(request,16384),url,engine));
    if(url.pathname==='/api/report'&&request.method==='GET'){
     const{value:saved}=await jsonObject(env.BUCKET,REPORT_KEY);if(!saved)return response({model:null,files:null,updatedAt:null,updatedBy:null,revision:null});

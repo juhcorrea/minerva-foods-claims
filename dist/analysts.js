@@ -97,7 +97,7 @@
     try { const workbook = exportWorkbook(); if (!workbook) throw new Error('A análise ainda não está disponível.'); global.XLSX.writeFile(workbook, `Minerva-Recebimentos-Analistas-${state.year}.xlsx`); document.getElementById('analystExportStatus').textContent = 'Excel gerado com os filtros aplicados e todas as parcelas selecionadas.'; }
     catch (error) { const status = document.getElementById('analystExportStatus'); if (status) status.textContent = 'Não foi possível gerar o Excel: ' + error.message; }
   });
-  document.addEventListener('minerva:model-updated', () => render(global.MinervaApp?.state.model || null));
+  document.addEventListener('minerva:model-updated', () => {const app=global.MinervaApp,model=app?.state.model||null;if(!model||app?.state.view==='analysts')render(model);});
   document.addEventListener('minerva:session-updated', event => { if (global.MINERVA_HOSTED && !event.detail) clear(); });
   global.MinervaAnalysts = {getViewState:()=>({year:state.year}),setViewState:value=>{if(Number.isInteger(value?.year)){state.year=state.draftYear=value.year;state.page=1;}},render, handlesTable, handleFilter, exportWorkbook, filterText, clear, beforePrint: () => { state.printing = true; render(); }, afterPrint: () => { state.printing = false; render(); }};
 })(window);

@@ -23,8 +23,8 @@ function fixture({local=false,initialModel=model(false),pausePaint=false,respect
   window:{scrollTo(options){scrolls.push({...options});}},global:{setTimeout(fn,delay){const id=++timerId;timers.set(id,{fn,delay});return id;},clearTimeout(id){timers.delete(id);}},$:node,F:{clear(){clears++;}},captureOperation(){},populateOperations(){},setText(){},populateSuppliers(){},say(){},notice(message){errors.push(message);},integer:String,
   nextPaint:()=>pausePaint&&paintCount++===0?paint.promise:Promise.resolve(),openImports(){throw Error('Unexpected import prompt');},
   E:{analyze(_bd,_control,options){calculations.push({...options});return model(options.allYears===true);}},
-  render(){if(renderError)throw Error('Synthetic render failure');renders.push({view:state.view,allYears:state.model.meta.allYears,claimed:state.model.summary.claimed});},
-  session:{approved:true},reportController:null,loadVersion:0,loadingReport:false,publishedMeta:null,refreshControls(){},setMessage(message,error){messages.push({message,error:Boolean(error)});},showEmptyReport(){},canUpdateBases:()=>true,
+  renderViewBody(){},render(){if(renderError)throw Error('Synthetic render failure');renders.push({view:state.view,allYears:state.model.meta.allYears,claimed:state.model.summary.claimed});},
+  session:{approved:true},reportCache:require('../dist/team.js').createReportCache(),reportController:null,loadVersion:0,loadingReport:false,publishedMeta:null,refreshControls(){},setMessage(message,error){messages.push({message,error:Boolean(error)});},showEmptyReport(){},canUpdateBases:()=>true,
   api(url,options){const job=deferred();requests.push({url,options,...job});if(respectAbort)options.signal.addEventListener('abort',()=>job.reject(Object.assign(new Error('Aborted'),{name:'AbortError'})),{once:true});return job.promise;},reportQuery:require('../dist/team.js').reportQuery};
  vm.createContext(context);vm.runInContext(appCode,context,{filename:'app-orchestration-from-production.js'});
  context.app={state,getOptions:context.options,setPublishedReport:context.setPublishedReport};

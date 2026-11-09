@@ -187,7 +187,7 @@
     const button=event.target.closest('[data-meeting-action]');if(!button)return;
     switch(button.dataset.meetingAction){case 'present':present();break;case 'pdf':exportPdf();break;case 'pptx':exportPowerPoint();break;case 'close-detail':$('meetingDetailDialog')?.close();break;case 'excel':try{const workbook=exportWorkbook();if(workbook){global.XLSX.writeFile(workbook,`Minerva-Reuniao-${state.year}-${state.month===0?'ano':state.month===-1?'sem-mes':String(state.month).padStart(2,'0')}.xlsx`);message('Excel gerado com resumo, gráficos em dados e todas as parcelas do recorte.');}}catch(error){message('Não foi possível gerar o Excel: '+error.message);}break;}
   });
-  document.addEventListener('minerva:model-updated',()=>render(global.MinervaApp?.state.model||null));
+  document.addEventListener('minerva:model-updated',()=>{const app=global.MinervaApp,model=app?.state.model||null;if(!model||app?.state.view==='meeting')render(model);});
   document.addEventListener('minerva:session-updated',event=>{if(global.MINERVA_HOSTED&&!event.detail)clear();});
   global.MinervaMeetings={getViewState:()=>({year:state.year,month:state.month}),setViewState:value=>{if(Number.isInteger(value?.year)){state.year=state.draftYear=value.year;state.month=state.draftMonth=Number.isInteger(value.month)?value.month:0;state.page=1;}},render,clear,aggregate,exportWorkbook,exportPdf,present,handlesTable,handleFilter,filterText:period,presentationPayload,powerPointPayload,exportPowerPoint};
 })(typeof window!=='undefined'?window:globalThis);

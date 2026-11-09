@@ -11,6 +11,7 @@ function fixture(){
  let liveValue=110,claimState={claims:{country:['País A','País B'],query:'ABC'},procurement:{pending:['Aguardando']},supplier:'Fornecedor A'};
  const F={clear(){storedTables.length=0;},sanitizeState:input=>({tables:(input?.tables||[]).map(t=>({id:String(t.id),filters:(t.filters||[]).map(f=>({column:f.column,values:f.values})),sort:t.sort||null}))}),exportState:()=>({tables:[{id:'cc-claims-table',filters:[{column:1,values:['País A']}],sort:{column:6,direction:'desc'}}]}),importState:s=>storedTables.push(plain(s))};
  const c={state,applied,F,document:{querySelectorAll:()=>years},window:{MinervaClaimControl:{getViewState:()=>claimState,setViewState:v=>claimState=plain(v)},MinervaAnalysts:{getViewState:()=>({year:2026}),setViewState(){}},MinervaMeetings:{getViewState:()=>({year:2026,month:3}),setViewState(){}}},$:node,asList:value=>(Array.isArray(value)?value:value?[value]:[]).map(String),appliedGlobalValues:key=>state.appliedGlobal[key+'s'],currentScenario:()=>state.appliedGlobal.correctionScenario,Option:function(label,value){this.value=value;this.text=label;},populateOperations(){},setSelected:(id,values)=>{const el=typeof id==='string'?node(id):id;for(const o of el.options)o.selected=values.includes(o.value);},view:name=>{assert(state.restoringView);state.view=name;},async analyze(){calls.push({view:state.view,suppliers:node('supplierFilter').selectedOptions.map(x=>x.value),scenario:node('correctionScenario').value});state.model={meta:{},rows:[{amount:liveValue}]};},render:()=>renders.push(plain(state.model)),say(){}};
+ c.viewScopeMatches=()=>true;const analyze=c.analyze;c.analyze=async()=>{await analyze();return true;};
  vm.createContext(c);vm.runInContext(code,c);return{api:c.api,state,applied,calls,renders,storedTables,node,years,context:c,setLive:value=>liveValue=value,get claimState(){return claimState;}};
 }
 function memory(){const values=new Map();return{values,getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value)};}
@@ -42,3 +43,9 @@ test('saved views enable after initial analysis finishes without polling',async(
 });
 
 test('removed saved suppliers and analysts remain explicit selections after current options are rebuilt',async()=>{const f=fixture();f.applied.analystFilter=['Analista ausente'];const saved=plain(f.api.captureView());f.context.render=()=>{f.node('supplierFilter').options=[{value:'',selected:true}];f.node('analystFilter').options=[{value:'',selected:true}];};await f.api.restoreView(saved);assert.deepEqual(f.node('supplierFilter').selectedOptions.map(o=>o.value),['Fornecedor A']);assert.deepEqual(f.node('analystFilter').selectedOptions.map(o=>o.value),['Analista ausente']);});
+
+test('saved views accept a revalidated cached model and invalidate hidden pane stamps for restored filters',async()=>{
+ const f=fixture(),previous=f.state.model,saved=plain(f.api.captureView());f.context.analyze=async()=>true;f.state.renderedViews=new Map([['claims',1],['suppliers',1]]);saved.local.supplierSearch='Synthetic filter';await f.api.restoreView(saved);
+ assert.equal(f.state.model,previous);assert.equal(f.applied.supplierSearch,'Synthetic filter');assert.equal(f.state.renderedViews.size,0);assert.equal(f.renders.length,1);
+ f.context.analyze=async()=>false;await assert.rejects(f.api.restoreView(saved),/Não foi possível atualizar/);
+});

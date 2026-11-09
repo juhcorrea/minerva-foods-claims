@@ -19,9 +19,30 @@
     params.set('correctionScenario', String(opts.correctionScenario ?? 'corrected'));
     return params.toString();
   }
+  // Session-memory only. Revalidate access and both data revisions before reuse;
+  // never persist published financial models in browser storage.
+  function createReportCache(limit = 2) {
+    const entries = new Map();
+    return {
+      get(key) { return entries.get(key); },
+      valid(payload, meta) {
+        return Boolean(payload?.revision && payload.revision === meta?.reportMeta?.revision &&
+          payload.model?.meta?.correctionProgressRevision === meta?.correctionProgressRevision &&
+          typeof meta?.correctionProgressRevision === 'string' &&
+          payload.model?.procurementReport?.meta?.agingDate === meta?.agingDate && typeof meta?.agingDate === 'string');
+      },
+      put(key, payload) {
+        if (!payload?.model || !payload.revision) return;
+        for (const [id, value] of entries) if (value.revision !== payload.revision) entries.delete(id);
+        entries.delete(key); entries.set(key, payload);
+        while (entries.size > limit) entries.delete(entries.keys().next().value);
+      },
+      clear() { entries.clear(); }
+    };
+  }
   // Pure helpers are available to local Node checks; hosted behavior never starts there.
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {displayName, accessStatus, isApprovedSession, publicProfile, escapeHTML, reportQuery};
+    module.exports = {displayName, accessStatus, isApprovedSession, publicProfile, escapeHTML, reportQuery, createReportCache};
     return;
   }
   if (global.MINERVA_HOSTED !== true) return;
@@ -34,6 +55,7 @@
   let reportController = null;
   let loadVersion = 0;
   let publishedMeta = null;
+  const reportCache = createReportCache();
   let sessionWatchTimer = null;
   let sessionCheckInFlight = false;
   let lastSessionCheckAt = 0;
@@ -107,7 +129,7 @@
     $('teamCloseCopy').addEventListener('click', () => { $('teamCopyFallback').hidden = true; });
     $('teamRefresh').addEventListener('click', () => {
       if (hasDraft()) { setMessage('Publique a análise local ou limpe a seleção dos arquivos antes de recarregar a versão compartilhada.'); return; }
-      loadReport(app.getOptions());
+      reportCache.clear(); loadReport(app.getOptions());
     });
     document.addEventListener('minerva:model-updated', refreshControls);
     global.addEventListener('focus', checkSessionAccess);
@@ -123,11 +145,13 @@
     const opts = options || {};
     stopSessionWatch();
     session = null;
+    reportCache.clear();
     updateProfile();
     publishedMeta = null;
     if ($('sidebarUpdatedAt')) { $('sidebarUpdatedAt').textContent = 'Acesso encerrado'; $('sidebarUpdatedAt').removeAttribute('datetime'); }
     if ($('sidebarUpdatedBy')) $('sidebarUpdatedBy').textContent = '';
     if (reportController) reportController.abort();
+    ++loadVersion; reportController = null; loadingReport = false;
     body.classList.remove('team-session-pending', 'team-authenticated', 'team-admin', 'team-editor', 'team-viewer');
     body.classList.add('team-denied');
     $('teamGate').hidden = false;
@@ -279,8 +303,16 @@
     loadingReport = true;
     refreshControls();
     try {
-      const payload = await api('/api/report?' + reportQuery(opts), {signal:controller.signal});
-      if (requestVersion !== loadVersion) return false;
+      const key = reportQuery(opts);
+      let payload = reportCache.get(key);
+      if (payload) {
+        const metadata = await api('/api/report/meta', {signal:controller.signal});
+        if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return false;
+        if (!reportCache.valid(payload, metadata)) { reportCache.clear(); payload = null; }
+      }
+      if (!payload) payload = await api('/api/report?' + key, {signal:controller.signal});
+      if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return false;
+      reportCache.put(key, payload);
       publishedMeta = payload.revision ? payload : null;
       if (!payload.model) {
         showEmptyReport();
@@ -325,6 +357,7 @@
     try {
       const expectedRevision = publishedMeta?.revision || session.reportMeta?.revision || 'none';
       const saved = await api('/api/report', {method:'POST', headers:{'If-Match':'"' + expectedRevision + '"'}, body:JSON.stringify(payload)});
+      reportCache.clear();
       publishedMeta = saved;
       session.reportMeta = saved;
       app.state.bd = app.state.control = null;
@@ -532,10 +565,11 @@
 
   async function setCorrectionProgress(payload){
     if(!canUpdateBases()||hasDraft())throw new Error('As marcações exigem permissão para atualizar bases e uma versão publicada.');
+    reportCache.clear();
     return api('/api/correction-progress',{method:'POST',body:JSON.stringify(payload)});
   }
 
   createUI();
-  global.MinervaTeam = {refresh:() => loadReport(app.getOptions()), setCorrectionProgress, openMembers, copyLink, logout, getProfile:() => {const profile=publicProfile(session);return profile?{...profile,id:session.userId||''}:null;}};
+  global.MinervaTeam = {refresh:() => {reportCache.clear();return loadReport(app.getOptions());}, setCorrectionProgress, openMembers, copyLink, logout, getProfile:() => {const profile=publicProfile(session);return profile?{...profile,id:session.userId||''}:null;}};
   boot();
 })(typeof window !== 'undefined' ? window : globalThis);

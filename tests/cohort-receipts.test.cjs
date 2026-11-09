@@ -7,6 +7,17 @@ const bd=(o={})=>Object.assign(Array(57).fill(null),{0:o.order||'CLAIM1',1:o.dat
 const cr=(o={})=>Object.assign(Array(32).fill(null),{1:o.entryYear===undefined?2026:o.entryYear,3:'ME',7:o.ref||'A/1',10:o.supplier||'NOME LONGO DO CONTROLE',11:'Depósito',12:o.status||'Pago',13:'2026-02-01',14:o.expected===undefined?50:o.expected,17:o.comp===undefined?'2026-02-01':o.comp,19:o.received===undefined?100:o.received,30:o.ae===undefined?2026:o.ae,31:'Analista Controle'});
 const run=(b,c,o={})=>E.analyze([bh,...b],[ch,...c],{years:[2026],asOf:'2026-10-30',lossFormula:'subtract-negotiating',...o});
 
+test('supplier receipt indexing preserves normalized names, status subtotals, unlinked cash and source order',()=>{
+ const b=[bd({order:'FORWARD',nf:1,supplier:'Fornecedor Á'}),bd({order:'NEGOTIATE',nf:2,supplier:' fornecedor a ',status:'EM NEGOCIAÇÃO - PROCEDENTE'}),bd({order:'OTHER',nf:3,supplier:'FORNECEDOR A',status:'EM ANALISE'}),bd({order:'SECOND',nf:4,supplier:'Fornecedor B'}),bd({order:'UNPAID',nf:5,supplier:'Fornecedor sem pagamento'})];
+ const c=[cr({ref:'FORWARD',supplier:'FORNECEDOR A',received:11.25}),cr({ref:'NEGOTIATE',supplier:'Fornecedor Á',received:22.5}),cr({ref:'OTHER',supplier:' fornecedor a ',received:33.75}),cr({ref:'SECOND',supplier:'Fornecedor B',received:7.5}),cr({ref:'UNLINKED',supplier:'Fornecedor A',received:44.5})],before=JSON.stringify({b,c});
+ for(const correctionScenario of ['original','corrected'])for(const allYears of [false,true]){
+  const m=run(b,c,{correctionScenario,allYears}),a=m.suppliers.find(s=>E.normalizeSupplier(s.name)==='FORNECEDOR A'),other=m.suppliers.find(s=>s.name==='Fornecedor B'),unpaid=m.suppliers.find(s=>s.name==='Fornecedor sem pagamento');
+  assert.equal(a.received,112);assert.equal(a.receivedNegotiating,22.5);assert.equal(a.receivedOtherStatuses,78.25);assert.equal(a.paid,4);assert.equal(other.received,7.5);assert.equal(other.receivedNegotiating,0);assert.equal(other.receivedOtherStatuses,0);assert.equal(unpaid.received,0);assert.equal(unpaid.receivedNegotiating,0);assert.equal(unpaid.receivedOtherStatuses,0);
+  assert.equal(m.summary.received,119.5);assert.equal(m.summary.receivedNegotiating,22.5);assert.equal(m.summary.receivedOtherStatuses,78.25);assert.deepEqual(m.receiptCohorts.rows.map(row=>row.row),[2,3,4,5,6]);assert.equal(m.suppliers.filter(s=>E.normalizeSupplier(s.name)==='FORNECEDOR A').length,1);
+ }
+ assert.equal(JSON.stringify({b,c}),before);
+});
+
 test('a 2024 claim paid in 2026 enters 2026 cash and is separated from same-year claims',()=>{
  const b=[bd({order:'NEW',nf:1}),bd({order:'OLD',nf:2,date:'2024-01-01'})],c=[cr({ref:'NEW',received:100}),cr({ref:'OLD',received:200,entryYear:2024})];
  const before=JSON.stringify({b,c}),m=run(b,c);
