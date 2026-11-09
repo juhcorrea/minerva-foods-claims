@@ -18,8 +18,19 @@
   const OPS = new Set(['EXPORTACAO - CTNR', 'EXPORTACAO - CARRETA']);
   const OMIT = new Set(['', 'NA', 'N/A', 'NAN', 'NONE', 'NULL', '0', '-', '--', 'NAO ACIONADO', 'SEM REFERENCIA', 'SEM INFORMACAO', 'CCO', 'COURO']);
   const text = v => v == null ? '' : String(v).trim();
-  const norm = v => text(v).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ');
-  const normalizeStatus = v => norm(v).replace(/\s*[-–—]\s*/g, ' - ');
+  // Repeated suppliers, headers and dates recur in several independent reports.
+  // Memoization lasts only for one synchronous analysis and is bounded: source
+  // data and derived values are never retained across uploads or requests.
+  let analysisMemo = null;
+  const memo = (cache, key, calculate) => {
+    if (!cache) return calculate();
+    if (cache.has(key)) return cache.get(key);
+    const value = calculate();
+    if (cache.size < 16384) cache.set(key, value);
+    return value;
+  };
+  const norm = v => {const value=text(v);return memo(analysisMemo?.norm,value,()=>value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' '));};
+  const normalizeStatus = v => {const value=norm(v);return memo(analysisMemo?.status,value,()=>value.replace(/\s*[-–—]\s*/g, ' - '));};
   function filterValues(options, plural, singular, normalize) {
     const input=Object.prototype.hasOwnProperty.call(options,plural)?options[plural]:options[singular],values=Array.isArray(input)?input:[input],seen=new Set();
     return values.map(text).filter(value=>{const key=normalize(value);if(!key||seen.has(key))return false;seen.add(key);return true;});
@@ -29,7 +40,7 @@
     return {...options,operations,suppliers,controlOperations,operation:operations.join(' · '),supplier:suppliers.join(' · '),controlOperation:controlOperations.join(' · ')};
   }
   const globalFilterMeta=options=>({supplier:options.suppliers.join(' · '),suppliers:[...options.suppliers],operation:options.operations.join(' · '),operations:[...options.operations]});
-  const headerKey = v => norm(v).replace(/[^A-Z0-9]/g, '');
+  const headerKey = v => {const value=norm(v);return memo(analysisMemo?.headers,value,()=>value.replace(/[^A-Z0-9]/g, ''));};
   const unique = values => [...new Set(values)];
   const money = n => Math.round((n + Number.EPSILON * Math.sign(n)) * 100) / 100;
   const ratio = (a, b) => b === 0 ? null : a / b;
@@ -46,6 +57,9 @@
   }
 
   function parseDate(v) {
+    return typeof v === 'string' || typeof v === 'number' ? memo(analysisMemo?.dates,v,()=>parseDateValue(v)) : parseDateValue(v);
+  }
+  function parseDateValue(v) {
     if (v == null || v === '') return null;
     if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
     if (typeof v === 'number') {
@@ -168,10 +182,10 @@
     const operationFilter = new Set(options.operations.map(normalizeStatus));
     const lossFormula = options.lossFormula === 'pending' ? 'pending' : options.lossFormula === 'add-negotiating' ? 'add-negotiating' : 'subtract-negotiating';
     const issues = [], corrections = [], installments = [], unmatchedControls = [];
-    const all = [];
+    const all = [], eligibleAnalysts = new Map();
     const analystAt = row => text(bdRows[row - 1]?.[56]).replace(/\s+/g, ' ') || 'Não informado';
     const issue = (kind, data) => {
-      const analysts = unique((data.bdRows?.length ? data.bdRows.map(analystAt) : all.filter(c => c.eligible && norm(c.supplier) === norm(data.supplier)).map(c => c.analyst)));
+      const analysts = unique((data.bdRows?.length ? data.bdRows.map(analystAt) : [...(eligibleAnalysts.get(norm(data.supplier)) || [])]));
       issues.push({kind, row: null, reference: '', supplier: '', detail: '', bdRows: [], amount: null, ...data, analysts: analysts.length ? analysts : ['Não informado']});
     };
     const index = new Map();
@@ -196,6 +210,10 @@
         eligible: otherFilters && periodEligible && !war, matchedControlRows: [], candidateControlRows: [], linkState: 'unmatched',
       };
       all.push(c);
+      if (c.eligible) {
+        if (!eligibleAnalysts.has(c.supplierKey)) eligibleAnalysts.set(c.supplierKey, new Set());
+        eligibleAnalysts.get(c.supplierKey).add(c.analyst);
+      }
       for (const k of keys) {
         if (!index.has(k)) index.set(k, new Set());
         index.get(k).add(c);
@@ -361,8 +379,9 @@
       if (markedPaid && compensationYear == null) {meta.excludedYearUnknownCount++; if (validReceived) meta.excludedYearUnknownAmount += receivedValue;}
     }
 
+    const installmentByRow = new Map(installments.map(installment => [installment.row, installment]));
     for (const c of claims) {
-      const linked = installments.filter(i => c.matchedControlRows.includes(i.row));
+      const linked = c.matchedControlRows.map(row => installmentByRow.get(row)).filter(Boolean);
       c.linkState = linked.length ? linked.some(i => i.grouped) ? 'grouped' : 'matched' : c.candidateControlRows.length ? 'review' : 'unmatched';
       if (c.linkState === 'unmatched' && c.statusKey === FORWARDED) {
         supplierRow(c.supplierKey).unmatchedClaims++;
@@ -412,7 +431,9 @@
       s.recoveryRate = ratio(s.received, s.claimed);
       if (s.forwarded - s.received < -0.005) issue('RECEIVED_ABOVE_FORWARDED', {supplier: s.name, amount: s.forwarded - s.received, detail: 'Recebido executivo supera o reclamado encaminhado. Diferença negativa preservada; revisar valores, câmbio e vínculos. Outros status no reclamado não compensam esse excesso.'});
     }
-    for (const s of suppliersMap.values()) s.reviewCount = issues.filter(i => norm(i.supplier) === norm(s.name)).length;
+    const reviewCounts = new Map();
+    for (const item of issues) { const key = norm(item.supplier); reviewCounts.set(key, (reviewCounts.get(key) || 0) + 1); }
+    for (const s of suppliersMap.values()) s.reviewCount = reviewCounts.get(norm(s.name)) || 0;
     const suppliers = [...suppliersMap.values()].sort((a, b) => b.claimed - a.claimed || a.name.localeCompare(b.name, 'pt-BR'));
     const totalClaimed = sum(suppliers, 'claimed');
     const rawTotals = Object.fromEntries(['forwarded', 'negotiating', 'otherClaimed', 'received', 'receivedNegotiating', 'receivedOtherStatuses', 'receivedConfirmed', 'balance', 'explicitLoss', 'openBalance', 'overdueBalance', 'onTimeBalance', 'noDueBalance'].map(k => [k, sum(suppliers, k)]));
@@ -504,6 +525,12 @@
     return years.size?[...years].sort((a,b)=>a-b):[Number(today().slice(0,4))];
   }
   function analyze(bdRows, controlRows, options = {}) {
+    const previousMemo=analysisMemo;
+    analysisMemo={norm:new Map(),status:new Map(),headers:new Map(),dates:new Map()};
+    try {return analyzeCore(bdRows, controlRows, options);}
+    finally {analysisMemo=previousMemo;}
+  }
+  function analyzeCore(bdRows, controlRows, options = {}) {
     options=normalizeFilterOptions(options);
     if(options.allYears===true)options={...options,years:allSourceYears(bdRows,controlRows)};
     const correctionScenario = options.correctionScenario === 'original' ? 'original' : 'corrected', useOriginal = correctionScenario === 'original';
