@@ -43,6 +43,11 @@ test('chart supplier refinement restores applied operation sets and does not app
  await f.context.selectChartSupplier(A);const options=f.calls.at(-1);assert.deepEqual(options.operations,[EX,MI]);assert.deepEqual(options.controlOperations,[MI,IM]);assert.deepEqual(options.suppliers,[A]);assert.deepEqual(options.years,[2026]);assert.deepEqual(f.values('supplierFilter'),[A]);assert.equal(f.state.chartSupplierBusy,false);
 });
 
+test('supplier chart refinement preserves its applied years without changing the other tabs year selection',async()=>{
+ const f=fixture();f.state.view='suppliers';f.state.model.meta.years=[2025];f.state.supplierYears=[2026];
+ await f.context.selectChartSupplier(A);assert.deepEqual(f.calls.at(-1).years,[2025]);assert.equal(f.calls.at(-1).allYears,false);assert.deepEqual(f.years.map(y=>y.checked),[false,true]);assert.deepEqual(clone(f.state.supplierYears),[2025]);
+});
+
 test('reportQuery repeats each selected value and explicit empty plurals override every legacy filter',()=>{
  const query=new URLSearchParams(reportQuery({operations:[EX,MI],suppliers:[A,B],controlOperations:[IM,UNKNOWN],years:[2026],allYears:true,correctionScenario:'original'}));assert.deepEqual(query.getAll('operation'),[EX,MI]);assert.deepEqual(query.getAll('supplier'),[A,B]);assert.deepEqual(query.getAll('controlOperation'),[IM,UNKNOWN]);assert.equal(query.get('allYears'),'1');assert.equal(query.get('correctionScenario'),'original');
  const empty=new URLSearchParams(reportQuery({operations:[],suppliers:[],controlOperations:[],operation:EX,supplier:A,controlOperation:MI}));for(const key of ['operation','supplier','controlOperation'])assert.equal(empty.has(key),false);

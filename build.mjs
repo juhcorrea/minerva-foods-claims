@@ -35,4 +35,7 @@ const wrapper=fs.readFileSync(path.join(root,'worker/entry.js'),'utf8');
 fs.mkdirSync(path.join(output,'server'),{recursive:true});fs.mkdirSync(path.join(output,'.openai'),{recursive:true});
 fs.writeFileSync(path.join(output,'server/index.js'),engine+'\n'+modules.join('\n')+'\nconst MIGRATION_SOURCE='+JSON.stringify(migrationSource)+';\nconst STATIC_ASSETS='+JSON.stringify(assets)+';\n'+wrapper);
 fs.copyFileSync(path.join(root,'.openai/hosting.json'),path.join(output,'.openai/hosting.json'));
+// The portable Sites packager reads dist/server. Keep it in the same build
+// transaction so an ignored Worker from an earlier release cannot be packaged.
+await import('./scripts/prepare-sites-artifact.mjs');
 console.log(JSON.stringify({entry:'build/server/index.js',bytes:fs.statSync(path.join(output,'server/index.js')).size,assets:Object.keys(assets).length}));

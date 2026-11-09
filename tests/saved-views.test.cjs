@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),{webcrypto}=require('node:crypto');
 const {repository,identityKey}=require('../dist/saved-views.js');
-const source=fs.readFileSync(require.resolve('../dist/app.js'),'utf8'),start=source.indexOf('  function sanitizeView('),end=source.indexOf('  window.MinervaApp=',start),code=source.slice(start,end)+'\nthis.api={sanitizeView,captureView,restoreView};';
+const source=fs.readFileSync(require.resolve('../dist/app.js'),'utf8'),start=source.indexOf('  function sanitizeView('),end=source.indexOf('  window.MinervaApp=',start),yearHelpers=source.slice(source.indexOf('  function cleanYears'),source.indexOf('  function requestedYearScope')),code=yearHelpers+source.slice(start,end)+'\nthis.api={sanitizeView,captureView,restoreView};';
 const plain=value=>JSON.parse(JSON.stringify(value));
 function fixture(){
  const years=[{value:'2025',checked:false},{value:'2026',checked:true}],nodes=new Map(),calls=[],renders=[],storedTables=[];
@@ -11,7 +11,7 @@ function fixture(){
  let liveValue=110,claimState={claims:{country:['País A','País B'],query:'ABC'},procurement:{pending:['Aguardando']},supplier:'Fornecedor A'};
  const F={clear(){storedTables.length=0;},sanitizeState:input=>({tables:(input?.tables||[]).map(t=>({id:String(t.id),filters:(t.filters||[]).map(f=>({column:f.column,values:f.values})),sort:t.sort||null}))}),exportState:()=>({tables:[{id:'cc-claims-table',filters:[{column:1,values:['País A']}],sort:{column:6,direction:'desc'}}]}),importState:s=>storedTables.push(plain(s))};
  const c={state,applied,F,document:{querySelectorAll:()=>years},window:{MinervaClaimControl:{getViewState:()=>claimState,setViewState:v=>claimState=plain(v)},MinervaAnalysts:{getViewState:()=>({year:2026}),setViewState(){}},MinervaMeetings:{getViewState:()=>({year:2026,month:3}),setViewState(){}}},$:node,asList:value=>(Array.isArray(value)?value:value?[value]:[]).map(String),appliedGlobalValues:key=>state.appliedGlobal[key+'s'],currentScenario:()=>state.appliedGlobal.correctionScenario,Option:function(label,value){this.value=value;this.text=label;},populateOperations(){},setSelected:(id,values)=>{const el=typeof id==='string'?node(id):id;for(const o of el.options)o.selected=values.includes(o.value);},view:name=>{assert(state.restoringView);state.view=name;},async analyze(){calls.push({view:state.view,suppliers:node('supplierFilter').selectedOptions.map(x=>x.value),scenario:node('correctionScenario').value});state.model={meta:{},rows:[{amount:liveValue}]};},render:()=>renders.push(plain(state.model)),say(){}};
- c.viewScopeMatches=()=>true;const analyze=c.analyze;c.analyze=async()=>{await analyze();return true;};
+ c.document.querySelectorAll=selector=>selector.includes(':checked')?years.filter(year=>year.checked):years;c.populateSupplierYears=()=>{c.supplierYearOptions=plain(state.supplierYears);};c.viewScopeMatches=()=>true;const analyze=c.analyze;c.analyze=async()=>{await analyze();return true;};
  vm.createContext(c);vm.runInContext(code,c);return{api:c.api,state,applied,calls,renders,storedTables,node,years,context:c,setLive:value=>liveValue=value,get claimState(){return claimState;}};
 }
 function memory(){const values=new Map();return{values,getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value)};}
@@ -48,4 +48,12 @@ test('saved views accept a revalidated cached model and invalidate hidden pane s
  const f=fixture(),previous=f.state.model,saved=plain(f.api.captureView());f.context.analyze=async()=>true;f.state.renderedViews=new Map([['claims',1],['suppliers',1]]);saved.local.supplierSearch='Synthetic filter';await f.api.restoreView(saved);
  assert.equal(f.state.model,previous);assert.equal(f.applied.supplierSearch,'Synthetic filter');assert.equal(f.state.renderedViews.size,0);assert.equal(f.renders.length,1);
  f.context.analyze=async()=>false;await assert.rejects(f.api.restoreView(saved),/Não foi possível atualizar/);
+});
+
+test('supplier saved views retain their applied years independently of the other tabs and legacy defaults remain all years',async()=>{
+ const f=fixture();f.state.view='suppliers';f.state.model.meta={allYears:false,years:[2021,2025]};f.state.supplierYears=[2026];f.state.appliedGlobal.years=[2021,2025];
+ const saved=plain(f.api.captureView());assert.deepEqual(saved.supplierYears,[2021,2025]);assert.deepEqual(saved.global.years,[2026]);f.state.supplierYears=[];await f.api.restoreView(saved);assert.deepEqual(plain(f.state.supplierYears),[2021,2025]);assert.deepEqual(f.context.supplierYearOptions,[2021,2025]);assert.deepEqual(f.years.map(y=>y.checked),[false,true]);
+ delete saved.supplierYears;await f.api.restoreView(saved);assert.deepEqual(plain(f.state.supplierYears),[]);assert.deepEqual(f.context.supplierYearOptions,[]);
+ assert.deepEqual(plain(f.api.sanitizeView({supplierYears:['2026',2025,2026,'bad',1999,2201]}).supplierYears),[2025,2026]);
+ f.state.model.meta={allYears:true,years:[2021,2025,2026]};assert.deepEqual(plain(f.api.captureView().supplierYears),[]);
 });

@@ -9,8 +9,8 @@ const teamCode=between(teamSource,'  async function loadReport(options)','  asyn
 const deferred=()=>{let resolve,reject;const promise=new Promise((done,fail)=>{resolve=done;reject=fail;});return {promise,resolve,reject};};
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function flush(){for(let n=0;n<5;n++)await tick();}
-const model=allYears=>({meta:{allYears,years:allYears?[2021,2026]:[2026],correctionScenario:'corrected',linkedControlRows:0},summary:{claimed:allYears?100:10,recordCount:0,reviewCount:0},suppliers:[],controlReport:{supplierOptions:[]}});
-const payload=allYears=>({model:model(allYears),files:{bd:'Synthetic BD.xlsx',control:'Synthetic Control.xlsx'},revision:allYears?'history':'current',updatedAt:'2026-11-06T12:00:00Z',updatedBy:'Test'});
+const model=(allYears,years=[2026])=>({meta:{allYears,years:allYears?[2021,2026]:years,correctionScenario:'corrected',linkedControlRows:0},summary:{claimed:allYears?100:10,recordCount:0,reviewCount:0},suppliers:[],controlReport:{supplierOptions:[]}});
+const payload=(allYears,years)=>({model:model(allYears,years),files:{bd:'Synthetic BD.xlsx',control:'Synthetic Control.xlsx'},revision:allYears?'history':'current',updatedAt:'2026-11-06T12:00:00Z',updatedBy:'Test'});
 function fixture({local=false,initialModel=model(false),pausePaint=false,respectAbort=false,renderError=false}={}){
  const elements=new Map(),renders=[],requests=[],errors=[],messages=[],calculations=[],scrolls=[],timers=new Map(),paint=deferred();let paintCount=0,timerId=0,clears=0;
  const node=id=>{if(!elements.has(id))elements.set(id,{id,hidden:false,disabled:false,isConnected:true,open:false,value:'',dataset:{},classList:{toggle(){}},setAttribute(){},removeAttribute(){},toggleAttribute(){},closest(){return this;},close(){this.open=false;}});return elements.get(id);};
@@ -22,7 +22,7 @@ function fixture({local=false,initialModel=model(false),pausePaint=false,respect
   document:{getElementById:node,body:{dataset:{},classList:{toggle(){}}},querySelector:node,querySelectorAll(selector){if(selector==='input[name="year"]:checked')return years.filter(y=>y.checked);if(selector==='[id^="view-"]')return views;if(selector==='[data-view]')return nav;if(selector.includes('.filters-panel input'))return [...controls,...(selector.includes('.main-nav')?nav:[])];return [];},dispatchEvent(){}},
   window:{scrollTo(options){scrolls.push({...options});}},global:{setTimeout(fn,delay){const id=++timerId;timers.set(id,{fn,delay});return id;},clearTimeout(id){timers.delete(id);}},$:node,F:{clear(){clears++;}},captureOperation(){},populateOperations(){},setText(){},populateSuppliers(){},say(){},notice(message){errors.push(message);},integer:String,
   nextPaint:()=>pausePaint&&paintCount++===0?paint.promise:Promise.resolve(),openImports(){throw Error('Unexpected import prompt');},
-  E:{analyze(_bd,_control,options){calculations.push({...options});return model(options.allYears===true);}},
+  E:{analyze(_bd,_control,options){calculations.push({...options});return model(options.allYears===true,options.years);}},
   renderViewBody(){},render(){if(renderError)throw Error('Synthetic render failure');renders.push({view:state.view,allYears:state.model.meta.allYears,claimed:state.model.summary.claimed});},
   session:{approved:true},reportCache:require('../dist/team.js').createReportCache(),reportController:null,loadVersion:0,loadingReport:false,publishedMeta:null,refreshControls(){},setMessage(message,error){messages.push({message,error:Boolean(error)});},showEmptyReport(){},canUpdateBases:()=>true,
   api(url,options){const job=deferred();requests.push({url,options,...job});if(respectAbort)options.signal.addEventListener('abort',()=>job.reject(Object.assign(new Error('Aborted'),{name:'AbortError'})),{once:true});return job.promise;},reportQuery:require('../dist/team.js').reportQuery};
@@ -117,6 +117,38 @@ test('render failure cannot reveal partially updated values and year mismatch ca
 
 test('scope notice is outside global filters and its retry button invokes analysis',()=>{
  const {createDOM}=require('./dom-fixture.cjs'),dom=createDOM(),main=dom.element('main'),globalFilters=dom.element('div',{id:'globalFilterBlock'},main),receipt=dom.element('nav',{id:'receiptViews'},main),claims=dom.element('section',{id:'view-claims'},main),exports=dom.element('button',{id:'exportReport'},main);let retries=0;
- const context={state:{view:'claims',model:model(true)},document:dom.document,$:id=>dom.document.getElementById(id),analyze(){retries++;}};vm.createContext(context);vm.runInContext(between(appSource,'  function viewScopeMatches','  const currentScenario'),context);context.refreshViewScope();
+ const context={state:{view:'claims',model:model(true)},document:dom.document,$:id=>dom.document.getElementById(id),asList:value=>value||[],analyze(){retries++;}};vm.createContext(context);vm.runInContext(between(appSource,'  function cleanYears','  function captureSupplierYears')+between(appSource,'  function viewScopeMatches','  const currentScenario'),context);context.refreshViewScope();
  const banner=dom.document.getElementById('viewScopeNotice'),retry=dom.document.getElementById('viewScopeRetry');assert.equal(banner.parentElement,main);assert.equal(globalFilters.contains(banner),false);assert.equal(main.children.indexOf(banner)+1,main.children.indexOf(receipt));assert.equal(claims.hidden,true);assert.equal(exports.disabled,true);retry.click();assert.equal(retries,1);
+});
+
+test('supplier year scope is independent and changing between two restricted scopes reloads the correct years',async()=>{
+ const f=fixture();f.state.supplierYears=[2025];f.context.view('suppliers');
+ assert.equal(f.requests.length,1);let query=new URLSearchParams(f.requests[0].url.split('?')[1]);assert.equal(query.has('allYears'),false);assert.equal(query.get('years'),'2025');assert.equal(f.node('view-suppliers').hidden,true);
+ f.requests[0].resolve(payload(false,[2025]));await flush();assert.equal(f.context.viewScopeMatches(),true);assert.deepEqual(f.years.map(y=>y.checked),[false,true]);
+ f.context.view('claims');assert.equal(f.requests.length,2);query=new URLSearchParams(f.requests[1].url.split('?')[1]);assert.equal(query.get('years'),'2026');assert.equal(f.node('view-claims').hidden,true);
+ f.requests[1].resolve(payload(false,[2026]));await flush();f.context.view('suppliers');assert.equal(f.requests.length,3);assert.equal(f.requests[2].url,'/api/report/meta');assert.deepEqual(f.state.supplierYears,[2025]);
+ f.requests[2].resolve({reportMeta:{revision:'new-revision'}});await flush();assert.equal(new URLSearchParams(f.requests[3].url.split('?')[1]).get('years'),'2025');f.requests[3].resolve(payload(false,[2025]));await flush();assert.equal(f.node('view-suppliers').hidden,false);assert.equal(f.node('exportReport').disabled,false);
+});
+
+test('same restricted year can reuse the active model while different and multiple supplier years cannot',async()=>{
+ const f=fixture();f.state.supplierYears=[2026];f.context.view('suppliers');assert.equal(f.requests.length,0);assert.equal(f.context.viewScopeMatches(),true);
+ f.state.supplierYears=[2026,2025,2026];const selected=f.context.options();assert.equal(selected.allYears,false);assert.deepEqual(Array.from(selected.years),[2025,2026]);assert.equal(f.context.viewScopeMatches(),false);
+ f.context.view('suppliers');assert.equal(f.requests.length,1);f.requests[0].resolve(payload(false,[2026,2025]));await flush();assert.equal(f.context.viewScopeMatches(),true,'Equal year sets do not depend on response ordering');
+ f.state.supplierYears=[];assert.equal(f.context.options().allYears,true);assert.equal(f.context.viewScopeMatches(),false);f.context.view('suppliers');f.requests[1].resolve(payload(true));await flush();assert.equal(f.context.viewScopeMatches(),true);
+});
+
+test('a late supplier year response cannot overwrite the last selected year and timeout keeps mismatched values hidden',async()=>{
+ const f=fixture({respectAbort:true});f.state.supplierYears=[2025];f.context.view('suppliers');f.state.supplierYears=[2026];const last=f.context.analyze();await flush();assert.equal(f.requests.length,2);assert.equal(f.requests[0].options.signal.aborted,true);
+ f.requests[0].resolve(payload(false,[2025]));f.requests[1].resolve(payload(false,[2026]));await last;await flush();assert.deepEqual(f.state.model.meta.years,[2026]);assert.equal(f.context.viewScopeMatches(),true);assert(f.nav.every(button=>!button.disabled));
+ f.state.supplierYears=[2025];f.context.view('suppliers');f.expireLatest();await flush();assert.equal(f.node('view-suppliers').hidden,true);assert.equal(f.node('exportReport').disabled,true);assert.deepEqual(f.state.model.meta.years,[2026]);
+ const retry=f.context.analyze();f.requests.at(-1).resolve(payload(false,[2025]));await retry;await flush();assert.equal(f.node('view-suppliers').hidden,false);assert.equal(f.node('exportReport').disabled,false);
+});
+
+test('supplier year field uses the shared searchable multi-select contract and retains historical options',()=>{
+ const {createDOM}=require('./dom-fixture.cjs'),dom=createDOM(),filters=dom.element('section',{class:'filters-panel'}),anchor=dom.element('div',{class:'year-selector'},filters);let selection=[];
+ for(const year of [2025,2026]){const input=dom.element('input',{name:'year',value:String(year)},anchor);input.value=String(year);input.checked=year===2026;}
+ const state={view:'overview',supplierYears:[2021,2025],model:{meta:{allYears:true,years:[2020,2021,2026]}}},context={state,document:dom.document,$:id=>dom.document.getElementById(id),asList:value=>Array.isArray(value)?value:value?[value]:[],setSelected(_el,values){selection=Array.from(values);},selectValues:()=>['2026','2025']};
+ vm.createContext(context);vm.runInContext(between(appSource,'  function cleanYears','  function renderView'),context);context.setupSupplierYears();
+ const field=dom.document.getElementById('supplierYearField'),select=dom.document.getElementById('supplierYearFilter');assert.equal(field.hidden,true);assert.equal(select.multiple,true);assert.equal(select.hasAttribute('data-multi-select'),true);assert.equal(select.dataset.applyTarget,'#applyFilters');assert.equal(select.dataset.placeholder,'Todos os anos');assert.deepEqual(selection,[2021,2025]);assert.deepEqual([...select.innerHTML.matchAll(/value="(\d+)"/g)].map(match=>Number(match[1])),[2026,2025,2021,2020]);
+ select.dispatchEvent({type:'change'});assert.deepEqual(Array.from(state.supplierYears),[2025,2026]);context.populateSupplierYears({meta:{allYears:false,years:[2026]}});assert(select.innerHTML.includes('value="2020"'));context.setupSupplierYears();assert.equal(filters.querySelectorAll('#supplierYearField').length,1);
 });
