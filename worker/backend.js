@@ -279,7 +279,7 @@ function redactModel(model) {
 export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null}){
  if(!engine?.analyze||!engine?.validateHeaders||!engine?.parseDate||!engine?.today)throw new Error('A reconciliation engine is required.');
  return async function handleApi(request,env){
-  const url=new URL(request.url);if(!url.pathname.startsWith('/api/'))return null;let shouldClear=false;const requestStart=performance.now();
+  const url=new URL(request.url);if(!url.pathname.startsWith('/api/'))return null;let shouldClear=false;
   try{
    if(!env?.BUCKET||typeof env.BUCKET.get!=='function'||typeof env.BUCKET.put!=='function')fail(503,'STORAGE_NOT_READY','O armazenamento compartilhado ainda não está disponível.');
    const admins=adminConfig(env);
@@ -327,14 +327,10 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
    }
    if(url.pathname==='/api/correction-progress'&&request.method==='POST')return response(await saveCorrectionProgress(env.BUCKET,access,await readBody(request,16384),url,engine));
    if(url.pathname==='/api/report'&&request.method==='GET'){
-    const authorizedAt=performance.now();
     const{value:saved}=await jsonObject(env.BUCKET,REPORT_KEY);if(!saved)return response({model:null,files:null,updatedAt:null,updatedBy:null,revision:null});
     if(saved.schemaVersion!==1||!Array.isArray(saved.bd)||!Array.isArray(saved.control))fail(503,'REPORT_INVALID','O relatório publicado precisa ser conferido pelas administradoras.');
-    const opts=analysisOptions(url,saved,engine),loadedAt=performance.now();let model;try{model=engine.analyze(saved.bd,saved.control,opts);}catch{fail(503,'REPORT_ANALYSIS_FAILED','Não foi possível processar o relatório publicado.');}
-    const analyzedAt=performance.now(),publishedModel=redactModel(await hydrateCorrectionProgress(env.BUCKET,model)),preparedAt=performance.now();
-    const result=response({...snapshotMetadata(saved),model:publishedModel},200,{'etag':`"${saved.revision}"`}),serializedAt=performance.now();
-    result.headers.set('Server-Timing',`auth;dur=${Math.round(authorizedAt-requestStart)}, storage;dur=${Math.round(loadedAt-authorizedAt)}, analysis;dur=${Math.round(analyzedAt-loadedAt)}, prepare;dur=${Math.round(preparedAt-analyzedAt)}, serialize;dur=${Math.round(serializedAt-preparedAt)}`);
-    return result;
+    const opts=analysisOptions(url,saved,engine);let model;try{model=engine.analyze(saved.bd,saved.control,opts);}catch{fail(503,'REPORT_ANALYSIS_FAILED','Não foi possível processar o relatório publicado.');}
+    return response({...snapshotMetadata(saved),model:redactModel(await hydrateCorrectionProgress(env.BUCKET,model))},200,{'etag':`"${saved.revision}"`});
    }
    if(url.pathname==='/api/report'&&request.method==='POST'){
     const body=await readBody(request);

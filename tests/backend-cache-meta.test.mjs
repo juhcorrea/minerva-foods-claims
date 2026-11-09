@@ -48,7 +48,6 @@ test('metadata keeps anonymous, pending and revoked visitors outside the private
 test('marking a correction changes the metadata revision and the hydrated report together',async()=>{
   const f=await fixture(),before=await f.call('/api/report?years=2026',f.admin);
   assert.equal(before.status,200);assert.equal(before.body.model.meta.correctionProgressRevision,'none');
-  assert.match(before.headers.get('server-timing'),/^auth;dur=\d+, storage;dur=\d+, analysis;dur=\d+, prepare;dur=\d+, serialize;dur=\d+$/);
   const key=before.body.model.correctionGroups[0].progress.key;
   const mark=await f.call('/api/correction-progress',f.admin,{key,done:true,reportRevision:'report-qa-1'});assert.equal(mark.status,200);
   assert.notEqual(mark.body.correctionProgressRevision,'none');

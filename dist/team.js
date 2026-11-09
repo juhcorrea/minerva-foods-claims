@@ -227,7 +227,7 @@
     let payload;
     try { payload = await response.json(); }
     catch { payload = null; }
-    if (diagnose && path.startsWith('/api/report')) global.console.info('MINERVA_PERF '+JSON.stringify({phase:'request',route:path.split('?')[0],headersMs:Math.round(received-started),bodyMs:Math.round(global.performance.now()-received),serverTiming:response.headers.get('Server-Timing')||''}));
+    if (diagnose && path.startsWith('/api/report')) global.console.info('MINERVA_PERF '+JSON.stringify({phase:'request',route:path.split('?')[0],headersMs:Math.round(received-started),bodyMs:Math.round(global.performance.now()-received)}));
     if (!response.ok) {
       const error = new Error(payload?.error || (response.status === 401 ? 'Seu acesso expirou. Volte à entrada para continuar.' : response.status === 403 ? 'Seu acesso não está liberado para este relatório.' : 'Não foi possível concluir a solicitação. Tente novamente.'));
       error.status = response.status;
