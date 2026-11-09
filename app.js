@@ -15,10 +15,13 @@
   const appliedGlobalValues=key=>asList(state.model?.meta?.[key+'s']??state.appliedGlobal?.[key+'s']??appliedGlobal(key));
   const $ = id => document.getElementById(id);
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const money = n => n == null || !Number.isFinite(Number(n)) ? '—' : Number(n).toLocaleString('pt-BR', {minimumFractionDigits:0,maximumFractionDigits:0});
-  const moneyExact = n => n == null || !Number.isFinite(Number(n)) ? '—' : Number(n).toLocaleString('pt-BR', {minimumFractionDigits:2,maximumFractionDigits:2});
-  const integer = n => Number(n || 0).toLocaleString('pt-BR');
-  const pct = n => n == null || !Number.isFinite(Number(n)) ? '—' : (n * 100).toLocaleString('pt-BR', {maximumFractionDigits:0}) + '%';
+  const wholeFormatter = new Intl.NumberFormat('pt-BR', {minimumFractionDigits:0,maximumFractionDigits:0});
+  const exactFormatter = new Intl.NumberFormat('pt-BR', {minimumFractionDigits:2,maximumFractionDigits:2});
+  const integerFormatter = new Intl.NumberFormat('pt-BR');
+  const money = n => n == null || !Number.isFinite(Number(n)) ? '—' : wholeFormatter.format(Number(n));
+  const moneyExact = n => n == null || !Number.isFinite(Number(n)) ? '—' : exactFormatter.format(Number(n));
+  const integer = n => integerFormatter.format(Number(n || 0));
+  const pct = n => n == null || !Number.isFinite(Number(n)) ? '—' : wholeFormatter.format(n * 100) + '%';
   const date = s => s ? String(s).slice(0,10).split('-').reverse().join('/') : '—';
   const normalize = v => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase();
   const state = {bd:null, control:null, bdName:'', controlName:'', model:null, demo:false, view:'overview', supplierMode:'summary', chartMonth:'', chartSupplierBusy:false, operation:'', controlOperation:'', correctionsPage:1, installmentsPage:1, processesPage:1, issuesPage:1, sort:'claimed', direction:-1};
@@ -83,15 +86,24 @@
     document.body.classList.toggle('presentation-workspace',['meeting','portfolio'].includes(name));
     const scopeReady=refreshViewScope();
     if(scopeReady||!state.model){
-      if(name==='claims')window.MinervaExecutive?.renderClaims(state.model,'claimAnalytics');
-      if(['claims','procurement'].includes(name))window.MinervaClaimControl?.render(state.model);
-      if(name==='analysts')window.MinervaAnalysts?.render(state.model);
-      if(name==='meeting')window.MinervaMeetings?.render(state.model);
-      if(name==='portfolio')window.MinervaPortfolio?.render(state.model);
+      try{renderView(name);}catch(error){notice(error.message||'Não foi possível exibir esta aba.',true);refreshViewScope();}
     }
     if(!state.model&&!['overview','method','portfolio'].includes(name))say('Importe as duas planilhas para consultar esta visão.');
     const activeScope=state.analysisBusy&&state.requestedOptions?state.requestedOptions.allYears:state.model?.meta?.allYears;
     if(!state.restoringView && state.model && Boolean(activeScope)!==(name==='suppliers'))analyze();
+  }
+  function renderView(name=state.view,force=false){
+    if(!state.model){state.renderedViews?.clear();if(!['overview','method'].includes(name))renderViewBody(name);return false;}
+    // Stamps are numbers: hidden panes do not retain previous large model objects.
+    const identities=state.renderModelIdentities||(state.renderModelIdentities=new WeakMap());
+    if(!identities.has(state.model))identities.set(state.model,state.renderModelSerial=(state.renderModelSerial||0)+1);
+    const key=identities.get(state.model),views=state.renderedViews||(state.renderedViews=new Map()),modules=state.renderedModules||(state.renderedModules={});
+    const needsExecutive=['overview','claims'].includes(name),needsClaims=['claims','procurement'].includes(name);
+    if(!force&&views.get(name)===key&&(!needsExecutive||modules.executive===key)&&(!needsClaims||modules.claims===key))return true;
+    state.scopeRenderPending=true;refreshViewScope();
+    renderViewBody(name);
+    views.set(name,key);if(needsExecutive)modules.executive=key;if(needsClaims)modules.claims=key;
+    state.scopeRenderPending=false;refreshViewScope();return true;
   }
   function viewScopeMatches(){
     if(!state.model||state.scopeRenderPending||Boolean(state.model.meta?.allYears)!==(state.view==='suppliers'))return false;
@@ -207,7 +219,8 @@
       if($('importDialog').open)$('importDialog').close();
       populateSuppliers();render();state.scopeRenderPending=false;refreshViewScope();document.dispatchEvent(new CustomEvent('minerva:model-updated'));
       say(`${state.demo?'Demonstração fictícia. ':''}${integer(state.model.summary.recordCount)} registros da BD no recorte; ${integer(state.model.meta.linkedControlRows)} parcelas vinculadas. ${state.model.summary.reviewCount?'Há referências para conferir antes de fechar os totais.':'Conciliação concluída.'}`);
-    }catch(e){notice(e.message||'Não foi possível analisar os arquivos.',true);}
+      return true;
+    }catch(e){notice(e.message||'Não foi possível analisar os arquivos.',true);return false;}
     finally{$('loadingOverlay').hidden=true;}
   }
   function populateSuppliers(){
@@ -223,19 +236,35 @@
   const supplierOpenTotals=()=>state.model.supplierOpenReport?.meta||state.model.summary;
   const earliestDate=values=>(values||[]).flatMap(v=>String(v||'').split(/[;·]/)).map(v=>E.parseDate(v.trim())).filter(Boolean).sort()[0]||null;
   function supplierFooter(){const s=state.model.summary,o=supplierOpenTotals();return ['Total do recorte',money(s.claimed),money(byClaimYear(s,2024)),money(byClaimYear(s,2025)),money(byClaimYear(s,2026)),money(comparativeReceived(s)),pct(comparativeRate(s)),money(loss(s)),pct(s.claimed?loss(s)/s.claimed:null),money(s.negotiating),integer(s.occurrences),s.claimed?'100%':'—',s.claimed?'100%':'—',moneyExact(o.openBalance),moneyExact(o.overdueBalance),integer(s.reviewCount)];}
-  function render(){
-    const m=state.model,s=m.summary;setText('supplierReceiptNote',receiptScopeNote());renderScenarioStatus();populateOperations();window.MinervaCorrectionImpact?.render(m);
+  function render(force=false){
+    const m=state.model,s=m.summary;renderScenarioStatus();populateOperations();
     if(state.chartMonth&&!m.meta.years.includes(Number(state.chartMonth.slice(0,4))))state.chartMonth='';
+    setText('periodLabel',`${m.meta.allYears?'Todos os anos':m.meta.years.join(' + ')} · posição em ${date(m.meta.asOf)}`);const reviewCount=reviewQueue().length;setText('correctionBadge',integer(reviewCount));setText('correctionCount',integer(reviewCount));setText('issueCount',integer(s.reviewCount));
+    const badge=$('correctionBadge');if(badge){badge.hidden=!reviewCount;badge.title=`${integer(reviewCount)} referências para conferir`;badge.setAttribute('aria-label',badge.title);}
+    renderView(state.view,force);
+  }
+  function renderViewBody(name){
+    const m=state.model;
+    if(name==='overview')renderOverview();
+    else if(name==='suppliers'){setText('supplierReceiptNote',receiptScopeNote());renderSuppliers();}
+    else if(name==='installments')renderInstallments();
+    else if(name==='corrections'){window.MinervaCorrectionImpact?.render(m);renderCorrections();}
+    else if(name==='claims'){window.MinervaExecutive?.renderClaims(m,'claimAnalytics');window.MinervaClaimControl?.render(m);}
+    else if(name==='procurement')window.MinervaClaimControl?.render(m);
+    else if(name==='analysts')window.MinervaAnalysts?.render(m);
+    else if(name==='meeting')window.MinervaMeetings?.render(m);
+    else if(name==='portfolio')window.MinervaPortfolio?.render(m);
+    else if(name==='method')renderMethodExtra();
+  }
+  function renderOverview(){
+    const m=state.model,s=m.summary;
     setText('metricClaimed',money(s.claimed));setText('metricReceived',money(comparativeReceived(s)));setText('metricRecovery',pct(comparativeRate(s)));setText('metricBalance',money(loss(s)));setText('metricNegotiating',money(s.negotiating));setText('metricOverdue',integer(s.overdue));setText('metricOpenBalance',money(s.openBalance));
-    setText('periodLabel',`${m.meta.allYears?'Todos os anos':m.meta.years.join(' + ')} · posição em ${date(m.meta.asOf)}`);setText('correctionBadge',integer(correctionGroups().length));setText('correctionCount',integer(correctionGroups().length));setText('issueCount',integer(s.reviewCount));
     document.querySelectorAll('[data-loss-formula],#lossFormula,#lossFormulaShort').forEach(el=>el.textContent=lossFormula());
     $('annualCards').innerHTML=m.annual.map(a=>`<article class="annual-card"><span class="eyebrow">ANO ${a.year}</span><div class="annual-values"><div><span>Reclamado · Data RNC</span><strong>${money(a.claimed)}</strong></div><div><span>Recebido · claims do período selecionado</span><strong>${money(comparativeReceived(a))}</strong></div><div><span>Recebido / reclamado</span><strong>${pct(comparativeRate(a))}</strong></div></div></article>`).join('');
-    renderMonthly();renderRanking();window.MinervaExecutive?.render(m);window.MinervaExecutive?.renderClaims(m,'claimAnalytics');window.MinervaClaimControl?.render(m);
+    renderMonthly();renderRanking();window.MinervaExecutive?.render(m);
     $('qualityNotice').hidden=false;$('qualityNotice').innerHTML=`<strong>${s.reviewCount?`${integer(s.reviewCount)} apontamentos para conferência`:'Referências conciliadas'}</strong><span>${integer(s.unmatchedClaims)} encaminhados sem correspondência; ${integer(m.meta.ambiguousControlRows)} parcelas com vínculo a conferir. Recebimentos confirmados no Controle são contados mesmo sem as ordens detalhadas. ${integer(s.receivedWithoutClaimDetailCount||0)} pagamentos sem detalhamento: USD ${money(s.receivedWithoutClaimDetail||0)}. ${receiptOperationNote()}</span><button class="button secondary" data-view="corrections">Conferir a base</button>`;
     const overviewRows=F.prepare('overviewTable',SUP_HEADERS,m.suppliers,supplierCells,'Resumo por fornecedor',SUP_SORT);
     $('overviewTable').innerHTML=table(SUP_HEADERS,(F.has('overviewTable')?overviewRows:overviewRows.slice(0,6)).map(supplierCells),{caption:'Principais fornecedores por valor reclamado',filterId:'overviewTable',prepared:true,footer:F.has('overviewTable')?null:supplierFooter()});
-    renderSuppliers();renderInstallments();renderCorrections();renderMethodExtra();window.MinervaAnalysts?.render(m);window.MinervaMeetings?.render(m);window.MinervaPortfolio?.render(m);
-    $('exportReport').disabled=$('exportCorrections').disabled=$('exportPdf').disabled=$('exportControl').disabled=$('exportControlPdf').disabled=false;
   }
   function chartMonthLabel(month){return new Intl.DateTimeFormat('pt-BR',{month:'long',year:'numeric',timeZone:'America/Sao_Paulo'}).format(new Date(month+'-01T12:00:00Z'));}
   function renderMonthly(){
@@ -270,7 +299,12 @@
     try{await analyze();}catch(error){notice(error.message||'Não foi possível aplicar o fornecedor.',true);}
     finally{state.chartSupplierBusy=false;if(state.model){setSelected('supplierFilter',appliedGlobalValues('supplier'));renderRanking();}}
   }
-  function supplierAnnual(s,year){const claims=state.model.claims.filter(c=>c.supplier===s.name&&c.year===year);const rows=(state.model.receiptCohorts?.rows||[]).filter(i=>i.supplier===s.name&&i.compensationYear===year);const sum=list=>list.reduce((a,r)=>a+r.received,0),claimed=claims.reduce((a,c)=>a+c.claimed,0),received=sum(rows.filter(r=>state.model.meta.years.includes(r.claimYear)));return {claimed,received,financialReceived:sum(rows),byYear:Object.fromEntries([2024,2025,2026].map(origin=>[origin,sum(rows.filter(r=>r.claimYear===origin))])),rate:claimed?received/claimed:null};}
+  function supplierAnnual(s,year){
+    const models=state.supplierAnnualModels||(state.supplierAnnualModels=new WeakMap());if(!models.has(state.model))models.set(state.model,new Map());const cache=models.get(state.model);
+    let supplier=cache.get(s.name);if(!supplier){supplier=new Map();cache.set(s.name,supplier);}if(supplier.has(year))return supplier.get(year);
+    const claims=state.model.claims.filter(c=>c.supplier===s.name&&c.year===year),rows=(state.model.receiptCohorts?.rows||[]).filter(i=>i.supplier===s.name&&i.compensationYear===year),sum=list=>list.reduce((a,r)=>a+r.received,0),claimed=claims.reduce((a,c)=>a+c.claimed,0),received=sum(rows.filter(r=>state.model.meta.years.includes(r.claimYear))),value={claimed,received,financialReceived:sum(rows),byYear:Object.fromEntries([2024,2025,2026].map(origin=>[origin,sum(rows.filter(r=>r.claimYear===origin))])),rate:claimed?received/claimed:null};
+    supplier.set(year,value);return value;
+  }
   function supplierRows(mode=state.supplierMode){
     const list=state.model.suppliers.filter(s=>normalize(s.name).includes(normalize(filterValue('supplierSearch')))).sort((a,b)=>state.sort==='name'?state.direction*a.name.localeCompare(b.name,'pt-BR'):state.direction*((state.sort==='received'?comparativeReceived(a):state.sort==='recoveryRate'?comparativeRate(a)||0:a[state.sort]??0)-(state.sort==='received'?comparativeReceived(b):state.sort==='recoveryRate'?comparativeRate(b)||0:b[state.sort]??0)));
     const heads=mode==='annual'?['Fornecedor / causador',...state.model.meta.years.flatMap(y=>[`Reclamado ${y} · USD`,`Recebido ${y} · claims 2024`,`Recebido ${y} · claims 2025`,`Recebido ${y} · claims 2026`,`Total do período em ${y} · USD`,`% ${y}`])]:SUP_HEADERS;
@@ -407,7 +441,11 @@
     worksheet(wb,'Auditoria correcoes',['Ordem agrupada','Arquivo de origem','Aba','Linha Excel','Célula','Referência original','Fornecedor BD','Analista na BD','Campo','Valor original','Valor corrigido','Linhas BD','Data RNC','Regra aplicada'],changes.map(({g,c})=>[g.reference,state.controlName,'Controle Recebimento',c.row,c.cell,c.reference||g.reference,c.supplier||g.supplier,analystText(c),c.field,c.original,c.corrected,(c.bdRows||g.bdRows).join('; '),c.rncDate,c.reason]));
     worksheet(wb,'Conferencias',['Tipo','Linha','Ordem / NF','Fornecedor','Analista na BD','Linhas BD','Valor USD','Detalhe'],issues.map(i=>[i.kind,i.row,i.reference,i.supplier,analystText(i),(i.bdRows||[]).join('; '),i.amount,i.detail]));
   }
-  function makeWorkbook(scope=false){if(!viewScopeMatches())throw new Error('Atualize o período desta aba antes de exportar.');if(scope==='meeting')return window.MinervaMeetings?.exportWorkbook();if(scope==='analysts')return window.MinervaAnalysts.exportWorkbook();if(!state.model)throw new Error('Importe as duas planilhas primeiro.');const m=state.model,wb=XLSX.utils.book_new(),correctionsOnly=scope===true,controlOnly=scope==='control';
+  function prepareExportViews(scope){
+    const views=scope==='meeting'?['meeting']:scope==='analysts'?['analysts']:['claims','procurement'].includes(scope)?[scope]:scope==='control'?['installments']:scope===true?['corrections']:['overview','claims','corrections','installments','analysts','meeting'];
+    for(const name of views)renderView(name);
+  }
+  function makeWorkbook(scope=false){if(!viewScopeMatches())throw new Error('Atualize o período desta aba antes de exportar.');prepareExportViews(scope);if(scope==='meeting')return window.MinervaMeetings?.exportWorkbook();if(scope==='analysts')return window.MinervaAnalysts.exportWorkbook();if(!state.model)throw new Error('Importe as duas planilhas primeiro.');const m=state.model,wb=XLSX.utils.book_new(),correctionsOnly=scope===true,controlOnly=scope==='control';
     if(['claims','procurement'].includes(scope)){window.MinervaClaimControl.worksheets(wb,worksheet,scope);return wb;}
     if(controlOnly)controlWorksheets(wb);else {correctionWorksheets(wb);window.MinervaCorrectionImpact?.addWorksheets(wb);}
     worksheet(wb,'Criterios',['Critério','Valor'],[['Relatório',controlOnly?'Controle de recebimento':correctionsOnly?'Correções agrupadas por ordem':'Análise completa'],['Responsável','Administração'],['Cenário dos resultados',scenarioLabel()],['Data da análise',m.meta.asOf],['Publicado por',!state.bd&&state.publishedMeta?.updatedBy||'Prévia local — não publicada'],['Atualização (Brasília)',!state.bd&&state.publishedMeta?.updatedAt?new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'short'}).format(new Date(state.publishedMeta.updatedAt)):'—'],['Anos dos claims / recebimentos',m.meta.years.join(', ')],['Fornecedor selecionado',appliedGlobal('supplier')||'Todos'],['Operação selecionada',controlOnly?controlOperationLabel():(appliedGlobal('operation')||'Todas as operações')],['Operação do Controle',controlOperationLabel()],['Escopo de operações do Controle','Controle integral, incluindo operações não identificadas. Recebidos por M/R/T; abertas de todos os anos até quitação. Filtros de fornecedor/operação podem restringir o recorte, sem exigir vínculo ou elegibilidade da BD.'],['Filtro do Controle',controlFilterText()],['Busca de correções',filterValue('correctionSearch').trim()||'Todas as ordens'],['Acompanhamento das correções',progressLabel()],['Marcação de ajuste','Conferência manual compartilhada; não altera os arquivos nem o cálculo financeiro. Novas divergências voltam a pendente.'],['Analista na BD',filterLabel('analystFilter','Todos os analistas')],['Origem do analista','BD!BE; todos os analistas das linhas vinculadas. Não identifica autoria de edição no Controle.'],['BD',state.bdName],['Controle',state.controlName],['Moeda','USD'],['Escopo do reclamado','Todas as situações da BD!G, exceto EM ANALISE, AGUARDANDO CUSTOS e RESPONDIDO-NÃO PROCEDE. Todas as operações, com filtro opcional; exclui INTERFERÊNCIA EXTERNA dos valores reclamados.'],['Em negociação','Somente EM NEGOCIAÇÃO - PROCEDENTE'],['Data de entrada','BD!B — Data RNC'],['Ano do realizado','Controle Recebimento!R — Data compensação'],['Status do realizado','Controle Recebimento!M — somente Pago'],['Data para detalhamento mensal','Controle Recebimento!R — Data compensação; ano e mês vêm desta data'],['Valor realizado','Controle Recebimento!T — Valor Recebido USD'],['Realizado do comparativo','M = Pago, ano da data R no período e T positivo; fornecedor informado no Controle ou validado na BD; todas as operações, inclusive não identificadas, na opção geral; pagamentos sem referências detalhadas são contados uma vez. Inclui claims de outros anos e situações; separa mesmo ano, outros anos e ano a conferir.'],['Recebido confirmado no Controle','Todo o Controle com M = Pago, ano de R no período e T positivo; independente de vínculo, ano RNC, situação ou expurgo da BD. Com todos os fornecedores e operações, coincide com o recebido por analista.'],['Total recebido no comparativo','Somente pagamentos no período selecionado de claims ocorridos nos anos selecionados. Com 2025+2026, um claim de 2025 pago em 2026 entra; claims de 2024 aparecem na coluna de origem mas ficam fora do total. Recebidos por origem 2024/2025/2026 incluem pagamentos dos anos selecionados em R e são apresentados separadamente. Recebido financeiro completo permanece no Controle.'],['Perda',lossFormula()],['Prejuízo por claim','AJ menos AO da BD. AO é confrontado com a soma de O de todas as parcelas, independentemente de status ou ano. Não confundir AO/acordado com T efetivamente pago.'],['Saldo em aberto por fornecedor','Soma de O das linhas com M = Dentro do Prazo ou Vencido, de todos os anos; fornecedor do cenário selecionado e recorte de operações. Vencido é apenas a parte com M = Vencido e já está incluído no aberto. N não reclassifica esses saldos.'],['Status na análise do Controle','O acompanhamento do Controle mantém o status calculado pela data da análise; os saldos por fornecedor usam o status informado em M.'],['Quitação dos acordos','Contagens no filtro; quitação considera todas as parcelas. Percentual acordado = V/U, sem repetir valores por parcela; 100% acordado não significa recebido. Saldo do acordo = V menos T pago em todos os anos; saldo das parcelas = O das parcelas abertas.'],['Ocorrências',m.meta.occurrenceDefinition],['Vínculos','O Controle é a fonte do recebido. Referências sem detalhamento não excluem pagamentos confirmados; nomes/anos originais são preservados quando a BD não permite validar. Operações conhecidas fora do recorte não entram; operação não identificada entra no filtro geral, mas não em uma operação específica.'],['Correções','Uma linha por ordem em Correcoes; auditoria por célula em Auditoria correcoes. Linhas e valores originais preservados.'],['Originais','Os arquivos de origem não foram alterados. Correções aplicadas somente na análise.'],['Demonstração',state.demo?'DADOS FICTÍCIOS':'Não']]);
@@ -446,6 +484,7 @@
   }
   function exportPdf(){
     if(!viewScopeMatches()){refreshViewScope();return;}
+    renderView(state.view);
     if(state.view==='portfolio')return window.MinervaPortfolio?.exportPdf();
     if(state.view==='meeting')return window.MinervaMeetings?.exportPdf();
     if(!state.model)return;
@@ -480,11 +519,12 @@
   addApply('applySupplierTable',$('supplierSearch').closest('.panel-heading'),['supplierSearch'],renderSuppliers);
   addApply('applyControlFilters',document.querySelector('.receipt-filters'),['installmentSearch','typeFilter','statusFilter'],renderInstallments);
   addApply('applyCorrectionFilters',document.querySelector('.correction-tools'),['correctionSearch','analystFilter','correctionProgressFilter'],renderCorrections);
-  F.onChange(id=>{if(window.MinervaClaimControl?.handlesTable(id)){window.MinervaClaimControl.handleFilter(id);return;}if(window.MinervaCorrectionImpact?.handlesTable(id)){window.MinervaCorrectionImpact.handleFilter();return;}if(window.MinervaMeetings?.handlesTable(id)){window.MinervaMeetings.handleFilter(id);return;}if(window.MinervaAnalysts?.handlesTable(id)){window.MinervaAnalysts.handleFilter(id);return;}state.correctionsPage=state.issuesPage=state.installmentsPage=state.processesPage=1;if(id.startsWith('detail-'))activeDetail?.();else if(state.model)render();});
+  function handleTableChange(id){if(window.MinervaClaimControl?.handlesTable(id)){window.MinervaClaimControl.handleFilter(id);return;}if(window.MinervaCorrectionImpact?.handlesTable(id)){window.MinervaCorrectionImpact.handleFilter();return;}if(window.MinervaMeetings?.handlesTable(id)){window.MinervaMeetings.handleFilter(id);return;}if(window.MinervaAnalysts?.handlesTable(id)){window.MinervaAnalysts.handleFilter(id);return;}state.correctionsPage=state.issuesPage=state.installmentsPage=state.processesPage=1;if(id.startsWith('detail-'))activeDetail?.();else if(state.model){const name=id.startsWith('supplier-')?'suppliers':id==='overviewTable'?'overview':['installmentTable','processTable'].includes(id)?'installments':['correctionTable','issueTable'].includes(id)?'corrections':state.view;renderView(name,true);}}
+  F.onChange(handleTableChange);
   $('detailDialog').addEventListener('close',()=>{F.close();activeDetail=null;F.clearDetails();});
   document.addEventListener('minerva:session-updated',event=>{if(window.MINERVA_HOSTED&&!event.detail){state.chartMonth='';state.chartSupplierBusy=false;F.clear();window.MinervaColumnLayout?.resetAll();window.MinervaAnalysts?.clear();window.MinervaCorrectionImpact?.clear();window.MinervaMeetings?.clear();window.MinervaPortfolio?.clear();window.MinervaPresentation?.close();activeDetail=null;for(const key of Object.keys(applied))applied[key]='';}});
   document.addEventListener('minerva:model-updated',()=>{if(!state.model){F.clear();window.MinervaMeetings?.clear();window.MinervaPortfolio?.clear();window.MinervaPresentation?.close();}});
-  window.addEventListener('afterprint',()=>{state.printing=false;window.MinervaAnalysts?.afterPrint();window.MinervaCorrectionImpact?.afterPrint();if(state.model){renderInstallments();renderCorrections();}});$('exportRules').addEventListener('click',()=>window.MinervaCalculationRules.exportPdf(state.model));
+  window.addEventListener('afterprint',()=>{state.printing=false;if(state.view==='analysts')window.MinervaAnalysts?.afterPrint();if(state.view==='corrections')window.MinervaCorrectionImpact?.afterPrint();if(state.model)renderView(state.view,true);});$('exportRules').addEventListener('click',()=>window.MinervaCalculationRules.exportPdf(state.model));
   $('exportPdf').addEventListener('click',exportPdf);$('exportReport').addEventListener('click',()=>exportBook(['claims','procurement'].includes(state.view)?state.view:state.view==='meeting'?'meeting':state.view==='analysts'?'analysts':state.view==='installments'?'control':false));$('exportCorrections').addEventListener('click',()=>exportBook(true));$('exportControl').addEventListener('click',()=>exportBook('control'));$('exportControlPdf').addEventListener('click',()=>{view('installments');exportPdf();});
   $('clearFiles')?.addEventListener('click',()=>{state.bd=state.control=state.model=null;state.chartMonth='';F.clear();window.MinervaColumnLayout?.resetAll();window.MinervaAnalysts?.clear();window.MinervaCorrectionImpact?.clear();window.MinervaMeetings?.clear();window.MinervaPortfolio?.clear();window.MinervaPresentation?.close();state.demo=false;$('bdFile').value=$('controlFile').value='';setText('bdFileInfo','Nenhum arquivo selecionado');setText('controlFileInfo','Nenhum arquivo selecionado');$('runAnalysis').disabled=true;$('emptyState').hidden=false;$('loadedContent').hidden=true;$('demoBanner').hidden=true;$('exportReport').disabled=$('exportCorrections').disabled=$('exportPdf').disabled=$('exportControl').disabled=$('exportControlPdf').disabled=true;['supplierTable','installmentTable','processTable','processSummary','correctionTable','issueTable'].forEach(id=>{if($(id))$(id).innerHTML=blank('Importe as planilhas para consultar os dados.');});setText('correctionBadge','0');say('Arquivos removidos da memória desta página.');view('overview');});
   $('brandLogo')?.addEventListener('error',event=>{event.target.hidden=true;const fallback=$('brandFallback');if(fallback)fallback.hidden=false;});
@@ -519,11 +559,11 @@
       state.operations=saved.global.operations;state.controlOperations=saved.global.controlOperations;state.operation=state.operations.join(' · ');state.controlOperation=state.controlOperations.join(' · ');populateOperations();
       for(const value of saved.global.suppliers)if(!Array.from($('supplierFilter').options).some(option=>option.value===value))$('supplierFilter').add(new Option(value,value));
       setSelected('supplierFilter',saved.global.suppliers);years.forEach(el=>el.checked=saved.global.years.includes(Number(el.value)));$('asOf').value=saved.global.asOf;$('correctionScenario').value=saved.global.correctionScenario;
-      const previous=state.model;await analyze();if(!state.model||state.model===previous)throw new Error('Não foi possível atualizar os dados desta visão. Tente novamente.');
+      const analyzed=await analyze();if(analyzed!==true||!state.model||!viewScopeMatches())throw new Error('Não foi possível atualizar os dados desta visão. Tente novamente.');
       Object.assign(applied,saved.local);for(const[id,value]of Object.entries(saved.local)){const el=$(id);if(!el)continue;if(el.multiple){for(const selected of asList(value))if(!Array.from(el.options).some(option=>option.value===selected))el.add(new Option(selected,selected));setSelected(el,value);}else el.value=value;}
       state.supplierMode=saved.supplierMode;state.sort=saved.sort;state.direction=saved.sort==='name'?1:-1;state.chartMonth=saved.chartMonth;state.correctionsPage=state.installmentsPage=state.processesPage=state.issuesPage=1;
       if($('supplierMode'))$('supplierMode').value=state.supplierMode;if($('supplierSort'))$('supplierSort').value=state.sort;
-      window.MinervaClaimControl?.setViewState(saved.claims);window.MinervaAnalysts?.setViewState?.({year:saved.analystYear});window.MinervaMeetings?.setViewState?.(saved.meeting);F.importState?.(saved.tableState);render();
+      window.MinervaClaimControl?.setViewState(saved.claims);window.MinervaAnalysts?.setViewState?.({year:saved.analystYear});window.MinervaMeetings?.setViewState?.(saved.meeting);F.importState?.(saved.tableState);state.renderedViews?.clear();render(true);
       // Keep unavailable saved choices explicit instead of presenting an empty selection as Todos.
       for(const[id,value]of Object.entries({...saved.local,supplierFilter:saved.global.suppliers})){const el=$(id);if(!el)continue;if(el.multiple){for(const selected of asList(value))if(!Array.from(el.options).some(option=>option.value===selected))el.add(new Option(selected,selected));setSelected(el,value);}else el.value=value;}
       window.MinervaMultiSelect?.refresh?.();say('Visão aplicada aos dados atuais.');return true;

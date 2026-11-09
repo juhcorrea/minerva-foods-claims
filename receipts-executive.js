@@ -47,5 +47,5 @@
     if(!dialog.open)dialog.showModal();
   }
   global.MinervaReceiptsExecutive={render,aggregate};
-  document.addEventListener('minerva:model-updated',()=>{const model=global.MinervaApp?.state.model||null;if(model!==lastModel)render(model);});
+  document.addEventListener('minerva:model-updated',()=>{const app=global.MinervaApp,model=app?.state.model||null;if(model!==lastModel&&(!model||app?.state.view==='installments'))render(model);});
 })(typeof window!=='undefined'?window:globalThis);
