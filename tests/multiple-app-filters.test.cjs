@@ -49,9 +49,9 @@ test('supplier chart refinement preserves its applied years without changing the
 });
 
 test('reportQuery repeats each selected value and explicit empty plurals override every legacy filter',()=>{
- const query=new URLSearchParams(reportQuery({operations:[EX,MI],suppliers:[A,B],controlOperations:[IM,UNKNOWN],years:[2026],allYears:true,correctionScenario:'original'}));assert.deepEqual(query.getAll('operation'),[EX,MI]);assert.deepEqual(query.getAll('supplier'),[A,B]);assert.deepEqual(query.getAll('controlOperation'),[IM,UNKNOWN]);assert.equal(query.get('allYears'),'1');assert.equal(query.get('correctionScenario'),'original');
+ const query=new URLSearchParams(reportQuery({operations:[EX,MI],suppliers:[A,B],controlOperations:[IM,UNKNOWN],years:[2026],allYears:true,correctionScenario:'original'}));assert.deepEqual(query.getAll('operation'),[EX,MI].sort());assert.deepEqual(query.getAll('supplier'),[A,B].sort());assert.deepEqual(query.getAll('controlOperation'),[IM,UNKNOWN].sort());assert.equal(query.get('allYears'),'1');assert.equal(query.get('correctionScenario'),'original');
  const empty=new URLSearchParams(reportQuery({operations:[],suppliers:[],controlOperations:[],operation:EX,supplier:A,controlOperation:MI}));for(const key of ['operation','supplier','controlOperation'])assert.equal(empty.has(key),false);
- assert.deepEqual(new URLSearchParams(reportQuery({operation:[EX,MI],supplier:A})).getAll('operation'),[EX,MI]);assert.deepEqual(new URLSearchParams(reportQuery({operation:EX})).getAll('operation'),[EX]);
+ assert.deepEqual(new URLSearchParams(reportQuery({operation:[EX,MI],supplier:A})).getAll('operation'),[EX,MI].sort());assert.deepEqual(new URLSearchParams(reportQuery({operation:EX})).getAll('operation'),[EX]);
 });
 
 test('local receipt types and statuses use OR within each filter and AND across filters without changing model rows',()=>{

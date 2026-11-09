@@ -3,7 +3,10 @@
   if (typeof document === 'undefined') return;
   const widths = new Map();
   const MIN = 112, MAX = 720;
-  let queued = false, drag = null, profileKey;
+  let queued = false, drag = null, profileKey, observer, printing = false;
+  const pending = new Set(), numericReady = new WeakSet(), numericDirty = new WeakSet();
+  const tableSelector = 'table[data-table-id]';
+  const observerOptions = {childList:true,subtree:true,attributes:true,attributeFilter:['hidden','open','data-sc-collapsed','class']};
   const scale = () => Math.max(1, Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--minerva-text-scale')) || 1);
   const headers = table => Array.from(table.tHead?.rows[0]?.cells || []);
   const key = table => table.dataset.tableId;
@@ -112,7 +115,7 @@
   }
   function mount(table) {
     if (!table.tHead || !key(table)) return;
-    markNumericColumns(table);
+    if (!numericReady.has(table) || numericDirty.has(table)) {markNumericColumns(table);numericReady.add(table);numericDirty.delete(table);}
     if (!table.previousElementSibling?.classList.contains('column-layout-toolbar')) {
       const toolbar = document.createElement('div');toolbar.className = 'column-layout-toolbar';toolbar.dataset.tableControls = key(table);
       const hint = document.createElement('span');hint.className = 'column-layout-hint';hint.textContent = 'Arraste a borda do título para ajustar a coluna.';
@@ -143,17 +146,67 @@
     const container = table.closest('.table-container,.table-wrap'),toolbar = table.previousElementSibling;
     if (container && toolbar?.classList.contains('column-layout-toolbar')) {const height=toolbar.getBoundingClientRect().height+'px',disabled=container.scrollWidth<=container.clientWidth+1;if(container.style.getPropertyValue('--column-tools-height')!==height)container.style.setProperty('--column-tools-height',height);for (const button of toolbar.querySelectorAll('[data-column-scroll]'))if(button.disabled!==disabled)button.disabled=disabled;}
   }
-  function refresh() {queued = false;if (drag && !drag.table.isConnected) finishDrag(true);tables().forEach(mount);}
-  function schedule() {if (!queued) {queued = true;requestAnimationFrame(refresh);}}
+  function visible(table) {
+    if (!table.isConnected) return false;
+    for (let node=table;node;node=node.parentElement) {
+      if (node.hidden || node.tagName==='DIALOG'&&!node.open || node.tagName==='DETAILS'&&!node.open) return false;
+      if (!printing && node.getAttribute?.('data-sc-collapsed')==='true') return false;
+    }
+    return printing || !table.getClientRects || table.getClientRects().length>0;
+  }
+  function enqueue(table,dirty=false) {
+    if (!table?.matches?.(tableSelector)) return;
+    if (dirty) numericDirty.add(table);
+    if (visible(table)) pending.add(table);
+  }
+  function collect(node,dirty=false) {
+    if (!node?.querySelectorAll) return;
+    const owner=node.closest?.(tableSelector);
+    if (owner) {enqueue(owner,dirty);return;}
+    for (const table of node.querySelectorAll(tableSelector)) enqueue(table,dirty);
+  }
+  function changed(records) {
+    for (const record of records) {
+      const target=record.target;
+      if (record.type==='attributes') {
+        // Cell/handle classes are local styling, not table-data invalidations.
+        if (record.attributeName!=='class' || target===document.body || target===document.documentElement) collect(target);
+        continue;
+      }
+      if (target.closest?.('.column-layout-toolbar,.column-resize-handle,.column-measure,colgroup')) continue;
+      const owner=target.closest?.(tableSelector);
+      if (owner) enqueue(owner,true);
+      else {
+        for (const node of record.addedNodes||[]) collect(node,true);
+        // Recreate an externally removed toolbar without traversing unrelated panes.
+        if (Array.from(record.removedNodes||[]).some(node=>node.classList?.contains('column-layout-toolbar'))) collect(target);
+      }
+    }
+    if (drag && !drag.table.isConnected) finishDrag(true);
+  }
+  function flush() {
+    queued=false;changed(observer?.takeRecords?.()||[]);observer?.disconnect();
+    try {
+      const batch=Array.from(pending);pending.clear();
+      for (const table of batch) if (visible(table)) mount(table);
+    } finally {observer?.observe(document.body,observerOptions);}
+  }
+  function schedule() {if (!queued && pending.size) {queued=true;requestAnimationFrame(flush);}}
+  // Explicit refresh is used after a base expands; untouched tables only sync geometry.
+  function refresh() {collect(document.body);flush();}
+  function refreshVisible() {collect(document.body);schedule();}
   function resetAll() {finishDrag(true);for (const id of widths.keys()) reset(id);widths.clear();}
   global.MinervaColumnLayout = {refresh,reset,resetAll,autoFit,fitColumn,getWidths:id => widths.get(id)?.slice() || null};
   function init() {
-    refresh();new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','open']});
-    new MutationObserver(schedule).observe(document.documentElement,{attributes:true,attributeFilter:['data-text-size']});
+    observer=new MutationObserver(records=>{changed(records);schedule();});refresh();
+    new MutationObserver(refreshVisible).observe(document.documentElement,{attributes:true,attributeFilter:['data-text-size']});
     document.addEventListener('minerva:reset-columns',resetAll);
     document.addEventListener('minerva:session-updated',event => {const profile = event.detail,key = profile ? [profile.name,profile.email,profile.role].join('|') : '';if (profileKey !== undefined && profileKey !== key) resetAll();profileKey = key;});
     global.addEventListener('blur',() => finishDrag(true));
-    global.addEventListener('resize',schedule);
+    global.addEventListener('resize',refreshVisible);
+    document.addEventListener('fullscreenchange',refreshVisible);
+    global.addEventListener('beforeprint',()=>{printing=true;refresh();});
+    global.addEventListener('afterprint',()=>{printing=false;refreshVisible();});
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })(window);

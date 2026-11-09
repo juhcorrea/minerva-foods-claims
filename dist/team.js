@@ -9,12 +9,12 @@
   function reportQuery(options) {
     const params = new URLSearchParams();
     const opts = options || {};
-    if (Array.isArray(opts.years) && opts.years.length) params.set('years', opts.years.map(Number).filter(Number.isInteger).join(','));
+    if (opts.allYears !== true && Array.isArray(opts.years) && opts.years.length) params.set('years', [...new Set(opts.years.map(Number).filter(Number.isInteger))].sort((a,b)=>a-b).join(','));
     if (opts.allYears === true) params.set('allYears', '1');
     if (opts.asOf) params.set('asOf', String(opts.asOf));
     for(const [key,plural] of [['supplier','suppliers'],['operation','operations'],['controlOperation','controlOperations']]){
       const value=opts[plural]??opts[key],values=Array.isArray(value)?value:value?[value]:[];
-      for(const selected of values)if(selected)params.append(key,String(selected));
+      for(const selected of [...new Set(values.filter(Boolean).map(String))].sort())params.append(key,selected);
     }
     params.set('correctionScenario', String(opts.correctionScenario ?? 'corrected'));
     return params.toString();
@@ -208,6 +208,8 @@
 
   async function api(path, options) {
     const opts = options || {};
+    const diagnose = global.location?.search && new URLSearchParams(global.location.search).get('diagnostico') === '1';
+    const started = diagnose ? global.performance.now() : 0;
     const headers = Object.assign({'Accept':'application/json'}, opts.headers || {});
     if (opts.method && opts.method !== 'GET') {
       headers['Content-Type'] = 'application/json';
@@ -221,9 +223,11 @@
       problem.network = true;
       throw problem;
     }
+    const received = diagnose ? global.performance.now() : 0;
     let payload;
     try { payload = await response.json(); }
     catch { payload = null; }
+    if (diagnose && path.startsWith('/api/report')) global.console.info('MINERVA_PERF '+JSON.stringify({phase:'request',route:path.split('?')[0],headersMs:Math.round(received-started),bodyMs:Math.round(global.performance.now()-received),serverTiming:response.headers.get('Server-Timing')||''}));
     if (!response.ok) {
       const error = new Error(payload?.error || (response.status === 401 ? 'Seu acesso expirou. Volte à entrada para continuar.' : response.status === 403 ? 'Seu acesso não está liberado para este relatório.' : 'Não foi possível concluir a solicitação. Tente novamente.'));
       error.status = response.status;
@@ -291,6 +295,8 @@
 
   async function loadReport(options) {
     if (!session?.approved) return false;
+    const diagnose = global.location?.search && new URLSearchParams(global.location.search).get('diagnostico') === '1';
+    const started = diagnose ? global.performance.now() : 0;
     const opts = options || app.getOptions();
     if (Array.isArray(opts.years) && !opts.years.length) { setMessage('Selecione pelo menos um ano para a análise.', true); return false; }
     if (!opts.asOf) { setMessage('Informe a data da análise.', true); return false; }
@@ -310,6 +316,7 @@
         if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return false;
         if (!reportCache.valid(payload, metadata)) { reportCache.clear(); payload = null; }
       }
+      const reused = Boolean(payload);
       if (!payload) payload = await api('/api/report?' + key, {signal:controller.signal});
       if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return false;
       reportCache.put(key, payload);
@@ -319,7 +326,14 @@
         setMessage(canUpdateBases() ? 'Carregue e analise as duas planilhas. Depois clique em Publicar atualização para disponibilizar o relatório.' : 'Nenhum relatório publicado. Aguarde a administração.');
         return true;
       }
+      const rendering = diagnose ? global.performance.now() : 0;
       if(app.setPublishedReport(payload)===false)return false;
+      if (diagnose) {
+        const renderMs = Math.round(global.performance.now()-rendering), view = app.state.view;
+        global.requestAnimationFrame(()=>global.requestAnimationFrame(()=>{
+          if(requestVersion===loadVersion && session?.approved)global.console.info('MINERVA_PERF '+JSON.stringify({phase:'visible',view,reused,requestMs:Math.round(rendering-started),renderMs,totalMs:Math.round(global.performance.now()-started)}));
+        }));
+      }
       setMessage('Você está consultando a última versão publicada do relatório.');
       return true;
     } catch (error) {

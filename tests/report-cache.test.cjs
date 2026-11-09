@@ -27,6 +27,13 @@ test('changed filters do not reuse a differently filtered report',async()=>{
  const h=harness();await h.load();await h.load({...opts,operations:['EXPORTAÇÃO - CTNR']});
  assert.equal(h.requests.length,2);assert(h.requests.every(url=>url.startsWith('/api/report?')));
 });
+test('equivalent filter sets share one query and all-years ignores inactive year choices',async()=>{
+ const first={...opts,years:[2026,2025,2026],suppliers:['B','A','A'],operations:['Y','X'],controlOperations:['V','U']};
+ const second={...opts,years:[2025,2026],suppliers:['A','B'],operations:['X','Y'],controlOperations:['U','V']};
+ assert.equal(reportQuery(first),reportQuery(second));
+ assert.equal(reportQuery({...first,allYears:true}),reportQuery({...second,years:[2020],allYears:true}));
+ const h=harness();await h.load(first);await h.load(second);assert.equal(h.requests[1],'/api/report/meta');assert.equal(h.applied[1],h.applied[0]);
+});
 test('metadata access failure never displays the cached report',async()=>{
  const h=harness();await h.load();h.deny();assert.equal(await h.load(),false);assert.equal(h.applied.length,1);assert.equal(h.context.loadingReport,false);assert.equal(h.messages.at(-1)[1],true);
 });
