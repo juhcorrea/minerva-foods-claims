@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {buildMigrationFiles,MigrationExportError} from '../worker/migration.js';
+import {CORRECTION_PROGRESS_KEYS} from '../worker/correction-progress.js';
 
 const reportKey='private/report-latest-v1.json';
 const progressKey='private/correction-progress-v1.json';
@@ -43,7 +44,7 @@ test('private snapshot preserves authoritative data, correction identifiers and 
   const acl=jsonFile(files,'dados/cadastros-perfis.json');assert.equal(acl.members['member-1'].role,'editor');assert.equal(acl.members['member-1'].status,'approved');assert.equal(acl.members['member-1'].requestCode,'DEMO-1234');assert.equal(acl.admins.owner.name,'Admin Exemplo');assert.equal(acl.admins.owner.activatedAt,stamp);assert.equal(acl.audit[0].previousRole,'viewer');
   const allData=files.map(file=>new TextDecoder().decode(file.data)).join('\n');assert.doesNotMatch(allData,/secret-/);assert.doesNotMatch(allData,/tokenHash|tokenHashes|adminHash|ipHash/);
   assert.equal(bucket.writes,0);assert.equal(JSON.stringify([...bucket.values]),before);
-  assert.deepEqual(new Set(bucket.reads),new Set([reportKey,progressKey,aclKey]));
+  assert.deepEqual(new Set(bucket.reads),new Set([reportKey,...CORRECTION_PROGRESS_KEYS,aclKey]));
   assert.equal(manifest.capturedAt,stamp);assert.equal(manifest.source.commitSha,source.commitSha);
   assert.deepEqual(manifest.counts,{bdRows:1,controlRows:2,correctionEntries:1,admins:1,members:1,auditEvents:1});
   assert.deepEqual(manifest.objects.map(item=>item.schemaVersion),[1,1,3]);
@@ -60,19 +61,19 @@ test('absent state is explicit and does not invent a report, corrections or ACL'
 test('publication during snapshot retries and returns the coherent updated revision',async()=>{
   const bucket=new ReadOnlyR2();const head=bucket.head.bind(bucket);let changed=false;
   bucket.head=async key=>{if(!changed){changed=true;const report=bucket.values.get(reportKey);report.value={...report.value,revision:'report-two',control:[['Ref','Amount'],['DEMO-002',75]]};report.etag='new-report-etag';}return head(key);};
-  const {files,manifest}=await run(bucket);assert.equal(jsonFile(files,'dados/bases-publicadas.json').revision,'report-two');assert.equal(manifest.objects[0].etag,'new-report-etag');assert.equal(bucket.reads.length,6);assert.equal(bucket.writes,0);
+  const {files,manifest}=await run(bucket);assert.equal(jsonFile(files,'dados/bases-publicadas.json').revision,'report-two');assert.equal(manifest.objects[0].etag,'new-report-etag');assert.equal(bucket.reads.length,2*(CORRECTION_PROGRESS_KEYS.length+2));assert.equal(bucket.writes,0);
 });
 
 test('continually changing state returns a bounded conflict rather than an inconsistent archive',async()=>{
   const bucket=new ReadOnlyR2();let serial=0;
-  bucket.head=async key=>({etag:bucket.values.get(key).etag+'-'+(++serial)});
+  bucket.head=async key=>bucket.values.has(key)?({etag:bucket.values.get(key).etag+'-'+(++serial)}):null;
   await assert.rejects(run(bucket),error=>error instanceof MigrationExportError&&error.status===409&&error.code==='MIGRATION_CHANGED');
-  assert.equal(bucket.reads.length,9);assert.equal(bucket.writes,0);
+  assert.equal(bucket.reads.length,3*(CORRECTION_PROGRESS_KEYS.length+2));assert.equal(bucket.writes,0);
 });
 
 test('snapshot can verify etags with get when a storage adapter has no head',async()=>{
   const bucket=new ReadOnlyR2();bucket.head=undefined;
-  const {manifest}=await run(bucket);assert.equal(manifest.counts.members,1);assert.equal(bucket.reads.length,6);
+  const {manifest}=await run(bucket);assert.equal(manifest.counts.members,1);assert.equal(bucket.reads.length,2*(CORRECTION_PROGRESS_KEYS.length+2));
 });
 
 test('malformed known objects and non-scalar allowlisted data fail instead of exporting hidden objects',async()=>{

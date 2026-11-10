@@ -42,7 +42,7 @@ async function backupParallel(items,fn){let next=0;await Promise.all(Array.from(
 async function buildClientBackup({origin,onProgress=()=>{}}){
  const endpoint=backupUrl('/api/client-report/backup','/api/client-report/backup',origin);
  onProgress('Conferindo a publicação e as permissões…');
- const manifest=backupValidateManifest((await backupRead(endpoint)).data,origin),initial=backupSnapshot(manifest),pieces=new Map();let loaded=0;
+ const manifest=backupValidateManifest((await backupRead(endpoint,20*1024*1024)).data,origin),initial=backupSnapshot(manifest),pieces=new Map();let loaded=0;
  await backupParallel(manifest.parts,async part=>{
   const {data,bytes}=await backupRead(backupUrl(part.url,'/api/client-report/parts',origin),131072);
   if(await backupDigest(bytes)!==part.sha256||!backupPlain(data)||!Array.isArray(data.rows)||data.rows.length!==part.rowCount)backupFail('Um trecho das bases não passou na conferência de integridade.');
@@ -55,7 +55,7 @@ async function buildClientBackup({origin,onProgress=()=>{}}){
   if(!backupPlain(data)||data.index!==index||typeof data.data!=='string'||!data.data.length||data.data.length>65536||data.data.length%4||!/^[A-Za-z0-9+/]*={0,2}$/.test(data.data)||index<sourceParts.length-1&&data.data.includes('='))backupFail('Um trecho do código de restauração está inválido.');
   sourceParts[index]=data.data;onProgress(`Carregando o código de restauração… ${++loaded} de ${sourceParts.length} trechos`);
  });
- const latest=backupValidateManifest((await backupRead(endpoint)).data,origin);if(backupSnapshot(latest)!==initial)backupFail('O painel foi atualizado durante o backup. Tente baixar novamente.');
+ const latest=backupValidateManifest((await backupRead(endpoint,20*1024*1024)).data,origin);if(backupSnapshot(latest)!==initial)backupFail('O painel foi atualizado durante o backup. Tente baixar novamente.');
  let sourceData;try{sourceData=Uint8Array.from(atob(sourceParts.join('')),char=>char.charCodeAt(0));}catch{backupFail('O código de restauração está inválido.');}
  if(await backupDigest(sourceData)!==manifest.source.sha256)backupFail('O código de restauração não passou na conferência de integridade.');
  onProgress('Verificando os arquivos e preparando o ZIP…');

@@ -1,4 +1,5 @@
 // Offline validation and controlled R2 restore. This module is not an HTTP route.
+import {CORRECTION_PROGRESS_LEGACY_KEY,CORRECTION_PROGRESS_OBJECT_BYTES,partitionCorrectionProgress} from '../worker/correction-progress.js';
 const enc = new TextEncoder();
 const definitions = Object.freeze([
   {key:'private/report-latest-v1.json',path:'dados/bases-publicadas.json',schemaVersion:1},
@@ -85,6 +86,10 @@ export async function loadMigrationBackup(directory){
   return validateMigrationBackup(manifest,files);
 }
 
+function restorationObjects(checked){
+  return checked.objects.flatMap(object=>object.present&&object.key===CORRECTION_PROGRESS_LEGACY_KEY&&object.body.byteLength>CORRECTION_PROGRESS_OBJECT_BYTES?partitionCorrectionProgress(object.value).map(part=>({...object,...part,customMetadata:{}})):[object]);
+}
+
 /** Controlled import only. The caller must supply the NEW, offline R2 binding. */
 export async function restoreMigrationObjects(bucket,backup,{confirmNewEmptyBucket=false}={}){
   requireValue(confirmNewEmptyBucket===true,'Confirme explicitamente um bucket novo, vazio e sem tráfego.');
@@ -93,9 +98,9 @@ export async function restoreMigrationObjects(bucket,backup,{confirmNewEmptyBuck
   const checked=await validateMigrationBackup(backup.manifest,backup.files);
   const existing=await bucket.list({limit:1});
   requireValue(Array.isArray(existing?.objects)&&existing.objects.length===0&&!existing.truncated,'O bucket de destino não está vazio. Nenhum registro foi sobrescrito.');
-  const written=[];
+  const objects=restorationObjects(checked),written=[];
   try{
-    for(const object of checked.objects){
+    for(const object of objects){
       if(!object.present)continue;
       const result=await bucket.put(object.key,object.body,{onlyIf:{etagDoesNotMatch:'*'},httpMetadata:{contentType:'application/json'},...(Object.keys(object.customMetadata).length?{customMetadata:object.customMetadata}:{})});
       requireValue(result,`O destino mudou durante a restauração (${object.key}).`);
@@ -114,7 +119,7 @@ export async function prepareMigrationObjects(backup,directory){
   const fs=await import('node:fs/promises'),path=await import('node:path');
   await fs.mkdir(directory,{mode:0o700}); // Deliberately fails if destination exists.
   const plan={format:1,requiresNewEmptyBucket:true,reportRevision:checked.objects[0].value?.revision||null,objects:[]};
-  for(const object of checked.objects){
+  for(const object of restorationObjects(checked)){
     const filename=object.key.split('/').at(-1);
     if(object.present)await fs.writeFile(path.join(directory,filename),object.body,{flag:'wx',mode:0o600});
     plan.objects.push({key:object.key,present:object.present,file:object.present?filename:null,httpMetadata:{contentType:'application/json'},customMetadata:object.customMetadata,onlyIf:{etagDoesNotMatch:'*'}});

@@ -125,8 +125,8 @@ test('reviewer marks and unmarks corrections but cannot publish or manage access
  assert.equal((await setRole(env,member,member.body.userId,'admin')).status,403);
  assert.equal(env.BUCKET.objects.get('private/report-latest-v1.json').text,before);
  const get=env.BUCKET.get.bind(env.BUCKET);let changed=false;
- env.BUCKET.get=async path=>{if(path==='private/correction-progress-v1.json'&&!changed){changed=true;await setRole(env,admin,member.body.userId,'viewer');}return get(path);};
- const denied=await call(env,'/api/correction-progress',member.cookie,{method:'POST',body});assert.equal(denied.status,403);assert.equal(denied.body.code,'PERMISSION_CHANGED');assert.equal(JSON.parse(env.BUCKET.objects.get('private/correction-progress-v1.json').text).entries[key].done,false);
+ env.BUCKET.get=async path=>{if(path==='private/correction-progress-shards-v1/'+key[0]+'.json'&&!changed){changed=true;await setRole(env,admin,member.body.userId,'viewer');}return get(path);};
+ const denied=await call(env,'/api/correction-progress',member.cookie,{method:'POST',body});assert.equal(denied.status,403);assert.equal(denied.body.code,'PERMISSION_CHANGED');assert.equal(JSON.parse(env.BUCKET.objects.get('private/correction-progress-shards-v1/'+key[0]+'.json').text).entries[key].done,false);
 });
 
 test('delegated admins manage approved roles and requests; bootstrap administrators stay protected',async()=>{

@@ -8,7 +8,7 @@ function model(integral=1000,reportView='full'){
  const control=row(32,{1:2026,3:'ME',7:'QA/1',10:'Fornecedor fictício',11:'Depósito',12:'Dentro do Prazo',13:'2026-12-01',14:0,17:null,19:null,20:integral,21:0,30:null,31:'Analista fictício'});
  return E.analyze([bh,bd],[ch,control],{years:[2026],asOf:'2026-11-10',reportView});
 }
-function review(){const window={},document={addEventListener(){}};vm.runInNewContext(fs.readFileSync(require.resolve('../dist/correction-impact.js'),'utf8'),{window,document});return window.MinervaCorrectionImpact;}
+function review(){const window={ClaimsEngine:E},document={addEventListener(){}};vm.runInNewContext(fs.readFileSync(require.resolve('../dist/correction-impact.js'),'utf8'),{window,document});return window.MinervaCorrectionImpact;}
 const plain=value=>JSON.parse(JSON.stringify(value));
 
 test('AJ equals U and AO equals zero scheduled total is reconciled even when derived prejudice equals AJ',()=>{

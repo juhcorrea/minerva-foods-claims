@@ -196,7 +196,7 @@ test('browser progress and publication revalidate roles immediately before commi
   await f.call(path+'/approve',{cookie:f.admin,method:'POST',body:{}});await f.call(path+'/role',{cookie:f.admin,method:'POST',body:{role:operation==='progress'?'reviewer':'admin'}});
   let upload;if(operation==='publish'){upload=(await f.start(input(),published.revision,member.cookie)).body.uploadId;for(const sheet of ['bd','control'])await f.part(upload,sheet,input()[sheet],0,0,member.cookie);}
   const get=f.env.BUCKET.get.bind(f.env.BUCKET),before=f.env.BUCKET.objects.get('private/client-report-v2.json').text;let changed=false;
-  const trigger=operation==='progress'?'private/correction-progress-v1.json':'private/client-staging/'+upload+'.json';
+  const trigger=operation==='progress'?'private/correction-progress-shards-v1/7.json':'private/client-staging/'+upload+'.json';
   f.env.BUCKET.get=async route=>{if(route===trigger&&!changed){changed=true;await f.call(path+'/role',{cookie:f.admin,method:'POST',body:{role:'viewer'}});}return get(route);};
   const result=operation==='progress'?await f.call('/api/correction-progress',{cookie:member.cookie,method:'POST',body:{key:'7'.repeat(64),done:true,reportRevision:published.revision}}):await f.commit(upload,member.cookie);
   assert.equal(result.status,403);assert.equal(result.body.code,'PERMISSION_CHANGED');assert.equal(f.env.BUCKET.objects.get('private/client-report-v2.json').text,before);assert.equal(f.env.BUCKET.objects.has('private/correction-progress-v1.json'),false);
@@ -221,7 +221,7 @@ test('projection retains row presence while excluding unused values',()=>{
 test('publication racing a correction acknowledgement rejects the stale revision before writing progress',async()=>{
  const f=await fixture(),published=await f.publish(),get=f.env.BUCKET.get.bind(f.env.BUCKET),key='e'.repeat(64);let changed=false;
  f.env.BUCKET.get=async path=>{
-  if(path==='private/correction-progress-v1.json'&&!changed){
+  if(path==='private/correction-progress-shards-v1/e.json'&&!changed){
    changed=true;const pointer=f.env.BUCKET.objects.get('private/client-report-v2.json'),next={...JSON.parse(pointer.text),revision:crypto.randomUUID()};
    await f.env.BUCKET.put('private/client-report-v2.json',JSON.stringify(next));
   }

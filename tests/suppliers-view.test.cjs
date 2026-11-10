@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),E=require('../dist/engine.js');
-const ui={window:{},document:{addEventListener(){}}};
+const ui={window:{ClaimsEngine:E},document:{addEventListener(){}}};
 vm.runInNewContext(fs.readFileSync(require.resolve('../dist/correction-impact.js'),'utf8'),ui);
 const queue=model=>ui.window.MinervaCorrectionImpact.buildQueue(model);
 const bh=Array(64).fill(null),ch=Array(32).fill(null);

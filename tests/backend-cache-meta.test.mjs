@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {createApiHandler} from '../worker/backend.js';
+import {CORRECTION_PROGRESS_KEYS} from '../worker/correction-progress.js';
 
 const REPORT='private/report-latest-v1.json',PROGRESS='private/correction-progress-v1.json';
 const origin='https://claims.example.test',digest=value=>createHash('sha256').update(value).digest('hex');
@@ -30,7 +31,7 @@ test('metadata validates the revision and aging day without reading bases or run
   const f=await fixture(),result=await f.call('/api/report/meta',f.admin);
   assert.equal(result.status,200);assert.equal(result.body.reportMeta.revision,'report-qa-1');
   assert.equal(result.body.correctionProgressRevision,'none');assert.equal(result.body.agingDate,'2026-11-09');
-  assert.equal(f.analyses,0);assert(!f.bucket.gets.includes(REPORT));assert.deepEqual(f.bucket.heads,[REPORT]);
+  assert.equal(f.analyses,0);assert(!f.bucket.gets.includes(REPORT));assert.deepEqual(f.bucket.heads,[REPORT,...CORRECTION_PROGRESS_KEYS]);assert(!f.bucket.gets.some(key=>CORRECTION_PROGRESS_KEYS.includes(key)));
   assert(!JSON.stringify(result.body).includes('private source marker'));assert(JSON.stringify(result.body).length<700);
   assert.match(result.headers.get('cache-control'),/private, no-store/);
   f.setDay('2026-11-10');assert.equal((await f.call('/api/report/meta',f.admin)).body.agingDate,'2026-11-10');
@@ -62,12 +63,13 @@ test('marking a correction changes the metadata revision and the hydrated report
 test('legacy correction stores use the R2 ETag, including legacy writers that omit revisions',async()=>{
   const f=await fixture();await f.bucket.put(PROGRESS,JSON.stringify({schemaVersion:1,entries:{}}));
   const first=await f.call('/api/report/meta',f.admin),model=await f.call('/api/report?years=2026',f.admin);
-  assert.match(first.body.correctionProgressRevision,/^etag-/);assert.equal(model.body.model.meta.correctionProgressRevision,first.body.correctionProgressRevision);
-  await f.bucket.put(PROGRESS,JSON.stringify({schemaVersion:1,entries:{'qa-key':{done:true}}}));
+  assert.match(first.body.correctionProgressRevision,/^p2:[a-f0-9]{64}$/);assert.equal(model.body.model.meta.correctionProgressRevision,first.body.correctionProgressRevision);
+  await f.bucket.put(PROGRESS,JSON.stringify({schemaVersion:1,entries:{['a'.repeat(64)]:{done:true}}}));
   const second=await f.call('/api/report/meta',f.admin);assert.notEqual(second.body.correctionProgressRevision,first.body.correctionProgressRevision);
 });
 
-test('metadata fails closed when correction progress is invalid',async()=>{
+test('metadata invalidates cached progress and hydrated report rejects malformed contents',async()=>{
   const f=await fixture();await f.bucket.put(PROGRESS,JSON.stringify({schemaVersion:1,entries:null}));
-  const result=await f.call('/api/report/meta',f.admin);assert.equal(result.status,503);assert.equal(result.body.code,'CORRECTION_PROGRESS_INVALID');assert.equal(f.analyses,0);
+  const meta=await f.call('/api/report/meta',f.admin);assert.equal(meta.status,200);assert.notEqual(meta.body.correctionProgressRevision,'none');assert.equal(f.analyses,0);
+  const result=await f.call('/api/report?years=2026',f.admin);assert.equal(result.status,503);assert.equal(result.body.code,'CORRECTION_PROGRESS_INVALID');
 });

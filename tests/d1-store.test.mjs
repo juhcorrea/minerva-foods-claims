@@ -50,6 +50,25 @@ test('head reads only metadata and length, while missing objects and deletion ma
   await bucket.delete('object');await bucket.delete('missing');assert.equal(await bucket.get('object'),null);
 });
 
+test('headMany reads an ordered metadata snapshot in one query without fetching bodies',async t => {
+  const {bucket,calls}=fixture(t);
+  const a=await bucket.put('shard-a','first body',{customMetadata:{revision:'a'}});
+  const b=await bucket.put("shard-'b",'second body',{customMetadata:{revision:'b'}});
+  calls.length=0;
+  const heads=await bucket.headMany(["shard-'b",'absent','shard-a','shard-a']);
+  assert.deepEqual(heads.map(head=>head?.etag??null),[b.etag,null,a.etag,a.etag]);
+  assert.equal(calls.length,1);assert.equal(calls[0].method,'all');
+  assert.match(calls[0].sql,/WHERE object_key IN \(\?1,\?2,\?3,\?4\)/);
+  assert.doesNotMatch(calls[0].sql,/, body FROM/);assert(!calls[0].sql.includes("shard-'b"));
+  assert(heads.filter(Boolean).every(head=>head.body===undefined&&head.json===undefined));
+  heads[2].customMetadata.revision='modified';assert.equal(heads[3].customMetadata.revision,'a');
+  calls.length=0;assert.deepEqual(await bucket.headMany([]),[]);assert.equal(calls.length,0);
+  await assert.rejects(bucket.headMany('shard-a'),TypeError);
+  await assert.rejects(bucket.headMany(Array(65).fill('shard-a')),TypeError);
+  await assert.rejects(bucket.headMany(['shard-a',null]),TypeError);
+  assert.equal(calls.length,0);
+});
+
 test('conditional creation and replacement are atomic and stale ETags cannot create or overwrite',async t => {
   const {bucket,db,calls}=fixture(t),other=createD1Bucket(db);
   const created=await Promise.all([bucket.put('shared','one',{onlyIf:{etagDoesNotMatch:'*'}}),other.put('shared','two',{onlyIf:{etagDoesNotMatch:'*'}})]);

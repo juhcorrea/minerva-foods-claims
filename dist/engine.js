@@ -770,6 +770,62 @@
       controlReport:{supplierOptions:model.controlReport.supplierOptions, operationOptions:model.controlReport.operationOptions, meta:model.controlReport.meta}};
   }
 
+  // One shared, presentation-free queue for the server, calculation worker and
+  // UI. Worksheet coordinates join objects within this snapshot only; they are
+  // never persisted as acknowledgement identities.
+  const correctionIssueSource = issue => issue.source === 'BD' || /^(?:CLAIM_|INVALID_RNC_DATE$|INVALID_CLAIM_AMOUNT$|MISSING_CLAIM_)/.test(issue.kind || '') ? 'BD' : 'Controle';
+  function buildCorrectionReviewItems(model, groups = model?.correctionGroups || []) {
+    const validRows = values => (values || []).filter(value => Number.isInteger(value) && value > 0);
+    const sourceKeys = node => [...validRows(node.bdRows).map(row=>'BD:'+row), ...validRows(node.controlRows).map(row=>'Controle:'+row)];
+    const nodes = [...groups.map(group=>({groups:[group],audits:[],issues:[],bdRows:group.bdRows||[],controlRows:group.rows||[]})),
+      ...(model?.claimValueAudit?.rows||[]).map(audit=>({groups:[],audits:[audit],issues:[],bdRows:audit.connectedBdRows||audit.bdRows||[],controlRows:audit.controlRows||[]})),
+      ...(model?.baseReconciliation?.rows||[]).map(issue=>({groups:[],audits:[],issues:[issue],bdRows:issue.bdRows||[],controlRows:issue.controlRows||[]}))];
+    const parents=nodes.map((_,index)=>index),owners=new Map();
+    const find=index=>{let root=index;while(parents[root]!==root)root=parents[root];while(parents[index]!==index){const next=parents[index];parents[index]=root;index=next;}return root;};
+    nodes.forEach((node,index)=>{for(const key of sourceKeys(node)){if(owners.has(key))parents[find(index)]=find(owners.get(key));else owners.set(key,index);}});
+    const components=new Map();
+    nodes.forEach((node,index)=>{const root=find(index);if(!components.has(root))components.set(root,{groups:[],audits:[],issues:[],bdRows:[],controlRows:[]});const entry=components.get(root);for(const key of ['groups','audits','issues','bdRows','controlRows'])entry[key].push(...node[key]);});
+    const sourceOwners=new Map();for(const entry of components.values())for(const key of sourceKeys(entry))sourceOwners.set(key,entry);
+    const standalone=new Map();for(const [index,issue] of (model?.issues||[]).entries()){
+      const source=correctionIssueSource(issue),key=Number.isInteger(issue.row)&&issue.row>0?source+':'+issue.row:'unlinked:'+index;
+      let entry=sourceOwners.get(key);if(!entry){if(!standalone.has(key))standalone.set(key,{groups:[],audits:[],issues:[],bdRows:source==='BD'?validRows([issue.row]):[],controlRows:source==='Controle'?validRows([issue.row]):[]});entry=standalone.get(key);}entry.issues.push(issue);
+    }
+    const warning=audit=>audit.uncertain||audit.hasClaimValueMismatch||audit.hasReceivedMismatch||audit.status!=='Conferido';
+    return [...components.values(),...standalone.values()].filter(entry=>entry.groups.length||entry.issues.length||entry.audits.some(warning)).map(entry=>{
+      const sources=[...entry.groups,...entry.audits,...entry.issues],progress=sources.find(source=>source.reviewProgress?.key)?.reviewProgress;
+      return {...entry,bdRows:[...new Set(validRows(entry.bdRows))].sort((a,b)=>a-b),controlRows:[...new Set(validRows(entry.controlRows))].sort((a,b)=>a-b),...(progress?{progress}:{} )};
+    });
+  }
+  const correctionIdentityValue=value=>value==null?'':typeof value==='string'?value.normalize('NFKC').trim().replace(/\s+/g,' ').toUpperCase():value;
+  // Only columns already available in projection v3 may participate. Original
+  // and browser-projected worksheets must produce exactly the same identity.
+  const correctionIdentityColumns={bd:[0,1,3,5,6,7,8,9,10,13,16,19,22,24,25,28,31,32,35,40,46,49,56,57,61,62,63],control:[0,1,2,3,7,9,10,11,12,13,14,17,19,20,21,23,30,31]};
+  function correctionReviewIdentity(item, bdRows=[], controlRows=[]) {
+    const sorted=values=>values.map(value=>JSON.stringify(value)).sort();
+    const source=(sheet,positions,rows)=>sorted(positions.map(position=>correctionIdentityColumns[sheet].map(column=>correctionIdentityValue(rows[position-1]?.[column]))));
+    // Filtered audits are projections of these original cells, not additional
+    // identity. Their disappearance under a year/supplier filter must never
+    // erase an acknowledgement. Source edits and added installments reopen it.
+    const unlinked=item.bdRows.length||item.controlRows.length?[]:sorted(item.issues.map(issue=>[issue.kind,correctionIssueSource(issue),issue.reference,issue.supplier,issue.amount].map(correctionIdentityValue)));
+    return JSON.stringify({schema:2,bd:source('bd',item.bdRows,bdRows),control:source('control',item.controlRows,controlRows),unlinked});
+  }
+  function correctionReviewTargets(model, bdRows=[], controlRows=[]) {
+    const occurrences=new Map();return buildCorrectionReviewItems(model).map(item=>{
+      const identity=correctionReviewIdentity(item,bdRows,controlRows),occurrence=occurrences.get(identity)||0;occurrences.set(identity,occurrence+1);
+      // Truly identical disconnected records have no intrinsic distinguishing
+      // ID. Preserve their multiplicity with a content-local ordinal, never an
+      // Excel or display position. Adding a duplicate creates a new target.
+      return {item,identity:JSON.stringify({schema:2,identity,occurrence})};
+    });
+  }
+  function correctionReviewLegacyProgress(item) {
+    if(!item.groups.length||item.groups.some(group=>group.progress?.done!==true))return null;
+    const changes=item.groups.flatMap(group=>group.changes||[]);
+    if(item.issues.some(issue=>issue.kind!=='CONTROL_RNC_YEAR_MISMATCH'||!changes.some(change=>change.row===issue.row&&/^B\d+$/.test(change.cell||'')&&correctionIdentityValue(change.original)===correctionIdentityValue(issue.originalYear)&&correctionIdentityValue(change.corrected)===correctionIdentityValue(issue.correctedYear))))return null;
+    if(item.audits.some(audit=>audit.uncertain||audit.complete===false||audit.hasReceivedMismatch||audit.hasClaimValueMismatch&&!(audit.controlRows||[]).every(row=>changes.some(change=>change.row===row&&/^U\d+$/.test(change.cell||'')))))return null;
+    return item.groups.map(group=>group.progress).slice().sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''))[0]||null;
+  }
+
   // Count the same connected review groups used by correction-impact.buildQueue.
   // Even a clean audit can connect corrections/issues, so join all audit nodes
   // first and only then discard components without any warning.
@@ -1348,5 +1404,5 @@
         financialBasis:'Relatório adicional de carteira aberta; não altera reclamado, recebido, negociação ou perda dos indicadores financeiros existentes.'}};
   }
 
-  return {analyze, validateHeaders, normalizeRef, tokenizeRefs, normalizeMarket, normalizeStatus, normalizeSupplier:norm, parseDate, number, today, recentClaimYears, version: '1.4.0'};
+  return {analyze, validateHeaders, normalizeRef, tokenizeRefs, normalizeMarket, normalizeStatus, normalizeSupplier:norm, parseDate, number, today, recentClaimYears, buildCorrectionReviewItems, correctionReviewIdentity, correctionReviewTargets, correctionReviewLegacyProgress, version: '1.4.0'};
 });

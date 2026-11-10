@@ -1,3 +1,4 @@
+import {CORRECTION_PROGRESS_LEGACY_KEY,CorrectionProgressError,readCorrectionProgress,readCorrectionProgressMetadata} from './correction-progress.js';
 /* Private migration snapshot. This module only reads the three operational
  * objects below; it deliberately never enumerates the bucket or writes data. */
 const MIGRATION_OBJECTS = Object.freeze([
@@ -76,6 +77,7 @@ function migrationAcl(value, admins) {
 }
 
 async function migrationRead(bucket, item) {
+  if(item.key===CORRECTION_PROGRESS_LEGACY_KEY){try{const found=await readCorrectionProgress(bucket);return {...item,present:found.value!==null,etag:found.etag,value:found.value};}catch(error){if(error instanceof CorrectionProgressError)migrationInvalid();throw error;}}
   const object = await bucket.get(item.key);
   if (!object) return {...item, present:false, etag:null, value:null};
   if (typeof object.etag !== 'string' || !object.etag) migrationInvalid();
@@ -85,6 +87,7 @@ async function migrationRead(bucket, item) {
 }
 
 async function migrationEtag(bucket, key) {
+  if(key===CORRECTION_PROGRESS_LEGACY_KEY){try{return (await readCorrectionProgressMetadata(bucket)).etag;}catch(error){if(error instanceof CorrectionProgressError)migrationInvalid();throw error;}}
   const object = await (typeof bucket.head === 'function' ? bucket.head(key) : bucket.get(key));
   if (object && (typeof object.etag !== 'string' || !object.etag)) migrationInvalid();
   return object ? object.etag : null;

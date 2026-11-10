@@ -18,8 +18,8 @@ export function projectClientRows(sheet,rows,firstRow=0){
 }
 
 export function createClientReportHandler(deps){
- const {engine,now,fail,response,readBody,jsonObject,putConditional,hashToken,stamp,uuid,actorLabel,confirmMutationPermission,readCorrectionProgress,correctionProgressRevision,publicCorrectionProgress,migrationSource,readAcl}=deps;
- const REPORT='private/client-report-v2.json',PROGRESS='private/correction-progress-v1.json';
+ const {engine,now,fail,response,readBody,jsonObject,putConditional,hashToken,stamp,uuid,actorLabel,confirmMutationPermission,readCorrectionProgress,readCorrectionProgressMetadata,saveProgressEntry,correctionProgressRevision,publicCorrectionProgress,migrationSource,readAcl}=deps;
+ const REPORT='private/client-report-v2.json';
  const MAX_PART=65536,MAX_TOTAL=20*1024*1024,MAX_PARTS=768,MAX_CELLS=1500000;
  const actorOf=access=>access.admin||access.member;
  const isId=id=>typeof id==='string'&&/^[a-f0-9-]{36}$/i.test(id);
@@ -168,23 +168,17 @@ export function createClientReportHandler(deps){
   if(typeof body.key!=='string'||!/^[a-f0-9]{64}$/.test(body.key)||typeof body.done!=='boolean'||!isId(body.reportRevision))fail(400,'INVALID_CORRECTION_PROGRESS','Informe uma correção e uma marcação válidas.');
   // This is an authorized reviewer acknowledgement only. Financial values and the
   // reconciliation are still derived from the immutable worksheets in the worker.
-  for(let attempt=0;attempt<4;attempt++){
-   if((await metadata(bucket))?.revision!==body.reportRevision)fail(409,'REPORT_CHANGED','O relatório mudou. Atualize a visão antes de marcar a correção.');
-   const {value,etag}=await readCorrectionProgress(bucket),actor=actorOf(access),entries={...(value?.entries||{})};
-   if(!Object.hasOwn(entries,body.key)&&Object.keys(entries).length>=5000)fail(409,'PROGRESS_CAPACITY','O acompanhamento atingiu o limite. Avise a administração.');
-   const entry={done:body.done,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,reportRevision:body.reportRevision};entries[body.key]=entry;
-   const next={schemaVersion:1,revision:uuid(),entries};
-   if(new TextEncoder().encode(JSON.stringify(next)).length>900000)fail(409,'PROGRESS_CAPACITY','O acompanhamento atingiu o limite. Avise a administração.');
+  const actor=actorOf(access),entry={done:body.done,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,reportRevision:body.reportRevision};
+  const result=await saveProgressEntry(bucket,body.key,entry,{validate:async()=>{
    await confirmMutationPermission(bucket,access,['admin','editor','reviewer']);
    if((await metadata(bucket))?.revision!==body.reportRevision)fail(409,'REPORT_CHANGED','O relatório mudou. Atualize a visão antes de marcar a correção.');
-   if(await putConditional(bucket,PROGRESS,next,etag))return response({progress:publicCorrectionProgress(body.key,entry),reportRevision:body.reportRevision,correctionProgressRevision:next.revision});
-  }
-  fail(409,'CORRECTION_PROGRESS_CHANGED','Outra marcação foi salva ao mesmo tempo. Tente novamente.');
+  }});
+  return response({progress:publicCorrectionProgress(body.key,entry),reportRevision:body.reportRevision,correctionProgressRevision:result.correctionProgressRevision});
  }
  async function handle({request,url,bucket,access}){
   if(url.pathname==='/api/report/meta'&&request.method==='GET'){
    const {value:saved}=await published(bucket);requireCurrentProjection(saved);
-   return response({reportMeta:meta(saved),correctionProgressRevision:(await progress(bucket)).revision,agingDate:engine.today(),analysisMode:'browser'});
+   return response({reportMeta:meta(saved),correctionProgressRevision:correctionProgressRevision(await readCorrectionProgressMetadata(bucket)),agingDate:engine.today(),analysisMode:'browser'});
   }
   if(url.pathname==='/api/correction-progress'&&request.method==='POST')return saveProgress(bucket,request,access);
   if(url.pathname==='/api/report')fail(409,'BROWSER_ANALYSIS_REQUIRED','Atualize a página para usar o processamento no navegador.');
@@ -214,9 +208,9 @@ export function createClientReportHandler(deps){
   if(url.pathname==='/api/client-report'||url.pathname==='/api/client-report/backup'){
    if(request.method!=='GET')fail(405,'METHOD_NOT_ALLOWED','Use a consulta do relatório.');
    const original=url.pathname.endsWith('/backup');if(original&&access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode baixar o backup privado.');
-   const {value:saved}=await published(bucket),tracking=await progress(bucket);
+   const {value:saved}=await published(bucket),tracking=original?await readCorrectionProgress(bucket):await progress(bucket);
    if(!original)requireCurrentProjection(saved);
-   const payload={...meta(saved),schemaVersion:2,projectionVersion:saved?projectionVersion(saved):CLIENT_REPORT_PROJECTION_VERSION,parts:saved?publicParts(saved,original):[],rows:saved?.rows||{bd:0,control:0},progress:original?(await readCorrectionProgress(bucket)).value:tracking,analysisMode:'browser',...(original?{capturedAt:stamp(),reportMeta:saved?{schemaVersion:1,revision:saved.revision,updatedAt:saved.updatedAt,updatedBy:saved.updatedBy,updatedByUserId:saved.updatedByUserId,asOf:saved.asOf,files:saved.files}:null,acl:(await readAcl(bucket)).value,source:migrationSource?{sha256:migrationSource.sha256,fileCount:migrationSource.fileCount,commitSha:migrationSource.commitSha,restorationInstructions:migrationSource.restorationInstructions,partCount:Math.ceil(migrationSource.base64.length/65536)}:null}:{})};
+   const payload={...meta(saved),schemaVersion:2,projectionVersion:saved?projectionVersion(saved):CLIENT_REPORT_PROJECTION_VERSION,parts:saved?publicParts(saved,original):[],rows:saved?.rows||{bd:0,control:0},progress:original?tracking.value:tracking,analysisMode:'browser',...(original?{capturedAt:stamp(),reportMeta:saved?{schemaVersion:1,revision:saved.revision,updatedAt:saved.updatedAt,updatedBy:saved.updatedBy,updatedByUserId:saved.updatedByUserId,asOf:saved.asOf,files:saved.files}:null,acl:(await readAcl(bucket)).value,source:migrationSource?{sha256:migrationSource.sha256,fileCount:migrationSource.fileCount,commitSha:migrationSource.commitSha,restorationInstructions:migrationSource.restorationInstructions,partCount:Math.ceil(migrationSource.base64.length/65536)}:null}:{})};
    if(original)await confirmMutationPermission(bucket,access,['admin']);
    return response(payload);
   }

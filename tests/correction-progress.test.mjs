@@ -57,7 +57,7 @@ test('correction follow-up persists for viewers across sessions without changing
  const reloaded=await call(env,'/api/report?years=2025,2026',visitor.cookie);const marked=reloaded.body.model.correctionGroups.find(x=>x.progress.key===g.progress.key);
  assert.equal(marked.progress.done,true);assert.equal(marked.progress.updatedAt,result.body.progress.updatedAt);assert.deepEqual(reloaded.body.model.summary,snapshot.model.summary);
  const secondAdmin=await login(env,'developer');const undone=await mark(env,secondAdmin,reloaded.body,marked,false);assert.equal(undone.status,200);assert.equal(undone.body.progress.updatedBy,'Desenvolvimento');
- const stored=JSON.parse(env.BUCKET.objects.get(PROGRESS_KEY).text).entries[g.progress.key];assert.equal(stored.updatedBy,'Developer');assert.equal(stored.updatedByUserId,'developer');
+ const stored=JSON.parse(env.BUCKET.objects.get('private/correction-progress-shards-v1/'+g.progress.key[0]+'.json').text).entries[g.progress.key];assert.equal(stored.updatedBy,'Developer');assert.equal(stored.updatedByUserId,'developer');
  assert.equal((await call(env,'/api/report?years=2025,2026',visitor.cookie)).body.model.correctionGroups.find(x=>x.progress.key===g.progress.key).progress.done,false);
 });
 
@@ -88,11 +88,22 @@ test('reordered rows retain progress; new divergences and stale reports cannot r
 test('two administrators marking different orders concurrently merge without lost updates',async()=>{
  const env=environment(),owner=await login(env),developer=await login(env,'developer'),saved=(await publish(env,owner)).body;assert.equal(saved.model.correctionGroups.length,2);
  const originalGet=env.BUCKET.get.bind(env.BUCKET),originalPut=env.BUCKET.put.bind(env.BUCKET);let arrivals=0,release,attempts=0;const barrier=new Promise(resolve=>release=resolve);
- env.BUCKET.get=async key=>{const snapshot=await originalGet(key);if(key===PROGRESS_KEY&&arrivals<2){arrivals++;if(arrivals===2)release();await barrier;}return snapshot;};
- env.BUCKET.put=async(key,...args)=>{if(key===PROGRESS_KEY)attempts++;return originalPut(key,...args);};
+ env.BUCKET.get=async key=>{const snapshot=await originalGet(key);if(key.startsWith('private/correction-progress-shards-v1/')&&arrivals<2){arrivals++;if(arrivals===2)release();await barrier;}return snapshot;};
+ env.BUCKET.put=async(key,...args)=>{if(key.startsWith('private/correction-progress-shards-v1/'))attempts++;return originalPut(key,...args);};
  const writes=await Promise.all([mark(env,owner,saved,saved.model.correctionGroups[0],true),mark(env,developer,saved,saved.model.correctionGroups[1],true)]);
- assert(writes.every(x=>x.status===200));assert(attempts>=3,'A failed conditional write is retried');
+ assert(writes.every(x=>x.status===200));assert(attempts>=2,'Both shard writes are persisted; same-shard conflicts retry');
  const loaded=(await call(env,'/api/report?years=2025,2026',owner.cookie)).body;assert(loaded.model.correctionGroups.every(g=>g.progress.done));assert.deepEqual(new Set(loaded.model.correctionGroups.map(g=>g.progress.updatedBy)),new Set(['Owner','Desenvolvimento']));
+});
+
+test('every unified queue item is hydrated, writable and reloadable without changing financial data or legacy keys',async()=>{
+ const env=environment(),admin=await login(env),snapshot=(await publish(env,admin)).body,items=engine.buildCorrectionReviewItems(snapshot.model);
+ assert(items.length>snapshot.model.correctionGroups.length);assert(items.some(item=>!item.groups.length));assert(items.every(item=>/^[a-f0-9]{64}$/.test(item.progress?.key)));
+ const before=env.BUCKET.objects.get('private/report-latest-v1.json').text,legacyKeys=snapshot.model.correctionGroups.map(group=>group.progress.key);
+ for(const item of items){const result=await mark(env,admin,snapshot,item,true);assert.equal(result.status,200,JSON.stringify(result.body));}
+ const loaded=(await call(env,'/api/report?years=2025,2026',admin.cookie)).body;assert(engine.buildCorrectionReviewItems(loaded.model).every(item=>item.progress.done));assert.deepEqual(loaded.model.summary,snapshot.model.summary);assert.deepEqual(loaded.model.correctionGroups.map(group=>group.progress.key),legacyKeys);assert(loaded.model.correctionGroups.every(group=>!group.progress.done),'Generic acknowledgement does not overwrite legacy group marks');assert.equal(env.BUCKET.objects.get('private/report-latest-v1.json').text,before);
+ const target=engine.buildCorrectionReviewItems(loaded.model).find(item=>!item.groups.length);assert.equal((await mark(env,admin,loaded,target,false)).status,200);
+ const reloaded=(await call(env,'/api/report?years=2025,2026',admin.cookie)).body;assert.equal(engine.buildCorrectionReviewItems(reloaded.model).find(item=>item.progress.key===target.progress.key).progress.done,false);
+ const stale={...target,progress:{key:'d'.repeat(64)}};assert.equal((await mark(env,admin,reloaded,stale,true)).status,409);
 });
 
 test('correction scenarios share the same audit key and accept progress in either view',async()=>{

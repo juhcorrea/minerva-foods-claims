@@ -76,6 +76,7 @@ test('multiple analyst and correction progress selections preserve OR semantics 
 
 test('correction progress carries the applied original scenario and plural scope rather than form drafts',async()=>{
  const f=fixture();Object.assign(f.state.model.meta,{allYears:true,years:[2021,2026],correctionScenario:'original',operations:[EX,MI],suppliers:[A,B],controlOperations:[IM]});f.state.model.correctionGroups=[{progress:{key:'synthetic-key',done:false}}];f.set('operationFilter',[IM]);f.set('supplierFilter',[]);
+ f.context.activeDetail=null;f.context.reviewQueue=()=>f.state.model.correctionGroups.map(group=>({progress:group.reviewProgress||group.progress,groups:[group],audits:[],issues:[]}));
  await f.context.toggleCorrectionProgress({dataset:{correctionProgress:'synthetic-key'},disabled:false,setAttribute(){},removeAttribute(){}});
  assert.equal(f.marks.length,1);assert.equal(f.marks[0].options.correctionScenario,'original');assert.deepEqual(f.marks[0].options.operations,[EX,MI]);assert.deepEqual(f.marks[0].options.suppliers,[A,B]);assert.deepEqual(f.marks[0].options.controlOperations,[IM]);assert.equal(f.marks[0].options.allYears,true);
 });

@@ -34,6 +34,7 @@ test('projected browser calculation preserves every financial and audit result a
     const options={years:[2026],asOf:'2026-11-10',lossFormula:'subtract-negotiating',...selection},actual=await f.runner.analyze(f.manifest,options),expected=E.analyze(f.input.bd,f.input.control,options);
     delete expected.unmatchedControls;expected.meta.correctionProgressRevision='none';
     for(const group of expected.correctionGroups||[])group.progress={key:await correctionProgressKey(group,webcrypto),done:false,updatedAt:null,updatedBy:null};
+    for(const {item,identity}of E.correctionReviewTargets(expected,f.input.bd,f.input.control)){const reviewProgress={key:hash(identity),done:false,updatedAt:null,updatedBy:null};for(const source of [...item.groups,...item.audits,...item.issues])source.reviewProgress=reviewProgress;}
     assert.deepEqual(actual,expected,JSON.stringify(selection));assert(!JSON.stringify(actual).includes('PRIVATE UNUSED'));
   }
   assert.equal(f.reads.length,f.manifest.parts.length,'Subsequent filters reuse this revision only in memory');
@@ -43,6 +44,24 @@ test('worker verifies digest and exact part order before calculating and rejects
   const f=manifestFixture();f.texts.set(origin+f.manifest.parts[0].url,'{"rows":[]}');await assert.rejects(f.runner.analyze(f.manifest,{}),/integridade/);
   const g=manifestFixture();for(const change of [{url:'https://other.example.test/secret'},{url:g.manifest.parts[0].url+'&original=1'},{url:g.manifest.parts[0].url+'&sheet=bd'},{index:2},{firstRow:8},{sheet:'other'},{sha256:'bad'}]){const invalid={...g.manifest,parts:g.manifest.parts.map((part,index)=>index?part:{...part,...change})};assert.throws(()=>manifestParts(invalid,origin),/publicação|origem|sequência|manifesto/i);}
   const unauthorized=createRunner({engine:E,crypto:webcrypto,baseURL:origin,fetcher:async()=>new Response('{}',{status:403})});await assert.rejects(unauthorized.analyze(g.manifest,{}),error=>error.status===403);
+});
+
+test('worker hydrates every queue item and explicit new marks override legacy fallback without changing originals',async()=>{
+ const f=manifestFixture(),options={allYears:true,asOf:'2026-11-10'},first=await f.runner.analyze(f.manifest,options),items=E.buildCorrectionReviewItems(first),baseline=JSON.stringify(f.input);
+ assert(items.length);assert(items.every(item=>/^[a-f0-9]{64}$/.test(item.progress?.key)));
+ for(const item of items)f.manifest.progress.entries[item.progress.key]={done:true,updatedAt:'2026-11-10T12:00:00Z',updatedBy:'QA Reviewer'};
+ f.manifest.progress.revision='marked';const marked=await f.runner.analyze(f.manifest,options);assert(E.buildCorrectionReviewItems(marked).every(item=>item.progress.done));
+ const key=items[0].progress.key;f.manifest.progress.entries[key].done=false;const undone=await f.runner.analyze(f.manifest,options);assert.equal(E.buildCorrectionReviewItems(undone).find(item=>item.progress.key===key).progress.done,false);assert.equal(JSON.stringify(f.input),baseline);assert.deepEqual(undone.summary,first.summary);assert.equal(f.reads.length,f.manifest.parts.length);
+});
+
+test('a legacy-only acknowledged correction is inherited and an explicit queue undo overrides it',async()=>{
+ const input=sources();input.bd=[input.bd[0],input.bd[1]];input.control=[input.control[0],input.control[1]];
+ Object.assign(input.control[1],{1:2025,3:'ME',10:'Fornecedor A',14:50.0625,19:50.0625,20:100.125,23:'Reembolsado'});
+ const f=manifestFixture(input),options={allYears:true,asOf:'2026-11-10'},initial=await f.runner.analyze(f.manifest,options),group=initial.correctionGroups[0];assert(group);
+ f.manifest.progress.entries[group.progress.key]={done:true,updatedAt:'2026-11-10T12:00:00Z',updatedBy:'Legacy reviewer'};
+ const inherited=await f.runner.analyze(f.manifest,options),item=E.buildCorrectionReviewItems(inherited).find(item=>item.groups.length);assert.equal(item.progress.done,true);assert.notEqual(item.progress.key,group.progress.key);
+ f.manifest.progress.entries[item.progress.key]={done:false,updatedAt:'2026-11-10T13:00:00Z',updatedBy:'Current reviewer'};
+ const undone=await f.runner.analyze(f.manifest,options),current=E.buildCorrectionReviewItems(undone).find(candidate=>candidate.progress.key===item.progress.key);assert.equal(current.progress.done,false);assert.equal(undone.correctionGroups[0].progress.done,true);
 });
 
 test('progress rehydration uses the same canonical correction key and does not download unchanged bases',async()=>{

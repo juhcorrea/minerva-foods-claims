@@ -222,6 +222,7 @@
 
   async function api(path, options) {
     const opts = options || {};
+    const requestSessionVersion = sessionVersion;
     const diagnose = global.location?.search && new URLSearchParams(global.location.search).get('diagnostico') === '1';
     const started = diagnose ? global.performance.now() : 0;
     const headers = Object.assign({'Accept':'application/json'}, opts.headers || {});
@@ -247,7 +248,7 @@
       error.status = response.status;
       error.code = payload?.code;
       error.payload = payload;
-      if (path !== '/api/session' && (response.status === 401 || response.status === 403)) {
+      if (requestSessionVersion === sessionVersion && path !== '/api/session' && (response.status === 401 || response.status === 403)) {
         lockGate(response.status === 401 ? 'Entre para continuar.' : 'Acesso não liberado.', error.message, {login:true, changeAccount:true, retry:response.status === 403});
       }
       throw error;
@@ -671,8 +672,12 @@
 
   async function setCorrectionProgress(payload){
     if(!canMarkProgress()||hasDraft())throw new Error('As marcações exigem perfil Admin, Atualizar bases ou Conferente e uma versão publicada.');
+    const version=sessionVersion,user=session.userId,role=session.role;
+    const current=()=>version===sessionVersion&&session?.userId===user&&session?.role===role&&canMarkProgress()&&!hasDraft();
+    const cancelled=()=>Object.assign(new Error('A marcação foi interrompida porque seu acesso mudou.'),{name:'AbortError'});
     reportCache.clear();
-    return api('/api/correction-progress',{method:'POST',body:JSON.stringify(payload)});
+    try{const result=await api('/api/correction-progress',{method:'POST',body:JSON.stringify(payload)});if(!current())throw cancelled();return result;}
+    catch(error){if(!current())throw cancelled();throw error;}
   }
 
   createUI();

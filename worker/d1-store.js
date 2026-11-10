@@ -98,6 +98,15 @@ export function createD1Bucket(db) {
       d1Key(key);
       return d1Object(await db.prepare('SELECT ' + D1_HEAD_COLUMNS + ' FROM claims_objects WHERE object_key = ?1').bind(key).first());
     },
+    async headMany(keys) {
+      if (!Array.isArray(keys) || keys.length > 64) throw new TypeError('Invalid metadata key list');
+      keys.forEach(key => d1Key(key));
+      if (!keys.length) return [];
+      const result = await db.prepare('SELECT ' + D1_HEAD_COLUMNS + ' FROM claims_objects WHERE object_key IN (' + keys.map((_,index) => '?' + (index + 1)).join(',') + ')').bind(...keys).all();
+      if (!result?.success || !Array.isArray(result.results)) throw new Error('Object metadata could not be read');
+      const found = new Map(result.results.map(row => [row.object_key,row]));
+      return keys.map(key => d1Object(found.get(key)));
+    },
     async put(key, body, options = {}) {
       d1Key(key);
       const condition = d1Condition(options.onlyIf), bytes = d1WriteBytes(body), metadata = d1Metadata(options), etag = crypto.randomUUID();

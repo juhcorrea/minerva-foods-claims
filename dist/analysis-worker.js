@@ -69,6 +69,11 @@
         const key=await correctionProgressKey(group,crypto),entry=progress.entries[key];
         group.progress={key,done:entry?.done===true,updatedAt:typeof entry?.updatedAt==='string'?entry.updatedAt:null,updatedBy:typeof entry?.updatedBy==='string'?entry.updatedBy:null};
       }));
+      await Promise.all(engine.correctionReviewTargets(model,rows.bd,rows.control).map(async({item,identity})=>{
+        const key=await digest(crypto,new TextEncoder().encode(identity)),entry=progress.entries[key]??engine.correctionReviewLegacyProgress(item);
+        const reviewProgress={key,done:entry?.done===true,updatedAt:typeof entry?.updatedAt==='string'?entry.updatedAt:null,updatedBy:typeof entry?.updatedBy==='string'?entry.updatedBy:null};
+        for(const source of [...item.groups,...item.audits,...item.issues])source.reviewProgress=reviewProgress;
+      }));
       model.meta={...model.meta,correctionProgressRevision:progress.revision};
       const {unmatchedControls,...safe}=model;return safe;
     },clear(){revision=null;source=null;}};

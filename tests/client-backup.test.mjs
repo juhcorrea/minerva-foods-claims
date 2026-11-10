@@ -23,7 +23,7 @@ function fixture(){
  return {report,progress,acl,manifest,partData,sourceParts};
 }
 async function runtime(data=fixture(),mutate){
- const sources=await Promise.all(['migration.js','zip.js','client-backup-entry.js'].map(file=>fs.readFile(new URL('worker/'+file,root),'utf8'))),requests=[];let manifestCalls=0;
+ const sources=await Promise.all(['correction-progress.js','migration.js','zip.js','client-backup-entry.js'].map(file=>fs.readFile(new URL('worker/'+file,root),'utf8'))),requests=[];let manifestCalls=0;
  const fetcher=async(input,options)=>{const url=new URL(input,origin);requests.push({url:url.href,options});let body;
   if(url.pathname==='/api/client-report/backup'){manifestCalls++;body=structuredClone(data.manifest);if(manifestCalls>1)body.capturedAt='2026-11-10T12:00:01.000Z';}
   else if(url.pathname==='/api/client-report/backup-source'){const index=+url.searchParams.get('part');body={index,data:data.sourceParts[index]};}
@@ -31,7 +31,7 @@ async function runtime(data=fixture(),mutate){
   const override=mutate?.({url,body,manifestCalls,data});if(override instanceof Response)return override;if(override!==undefined)body=override;
   return new Response(typeof body==='string'?body:JSON.stringify(body),{headers:{'content-type':'application/json'}});
  };
- const context={TextEncoder,TextDecoder,Uint8Array,Uint32Array,DataView,Blob,Map,Set,URL,Response,crypto,atob,fetch:fetcher,self:{location:{origin},addEventListener(){},postMessage(){}}};vm.createContext(context);vm.runInContext(sources.map(source=>source.replace(/^export\s+(?=(?:async\s+)?(?:class|function|const)\b)/gm,'')).join('\n'),context);
+ const context={TextEncoder,TextDecoder,Uint8Array,Uint32Array,DataView,Blob,Map,Set,URL,Response,crypto,atob,fetch:fetcher,self:{location:{origin},addEventListener(){},postMessage(){}}};vm.createContext(context);vm.runInContext(sources.map(source=>source.replace(/^import\s+\{[^}]+\}\s+from\s+['"]\.\/correction-progress\.js['"];?\s*$/gm,'').replace(/^export\s+(?=(?:async\s+)?(?:class|function|const)\b)/gm,'')).join('\n'),context);
  return {run:()=>context.buildClientBackup({origin}),requests,data};
 }
 function unzipStored(bytes){const entries=new Map(),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);let offset=0;while(view.getUint32(offset,true)===0x04034b50){assert.equal(view.getUint16(offset+8,true),0);const size=view.getUint32(offset+18,true),nameLength=view.getUint16(offset+26,true),extraLength=view.getUint16(offset+28,true),start=offset+30+nameLength+extraLength;const name=text(bytes.subarray(offset+30,offset+30+nameLength));assert(!entries.has(name));entries.set(name,bytes.slice(start,start+size));offset=start+size;}assert.equal(view.getUint32(offset,true),0x02014b50);return entries;}
@@ -48,6 +48,18 @@ test('browser Worker ZIP preserves the legacy migration payloads, hashes and ver
  const manifest=JSON.parse(text(entries.get('MANIFESTO.json')));assert.equal(manifest.capturedAt,when);assert.equal(manifest.counts.bdRows,3);assert.equal(manifest.counts.controlRows,2);
  await validateMigrationBackup(manifest,entries);
  assert(r.requests.every(item=>item.url.startsWith(origin+'/api/client-report/')&&item.options.credentials==='same-origin'&&item.options.cache==='no-store'&&item.options.redirect==='error'));
+});
+
+test('browser backup preserves ten thousand marks and accepts the bounded worst-case shard manifest',async()=>{
+ const data=fixture();data.progress.entries=Object.fromEntries(Array.from({length:10000},(_,index)=>[digest('mark-'+index),{done:index%2===0,updatedAt:when,updatedBy:'Synthetic Reviewer Name',updatedByUserId:'22222222-2222-4222-8222-222222222222',reportRevision:data.report.revision}]));
+ assert(Buffer.byteLength(JSON.stringify(data.progress))>2*1024*1024);
+ // Sixteen maximum-size shards, legacy state, ACL and manifest overhead.
+ const bound=16*900000+900000+1000000+800000;
+ const r=await runtime(data,({url,body})=>{if(url.pathname==='/api/client-report/backup'){const json=JSON.stringify(body);return new Response(json+' '.repeat(bound-Buffer.byteLength(json)),{headers:{'content-type':'application/json'}});}});
+ const result=await r.run(),files=unzipStored(new Uint8Array(await result.blob.arrayBuffer())),tracking=JSON.parse(text(files.get('dados/acompanhamento-correcoes.json')));
+ assert.deepEqual(tracking.entries,data.progress.entries);assert.equal(result.manifest.counts.correctionEntries,10000);await validateMigrationBackup(result.manifest,files);
+ const oversized=await runtime(data,({url})=>url.pathname==='/api/client-report/backup'?new Response(' '.repeat(20*1024*1024+1),{headers:{'content-type':'application/json'}}):undefined);
+ await assert.rejects(oversized.run(),/tamanho permitido/);assert.equal(oversized.requests.length,1);
 });
 
 test('browser backup rejects changed snapshots, corrupted rows/source, incomplete indexes and unsafe URLs',async()=>{

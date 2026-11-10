@@ -29,7 +29,7 @@ export async function buildMigrationSource(root) {
     roots.includes(name.split('/')[0])&&extensions.has(path.extname(name))&&
     name.split('/').every(part=>part&&!part.startsWith('.')&&!['bin','obj','server','node_modules','SOURCE.json'].includes(part))
   )).sort();
-  for(const required of [...topFiles,'migration/restore-data.mjs','migration/RESTAURACAO.txt','migration/source-archive.mjs','worker/migration.js','worker/zip.js'])if(!paths.includes(required))throw new Error('Required source must be tracked before building: '+required);
+  for(const required of [...topFiles,'migration/restore-data.mjs','migration/RESTAURACAO.txt','migration/source-archive.mjs','worker/migration.js','worker/zip.js','worker/correction-progress.js'])if(!paths.includes(required))throw new Error('Required source must be tracked before building: '+required);
   const fileHashes={};
   const files=paths.map(name=>{
     const absolute=path.join(root,name);

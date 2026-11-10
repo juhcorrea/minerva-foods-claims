@@ -1,6 +1,7 @@
 import {buildMigrationFiles, MigrationExportError} from './migration.js';
 import {migrationZipResponse} from './zip.js';
 import {createClientReportHandler} from './client-report.js';
+import {CorrectionProgressError,readCorrectionProgress,readCorrectionProgressMetadata,correctionProgressRevision,saveProgressEntry} from './correction-progress.js';
 import {CloudflareAccessError, cloudflareAccessConfig, createCloudflareAccessVerifier} from './cloudflare-access.js';
 
 /* Minerva Claims shared API — capability links and per-browser approvals.
@@ -267,20 +268,16 @@ async function correctionProgressKey(group) {
  const changes=(group.changes||[...(group.year?.changes||[]),...(group.market?.changes||[])]).map(change=>JSON.stringify([progressValue(change.field),progressValue(change.reference),progressValue(change.original),progressValue(change.corrected)])).sort();
  return hashToken(JSON.stringify({schema:1,refs,changes}));
 }
-async function readCorrectionProgress(bucket) {
- const found=await jsonObject(bucket,CORRECTION_PROGRESS_KEY);
- if(found.value&&(found.value.schemaVersion!==1||!found.value.entries||typeof found.value.entries!=='object'||Array.isArray(found.value.entries)))fail(503,'CORRECTION_PROGRESS_INVALID','O acompanhamento das correções precisa ser conferido.');
- return found;
-}
-// Legacy snapshots have no application revision. Their R2 ETag still changes
-// atomically with the entries and keeps the browser's in-memory report honest.
-const correctionProgressRevision = found => found.value ? String(found.value.revision || found.etag || 'none') : 'none';
 function publicCorrectionProgress(key,entry) {
  return {key,done:entry?.done===true,updatedAt:typeof entry?.updatedAt==='string'?entry.updatedAt:null,updatedBy:typeof entry?.updatedBy==='string'?actorLabel(entry.updatedBy,entry.updatedByUserId):null};
 }
-async function hydrateCorrectionProgress(bucket,model) {
+async function hydrateCorrectionProgress(bucket,model,engine,bdRows,controlRows) {
  const found=await readCorrectionProgress(bucket),{value}=found;
  await Promise.all((model.correctionGroups||[]).map(async group=>{const key=await correctionProgressKey(group);group.progress=publicCorrectionProgress(key,value?.entries[key]);}));
+ await Promise.all((engine.correctionReviewTargets?.(model,bdRows,controlRows)||[]).map(async({item,identity})=>{
+  const key=await hashToken(identity),entry=value?.entries[key]??engine.correctionReviewLegacyProgress(item),progress=publicCorrectionProgress(key,entry);
+  for(const source of [...item.groups,...item.audits,...item.issues])source.reviewProgress=progress;
+ }));
  model.meta={...model.meta,correctionProgressRevision:correctionProgressRevision(found)};
  return model;
 }
@@ -301,18 +298,14 @@ async function saveCorrectionProgress(bucket,access,body,url,engine) {
  if(saved.schemaVersion!==1||!Array.isArray(saved.bd)||!Array.isArray(saved.control))fail(503,'REPORT_INVALID','O relatório publicado precisa ser conferido pelas administradoras.');
  const options=correctionOptions(body.options,url,saved,engine);
  let model;try{model=engine.analyze(saved.bd,saved.control,options);}catch{fail(503,'REPORT_ANALYSIS_FAILED','Não foi possível conferir a correção no relatório publicado.');}
- const keys=await Promise.all((model.correctionGroups||[]).map(correctionProgressKey));
+ const keys=await Promise.all([...(model.correctionGroups||[]).map(correctionProgressKey),...(engine.correctionReviewTargets?.(model,saved.bd,saved.control)||[]).map(target=>hashToken(target.identity))]);
  if(!keys.includes(body.key))fail(409,'CORRECTION_CHANGED','A divergência mudou ou não está neste recorte. Atualize a visão antes de marcar.');
- for(let attempt=0;attempt<5;attempt++){
-  const {value,etag}=await readCorrectionProgress(bucket);
-  if((await reportMeta(bucket))?.revision!==body.reportRevision)fail(409,'REPORT_CHANGED','O relatório foi atualizado. Atualize a visão antes de marcar a correção.');
-  const actor=access.admin||access.member;
-  const entry={done:body.done,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,reportRevision:body.reportRevision};
-  const next={schemaVersion:1,revision:uuid(),entries:{...(value?.entries||{}),[body.key]:entry}};
+ const actor=access.admin||access.member,entry={done:body.done,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,reportRevision:body.reportRevision};
+ const result=await saveProgressEntry(bucket,body.key,entry,{validate:async()=>{
   await confirmMutationPermission(bucket,access,['admin','editor','reviewer']);
-  if(await putConditional(bucket,CORRECTION_PROGRESS_KEY,next,etag))return {progress:publicCorrectionProgress(body.key,entry),reportRevision:body.reportRevision,correctionProgressRevision:next.revision};
- }
- fail(409,'CORRECTION_PROGRESS_CHANGED','Outra marcação foi salva ao mesmo tempo. Tente novamente.');
+  if((await reportMeta(bucket))?.revision!==body.reportRevision)fail(409,'REPORT_CHANGED','O relatório foi atualizado. Atualize a visão antes de marcar a correção.');
+ }});
+ return {progress:publicCorrectionProgress(body.key,entry),reportRevision:body.reportRevision,correctionProgressRevision:result.correctionProgressRevision};
 }
 
 function redactModel(model) {
@@ -327,7 +320,7 @@ function redactModel(model) {
 export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null,accessFetch}){
  if(!engine?.analyze||!engine?.validateHeaders||!engine?.parseDate||!engine?.today)throw new Error('A reconciliation engine is required.');
  const verifyAccess=createCloudflareAccessVerifier({now,...(accessFetch?{fetcher:accessFetch}:{})});
- const clientReports=createClientReportHandler({engine,now,fail,response,readBody,jsonObject,putConditional,hashToken,stamp,uuid,actorLabel,confirmMutationPermission,readCorrectionProgress,correctionProgressRevision,publicCorrectionProgress,migrationSource,readAcl});
+ const clientReports=createClientReportHandler({engine,now,fail,response,readBody,jsonObject,putConditional,hashToken,stamp,uuid,actorLabel,confirmMutationPermission,readCorrectionProgress,readCorrectionProgressMetadata,saveProgressEntry,correctionProgressRevision,publicCorrectionProgress,migrationSource,readAcl});
  return async function handleApi(request,env){
   const url=new URL(request.url);if(!url.pathname.startsWith('/api/'))return null;let shouldClear=false;
   try{
@@ -388,7 +381,7 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
     return migrationZipResponse(files);
    }
    if(url.pathname==='/api/report/meta'&&request.method==='GET'){
-    const [metadata,progress]=await Promise.all([reportMeta(env.BUCKET),readCorrectionProgress(env.BUCKET)]);
+    const [metadata,progress]=await Promise.all([reportMeta(env.BUCKET),readCorrectionProgressMetadata(env.BUCKET)]);
     return response({reportMeta:metadata,correctionProgressRevision:correctionProgressRevision(progress),agingDate:engine.today()});
    }
    if(url.pathname==='/api/correction-progress'&&request.method==='POST')return response(await saveCorrectionProgress(env.BUCKET,access,await readBody(request,16384),url,engine));
@@ -399,7 +392,7 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
     if(saved.schemaVersion!==1||!Array.isArray(saved.bd)||!Array.isArray(saved.control))fail(503,'REPORT_INVALID','O relatório publicado precisa ser conferido pelas administradoras.');
     const opts=analysisOptions(url,saved,engine);if(reportView==='suppliers')opts.reportView='suppliers';
     let model;try{model=engine.analyze(saved.bd,saved.control,opts);}catch{fail(503,'REPORT_ANALYSIS_FAILED','Não foi possível processar o relatório publicado.');}
-    return response({...snapshotMetadata(saved),model:redactModel(await hydrateCorrectionProgress(env.BUCKET,model))},200,{'etag':`"${saved.revision}"`});
+    return response({...snapshotMetadata(saved),model:redactModel(await hydrateCorrectionProgress(env.BUCKET,model,engine,saved.bd,saved.control))},200,{'etag':`"${saved.revision}"`});
    }
    if(url.pathname==='/api/report'&&request.method==='POST'){
     const body=await readBody(request);
@@ -416,7 +409,7 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
     const metadata={revision:saved.revision,updatedAt:saved.updatedAt,updatedBy:saved.updatedBy,updatedByUserId:saved.updatedByUserId,bdName:files.bd,controlName:files.control,asOf};
     await confirmMutationPermission(env.BUCKET,access);
     if(!await putConditional(env.BUCKET,REPORT_KEY,saved,etag,metadata))fail(409,'REPORT_CHANGED','Outra atualização foi publicada ao mesmo tempo. Carregue a versão atual antes de tentar novamente.');
-    return response({...snapshotMetadata(saved),model:redactModel(await hydrateCorrectionProgress(env.BUCKET,model))},200,{'etag':`"${saved.revision}"`});
+    return response({...snapshotMetadata(saved),model:redactModel(await hydrateCorrectionProgress(env.BUCKET,model,engine,saved.bd,saved.control))},200,{'etag':`"${saved.revision}"`});
    }
    if(url.pathname==='/api/members'&&request.method==='GET'){
     if(access.role!=='admin')fail(403,'ADMIN_REQUIRED','Apenas as administradoras podem consultar os acessos.');
@@ -437,7 +430,7 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
     const result=await changeApproval(env.BUCKET,access,revokePath[1],false);return response(result);
    }
    fail(404,'NOT_FOUND','Esta operação não existe.');
-  }catch(err){const extra=shouldClear?{'set-cookie':clearCookie()}:{};if(err instanceof ApiError||err instanceof MigrationExportError||err instanceof CloudflareAccessError)return response({error:err.message,code:err.code},err.status,extra);return response({error:'Não foi possível concluir a operação. Tente novamente.',code:'SERVER_ERROR'},500,extra);}
+  }catch(err){const extra=shouldClear?{'set-cookie':clearCookie()}:{};if(err instanceof ApiError||err instanceof CorrectionProgressError||err instanceof MigrationExportError||err instanceof CloudflareAccessError)return response({error:err.message,code:err.code},err.status,extra);return response({error:'Não foi possível concluir a operação. Tente novamente.',code:'SERVER_ERROR'},500,extra);}
  };
 }
 export const apiConstants=Object.freeze({adminIds:ADMIN_IDS,cookieName:COOKIE,sessionDays:SESSION_DAYS,maxBodyBytes:MAX_BODY});

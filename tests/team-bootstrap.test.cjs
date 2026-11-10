@@ -107,3 +107,12 @@ for(const outcome of ['success','denied'])test('a late session poll '+outcome+' 
  if(outcome==='success')resolve(oldSession);else reject(Object.assign(new Error('Old session denied'),{status:403}));
  await poll;assert.equal(context.session,currentSession);assert.equal(context.sessionCheckInFlight,true);assert.deepEqual(events,[]);
 });
+
+for(const outcome of ['success','denied'])test('late correction acknowledgement '+outcome+' cannot affect a newly authenticated session',async()=>{
+ let release;const pending=new Promise(resolve=>release=resolve);let current={authenticated:true,approved:true,status:'approved',userId:'old-reviewer',name:'Old synthetic person',role:'reviewer'};
+ const h=harness({responses:{'/api/session':()=>current,'/api/correction-progress':()=>pending}});await h.settled();
+ const marking=h.window.MinervaTeam.setCorrectionProgress({key:'synthetic-key',done:true,reportRevision:'same-revision'}).then(result=>({result}),error=>({error}));
+ await h.window.MinervaTeam.logout();current={...current,userId:'new-reviewer',name:'New synthetic person'};h.document.getElementById('teamRetrySession').click();await h.settled();assert.equal(h.window.MinervaTeam.getProfile().id,'new-reviewer');
+ release(outcome==='success'?{progress:{key:'synthetic-key',done:true}}:{ok:false,status:403,json:async()=>({error:'Old request denied'})});
+ const settled=await marking;assert.equal(settled.error?.name,'AbortError');assert.equal(h.window.MinervaTeam.getProfile().id,'new-reviewer');assert.equal(h.document.getElementById('teamGate').hidden,true);assert(h.document.body.classList.contains('team-authenticated'));
+});
