@@ -38,7 +38,9 @@ export function createCloudflareAccessVerifier({fetcher=(...args)=>fetch(...args
   const task=(async()=>{
    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),5000);
    try{
-    const result=await fetcher(config.jwksUrl,{redirect:'error',signal:controller.signal,headers:{accept:'application/json'}});
+    // Workers supports only manual/follow. Manual keeps any redirect response
+    // here, where !ok rejects it without fetching an unconfigured key origin.
+    const result=await fetcher(config.jwksUrl,{redirect:'manual',signal:controller.signal,headers:{accept:'application/json'}});
     if(!result.ok)throw new Error('JWKS unavailable');
     const length=result.headers.get('content-length');if(length&&Number(length)>131072)throw new Error('JWKS too large');
     const reader=result.body?.getReader();if(!reader)throw new Error('JWKS body absent');const chunks=[];let size=0;

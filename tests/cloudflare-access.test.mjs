@@ -28,9 +28,38 @@ test('Access accepts only configured RS256 identity, verifies email domain and i
  const request=new Request(origin,{headers:{'Cf-Access-Jwt-Assertion':token,'Cf-Access-Authenticated-User-Email':'admin-a@'+domain,'X-Forwarded-Email':'admin-b@'+domain}});
  const identity=await f.verify(request,f.config);
  assert.equal(identity.email,'employee@'+domain);assert.equal(identity.subject,'qa-employee-one');assert.equal(identity.provider,'cloudflare-access');assert.equal(identity.issuer,issuer);
- assert.equal(f.requests.length,1);assert.equal(f.requests[0].url,issuer+'/cdn-cgi/access/certs');assert.equal(f.requests[0].options.redirect,'error');
+ assert.equal(f.requests.length,1);assert.equal(f.requests[0].url,issuer+'/cdn-cgi/access/certs');assert.equal(f.requests[0].options.redirect,'manual');
  assert.equal(await f.verify(tokenRequest(null),f.config),null);
  await f.verify(tokenRequest(token),f.config);assert.equal(f.requests.length,1,'Only public signing keys are cached');
+});
+
+test('Access JWKS fetch works with Workers redirect modes and the public Cloudflare key shape',async()=>{
+ const requests=[],config=cloudflareAccessConfig(configuration());
+ const publicKeyShape=key=>Object.fromEntries(['kid','kty','alg','use','e','n'].map(field=>[field,key[field]]));
+ const verify=createCloudflareAccessVerifier({now:()=>epoch,fetcher:async(url,options)=>{
+  // Node accepts redirect:error, but Workers throws before sending a request.
+  if(!['manual','follow'].includes(options.redirect))throw new TypeError('Unsupported redirect mode');
+  requests.push({url,redirect:options.redirect});
+  return keyResponse([publicKeyShape(firstJwk),publicKeyShape(secondJwk)]);
+ }});
+ assert.equal((await verify(tokenRequest(await signed()),config)).email,'employee@'+domain);
+ assert.deepEqual(requests,[{url:issuer+'/cdn-cgi/access/certs',redirect:'manual'}]);
+});
+
+test('Access rejects all JWKS redirects without contacting their destination',async()=>{
+ const config=cloudflareAccessConfig(configuration()),token=await signed();
+ for(const status of [301,302,303,307,308]){
+  const requests=[];
+  const verify=createCloudflareAccessVerifier({now:()=>epoch,fetcher:async(url,options)=>{
+   requests.push(url);
+   if(options.redirect==='error')throw new TypeError('Unsupported redirect mode');
+   // A follow request would obtain valid keys from an unauthorized destination.
+   if(options.redirect==='follow'){requests.push('https://other.example/keys');return keyResponse([firstJwk]);}
+   return new Response(JSON.stringify({keys:[firstJwk]}),{status,headers:{location:'https://other.example/keys','content-type':'application/json'}});
+  }});
+  await assert.rejects(()=>verify(tokenRequest(token),config),{status:503,code:'ACCESS_KEYS_UNAVAILABLE'});
+  assert.deepEqual(requests,[issuer+'/cdn-cgi/access/certs']);
+ }
 });
 
 test('Access rejects tampering, algorithm confusion, claim mismatches and unverified email',async()=>{
