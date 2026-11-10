@@ -46,6 +46,17 @@ function entryPage(kind,head=false){
  const page=staticAsset('/access.html',head);
  return new Response(page.body,{status:kind==='unavailable'?503:200,headers:page.headers});
 }
+function unknownDocumentNavigation(request,url){
+ if(!['GET','HEAD'].includes(request.method))return false;
+ const documentRequest=request.headers.get('sec-fetch-mode')==='navigate'||(request.headers.get('accept')||'').split(',').some(type=>type.split(';')[0].trim().toLowerCase()==='text/html');
+ if(!documentRequest)return false;
+ let pathname;try{pathname=decodeURIComponent(url.pathname);}catch{return false;}
+ // A stale page destination may return to the gated root. Files and internal
+ // namespaces retain their existing responses, including encoded spellings.
+ if(/[.\\\x00-\x1f\x7f]/.test(pathname))return false;
+ const first=pathname.split('/').filter(Boolean)[0]?.toLowerCase();
+ return !['api','assets','vendor','worker','server','private','dados','cdn-cgi'].includes(first);
+}
 export default {
  async fetch(request,env,ctx){
   const url=new URL(request.url);
@@ -72,7 +83,10 @@ export default {
     if(!session.approved||!['admin','editor','viewer'].includes(session.role))return secured(entryPage('denied',request.method==='HEAD'));
     return secured(staticAsset('/index.html',request.method==='HEAD'));
    }
-   if(!Object.hasOwn(STATIC_ASSETS,url.pathname))return secured(new Response('Não encontrado',{status:404}));
+   if(!Object.hasOwn(STATIC_ASSETS,url.pathname)){
+    if(unknownDocumentNavigation(request,url))return secured(new Response(null,{status:302,headers:{Location:'/'}}));
+    return secured(new Response('Não encontrado',{status:404}));
+   }
    if(!PUBLIC_ASSETS.has(url.pathname)){
     const sessionUrl=new URL('/api/session',url);const result=await apiHandler(new Request(sessionUrl,{headers:request.headers}),env);
     if(result.status>=500)return secured(new Response('Não foi possível conferir seu acesso.',{status:503}));

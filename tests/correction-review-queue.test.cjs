@@ -45,3 +45,14 @@ test('source reconciliation remains pending even when every linked manual adjust
  assert.equal(vm.runInContext('reviewProgress(testRow)',h.context),'Conferir na origem');assert(h.context.reviewCells(row).at(-1).includes('Conferir na origem'));assert(!h.context.reviewCells(row).at(-1).includes('MARK'));
  h.applied.correctionProgressFilter=['pending'];assert(h.context.reviewRows().some(item=>item.id===row.id));h.applied.correctionProgressFilter=['done'];assert(!h.context.reviewRows().some(item=>item.id===row.id));h.applied.correctionProgressFilter=['pending'];h.context.correctionWorksheets({});assert(h.sheets['Fila de conferencia'].rows.some(cells=>cells.includes('Conferir na origem')));
 });
+
+test('missing operation is searchable by SGR or exact source cell and exports its trace without a guessed correction',()=>{
+ const h=appFixture(),issue={kind:'BD_MISSING_OPERATION',type:'Operação em branco',source:'BD',row:2,bdRows:[2],controlRows:[],sourceCells:['BD!Z2'],sgr:'SGR-QA-001',order:'Order A',nf:'NF-QA-001',reference:'Order A',supplier:'Supplier A',analysts:['Ana'],reconciliation:true,amount:null,detail:'BD!Z2: operação em branco. Corrigir na BD e importar novamente.'};
+ h.model.baseReconciliation={rows:[issue]};h.model.correctionGroups.forEach(group=>group.progress.done=true);
+ for(const query of ['SGR-QA-001','BD!Z2','NF-QA-001','Operação em branco']){
+  h.applied.correctionSearch=query;h.applied.correctionProgressFilter=['pending'];const rows=h.context.reviewRows();assert.equal(rows.length,1);assert.equal(rows[0].issues.filter(i=>i===issue).length,1);assert.equal(rows[0].referenceAmount,50,'Source warning never repeats or changes the amount');
+ }
+ const row=h.context.reviewRows()[0];assert(h.context.reviewCells(row)[0].includes('SGR-QA-001'));h.context.correctionDetail(row.id);assert(h.details[0].html.includes('SGR-QA-001'));assert(h.details[0].html.includes('BD!Z2'));assert(!h.details[0].html.includes('Operação sugerida'));
+ h.context.correctionWorksheets({});const sheet=h.sheets.Conferencias,exported=sheet.rows.find(row=>row[0]==='Operação em branco');assert.equal(exported[sheet.headers.indexOf('SGR')],'SGR-QA-001');assert.equal(exported[sheet.headers.indexOf('NF')],'NF-QA-001');assert.equal(exported[sheet.headers.indexOf('Células de origem')],'BD!Z2');assert.equal(exported[sheet.headers.indexOf('Valor USD')],null);
+ h.applied.correctionProgressFilter=['done'];assert.equal(h.context.reviewRows().length,0,'Manual marks cannot hide a blank source field');
+});
