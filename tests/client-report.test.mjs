@@ -36,6 +36,53 @@ async function fixture(){
  async function publish(data=input(),revision='none',cookie=admin){const begun=await start(data,revision,cookie);assert.equal(begun.status,201,JSON.stringify(begun.body));const id=begun.body.uploadId;for(const sheet of ['bd','control'])assert.equal((await part(id,sheet,data[sheet],0,0,cookie)).status,201);const done=await commit(id,cookie);assert.equal(done.status,200,JSON.stringify(done.body));return done.body;}
  return {env,call,login,admin,start,part,commit,publish,source,analyses:()=>analyses};
 }
+async function oldProjection(f){
+ const saved=await f.publish(),key='private/client-report-v2.json',report=JSON.parse(f.env.BUCKET.objects.get(key).text);report.projectionVersion=2;
+ for(const part of report.parts){const objectKey=`private/client-reports/${saved.revision}/${part.sheet}/${part.index}.projected.json`,value=JSON.parse(f.env.BUCKET.objects.get(objectKey).text);if(part.sheet==='bd')for(const row of value.rows)row[5]=null;const body=JSON.stringify(value);part.sha256=hash(body);await f.env.BUCKET.put(objectKey,body,{customMetadata:{sha256:part.sha256}});}
+ await f.env.BUCKET.put(key,JSON.stringify(report));return report;
+}
+const upgrade=(f,step,body={},cookie=f.admin)=>f.call('/api/client-report/upgrade/'+step,{cookie,method:'POST',body});
+
+test('stored originals upgrade incrementally without changing publication identity, source data or progress',async()=>{
+ const f=await fixture(),old=await oldProjection(f),revision=old.revision,tracking={schemaVersion:1,revision:'stable-progress',entries:{}};await f.env.BUCKET.put('private/correction-progress-v1.json',JSON.stringify(tracking));
+ const originalKeys=[...f.env.BUCKET.objects.keys()].filter(key=>key.endsWith('.original.json')),originals=new Map(originalKeys.map(key=>[key,f.env.BUCKET.objects.get(key).text]));
+ const start=await upgrade(f,'start');assert.equal(start.status,201);assert.deepEqual(start.body,{revision,projectionVersion:3,totalParts:2,completed:0,nextPart:0,ready:false});
+ assert.equal((await upgrade(f,'commit',{revision})).body.code,'INCOMPLETE_UPGRADE');assert.equal((await upgrade(f,'part',{revision,part:1})).body.code,'PART_ORDER');
+ assert.equal((await upgrade(f,'part',{revision,part:0})).body.completed,1);assert.equal((await upgrade(f,'part',{revision,part:0})).body.completed,1);assert.equal((await upgrade(f,'start')).body.nextPart,1);
+ assert.equal((await f.call('/api/client-report',{cookie:f.admin})).body.code,'REPORT_PROJECTION_OUTDATED','partial projection is never exposed');
+ const otherAdmin=await f.login('developer');assert.equal((await upgrade(f,'part',{revision,part:1},otherAdmin)).body.completed,2);assert.equal((await upgrade(f,'commit',{revision},otherAdmin)).body.ready,true);assert.equal((await upgrade(f,'commit',{revision})).body.ready,true);assert.equal((await upgrade(f,'start')).body.ready,true);
+ const current=JSON.parse(f.env.BUCKET.objects.get('private/client-report-v2.json').text),omit=value=>Object.fromEntries(Object.entries(value).filter(([key])=>!['projectionVersion','parts'].includes(key)));assert.deepEqual(omit(current),omit(old));assert.equal(current.projectionVersion,3);
+ for(let i=0;i<old.parts.length;i++){const strip=part=>Object.fromEntries(Object.entries(part).filter(([key])=>!['sha256','projectedVersion'].includes(key)));assert.deepEqual(strip(current.parts[i]),strip(old.parts[i]));}
+ for(const [key,value]of originals)assert.equal(f.env.BUCKET.objects.get(key).text,value);assert.equal(f.env.BUCKET.objects.get('private/correction-progress-v1.json').text,JSON.stringify(tracking));
+ const manifest=await f.call('/api/client-report',{cookie:f.admin});assert.equal(manifest.status,200);assert.equal(manifest.body.revision,revision);assert.equal(manifest.body.updatedAt,old.updatedAt);
+ const descriptor=manifest.body.parts.find(part=>part.sheet==='bd'),projected=await f.call(descriptor.url,{cookie:f.admin});assert.equal(hash(projected.text),descriptor.sha256);assert.equal(projected.body.rows[1][5],'Aberto');assert.equal(projected.body.rows[1][16],'Seguro');assert(!projected.text.includes('UNUSED-PRIVATE'));
+ const backup=await f.call('/api/client-report/backup',{cookie:f.admin}),original=await f.call(backup.body.parts.find(part=>part.sheet==='bd').url,{cookie:f.admin});assert(original.text.includes('UNUSED-PRIVATE-BD'));assert.equal(backup.body.reportMeta.updatedAt,old.updatedAt);assert.equal(f.analyses(),0);
+});
+
+test('projection upgrade remains admin only with CSRF, bounded part selection and no caller supplied data',async()=>{
+ const f=await fixture(),old=await oldProjection(f),request=await f.call('/api/auth/request',{method:'POST',body:{name:'QA Reader',email:'qa-reader@corp.example'}});
+ for(const step of ['start','part','commit']){assert.equal((await upgrade(f,step,{},null)).status,401);assert.equal((await upgrade(f,step,{},request.cookie)).status,403);}
+ await f.call('/api/members/'+request.body.userId+'/approve',{cookie:f.admin,method:'POST',body:{}});
+ for(const role of ['viewer','editor']){if(role==='editor')await f.call('/api/members/'+request.body.userId+'/role',{cookie:f.admin,method:'POST',body:{role}});for(const step of ['start','part','commit'])assert.equal((await upgrade(f,step,{revision:old.revision,part:0},request.cookie)).status,403);}
+ assert.equal((await f.call('/api/client-report/upgrade/start',{cookie:f.admin,method:'POST',body:{},csrf:false})).status,403);assert.equal((await upgrade(f,'start',{rows:[]})).status,400);await upgrade(f,'start');
+ assert.equal((await upgrade(f,'part',{revision:old.revision,part:0,rows:[['injected']]})).status,400);for(const part of [-1,768,0.5,'0'])assert.equal((await upgrade(f,'part',{revision:old.revision,part})).status,400);
+ assert.equal(JSON.parse(f.env.BUCKET.objects.get('private/client-report-v2.json').text).projectionVersion,2);
+});
+
+test('projection preparation verifies originals, stops on missing or oversized parts and retries a stage conflict',async()=>{
+ for(const defect of ['hash','missing','oversized']){const f=await fixture(),old=await oldProjection(f),revision=old.revision,reportKey='private/client-report-v2.json',sourceKey=`private/client-reports/${revision}/bd/0.original.json`;
+  if(defect==='hash')await f.env.BUCKET.put(sourceKey,'{"rows":[]}');else if(defect==='missing')await f.env.BUCKET.delete(sourceKey);else{old.parts[0].size=65537;await f.env.BUCKET.put(reportKey,JSON.stringify(old));}
+  const before=f.env.BUCKET.objects.get(reportKey).text;await upgrade(f,'start');const failed=await upgrade(f,'part',{revision,part:0});assert.equal(failed.status,503);assert.equal(f.env.BUCKET.objects.get(reportKey).text,before);assert.equal((await upgrade(f,'start')).body.completed,0);assert(![...f.env.BUCKET.objects.keys()].some(key=>key.endsWith('.projected-v3.json')));
+ }
+ const f=await fixture(),old=await oldProjection(f),revision=old.revision;await upgrade(f,'start');f.env.BUCKET.conflictKey=`private/client-reports/${revision}/projection-3-upgrade.json`;
+ assert.equal((await upgrade(f,'part',{revision,part:0})).body.code,'UPGRADE_CHANGED');assert.equal((await upgrade(f,'part',{revision,part:0})).body.completed,1,'immutable prepared part is safely reused after interruption');
+});
+
+test('upgrade activation uses CAS and cannot replace a newer publication',async()=>{
+ const f=await fixture(),old=await oldProjection(f),revision=old.revision;await upgrade(f,'start');for(let part=0;part<2;part++)assert.equal((await upgrade(f,'part',{revision,part})).status,200);
+ f.env.BUCKET.conflictKey='private/client-report-v2.json';assert.equal((await upgrade(f,'commit',{revision})).body.code,'REPORT_CHANGED');assert.equal(JSON.parse(f.env.BUCKET.objects.get('private/client-report-v2.json').text).projectionVersion,2);
+ const newer=await f.publish(input(),revision),before=f.env.BUCKET.objects.get('private/client-report-v2.json').text;assert.equal((await upgrade(f,'commit',{revision})).body.code,'REPORT_CHANGED');assert.equal((await upgrade(f,'part',{revision,part:0})).body.code,'REPORT_CHANGED');assert.equal(f.env.BUCKET.objects.get('private/client-report-v2.json').text,before);assert.notEqual(newer.revision,revision);
+});
 test('browser publication is atomic, immutable, hash checked and never runs server analysis',async()=>{
  const f=await fixture(),data=input(),begun=await f.start(data),id=begun.body.uploadId;
  assert.equal((await f.call('/api/client-report',{cookie:f.admin})).body.parts.length,0);
@@ -61,7 +108,7 @@ test('old publication cannot feed analysis or cache but retains session metadata
  const f=await fixture(),data=input(),saved=await f.publish(data),pointerKey='private/client-report-v2.json',stored=JSON.parse(f.env.BUCKET.objects.get(pointerKey).text),stalePart=(await f.call('/api/client-report',{cookie:f.admin})).body.parts.find(part=>part.sheet==='bd');
  for(const version of [1,2,undefined]){
   const old={...stored};if(version===undefined)delete old.projectionVersion;else old.projectionVersion=version;await f.env.BUCKET.put(pointerKey,JSON.stringify(old));
-  for(const route of ['/api/client-report','/api/report/meta',stalePart.url]){const blocked=await f.call(route,{cookie:f.admin});assert.equal(blocked.status,409,route);assert.equal(blocked.body.code,'REPORT_PROJECTION_OUTDATED');assert.match(blocked.body.error,/publicar novamente as duas bases/);}
+  for(const route of ['/api/client-report','/api/report/meta',stalePart.url]){const blocked=await f.call(route,{cookie:f.admin});assert.equal(blocked.status,409,route);assert.equal(blocked.body.code,'REPORT_PROJECTION_OUTDATED');assert.match(blocked.body.error,/não é necessário importá-los novamente/);}
   const session=await f.call('/api/session',{cookie:f.admin});assert.equal(session.status,200);assert.equal(session.body.approved,true);assert.equal(session.body.reportMeta.revision,saved.revision);assert.equal(session.body.reportMeta.projectionVersion,version??1);
   const backup=await f.call('/api/client-report/backup',{cookie:f.admin});assert.equal(backup.status,200);assert.equal(backup.body.projectionVersion,version??1);const original=await f.call(backup.body.parts.find(part=>part.sheet==='bd').url,{cookie:f.admin});assert.equal(original.status,200);assert.equal(original.body.rows[1][16],'Seguro');assert.equal(original.body.rows[1][5],'Aberto');
   assert.equal((await f.call('/api/client-report')).status,401,'Compatibility errors never replace authorization');

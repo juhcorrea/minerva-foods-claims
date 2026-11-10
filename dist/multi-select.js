@@ -70,7 +70,7 @@
     const exit = document.createElement('button'); exit.type = 'button'; exit.className = 'multi-select-close'; exit.textContent = '×'; exit.setAttribute('aria-label', 'Fechar opções'); exit.addEventListener('click', () => close(true)); head.append(heading, exit);
     const search = document.createElement('input'); search.type = 'search'; search.className = 'multi-select-search'; search.placeholder = 'Buscar opções'; search.setAttribute('aria-label', 'Buscar em ' + title(record.select)); search.autocomplete = 'off';
     const actions = document.createElement('div'); actions.className = 'multi-select-actions';
-    for (const [name, text] of [['all', 'Marcar todos'], ['clear', 'Limpar']]) {
+    for (const [name, text] of [['all', 'Marcar todos'], ['clear', 'Desmarcar todos']]) {
       const button = document.createElement('button'); button.type = 'button'; button.textContent = text;
       button.addEventListener('click', () => commit(record, name === 'all' ? options(record.select).filter(option => !option.disabled && option.parentElement?.disabled !== true).map(option => option.value) : [])); actions.append(button);
     }

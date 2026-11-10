@@ -24,17 +24,18 @@
       yield {sheet,index,firstRow,rowCount:selected.length,body};firstRow+=selected.length;index++;
     }
   }
-  function createClient({makeWorker}){
-    let worker=null,workerRevision=null,serial=0,pending=null,epoch=0,maintenanceTask=null,maintenanceController=null,maintenanceCalls=0;
-    function clear(){
-      epoch++;if(worker)worker.terminate();worker=null;workerRevision=null;
-      maintenanceController?.abort();maintenanceController=null;
+  function createClient({makeWorker,setTimer=setTimeout,clearTimer=clearTimeout}){
+    let worker=null,workerRevision=null,serial=0,pending=null,epoch=0,loadSerial=0,upgradeController=null,maintenanceTask=null,maintenanceController=null,maintenanceCalls=0;
+    function discardWorker(){
+      if(worker)worker.terminate();worker=null;workerRevision=null;
       if(pending){const job=pending;pending=null;job.cleanup();job.reject(aborted());}
     }
+    function clear(){epoch++;discardWorker();upgradeController?.abort();upgradeController=null;maintenanceController?.abort();maintenanceController=null;}
     function run(manifest,options,signal,onProgress){
-      check(signal);if(workerRevision!==manifest.revision)clear();
-      if(pending)clear();
-      if(!worker){worker=makeWorker();workerRevision=manifest.revision;}
+      const sourceKey=JSON.stringify([manifest.revision,manifest.projectionVersion??1]);
+      check(signal);if(workerRevision!==sourceKey)discardWorker();
+      if(pending)discardWorker();
+      if(!worker){worker=makeWorker();workerRevision=sourceKey;}
       const current=worker,id=++serial;
       return new Promise((resolve,reject)=>{
         const stop=()=>clear();
@@ -47,12 +48,38 @@
             if(progress?.phase==='analysis'||progress?.phase==='download'&&Number.isInteger(progress.loaded)&&Number.isInteger(progress.total)&&progress.total>0&&progress.total<=768&&progress.loaded>=0&&progress.loaded<=progress.total)onProgress(progress);
             return;
           }
-          const failure=event.data.error?Object.assign(new Error(event.data.error.message),{status:event.data.error.status,code:event.data.error.code}):null;finish(failure,event.data.model);if(failure)clear();
+          const failure=event.data.error?Object.assign(new Error(event.data.error.message),{status:event.data.error.status,code:event.data.error.code}):null;finish(failure,event.data.model);if(failure)discardWorker();
         };
         const error=()=>{finish(new Error('Não foi possível concluir o cálculo no navegador. Atualize a visão e tente novamente.'));if(current===worker){current.terminate();worker=null;workerRevision=null;}};
         pending={id,reject,cleanup};signal?.addEventListener('abort',stop,{once:true});current.addEventListener('message',message);current.addEventListener('error',error);
-        try{current.postMessage({id,manifest,options});}catch(failure){finish(failure);clear();}
+        try{current.postMessage({id,manifest,options});}catch(failure){finish(failure);discardWorker();}
       });
+    }
+    async function upgradeProjection({api,signal,onProgress,guard,canUpgrade}){
+      const active=()=>{guard();if(!canUpgrade())throw aborted();};
+      const validate=(value,previous)=>{
+        if(!value||typeof value.revision!=='string'||!value.revision||value.projectionVersion!==3||!Number.isInteger(value.totalParts)||value.totalParts<2||value.totalParts>768||!Number.isInteger(value.completed)||value.completed<0||value.completed>value.totalParts||value.nextPart!==value.completed||typeof value.ready!=='boolean'||value.ready&&value.completed!==value.totalParts||previous&&(value.revision!==previous.revision||value.totalParts!==previous.totalParts||value.completed<previous.completed))throw new Error('A preparação da leitura não foi confirmada. Use Atualizar visão para retomar; as bases publicadas foram preservadas.');
+        return value;
+      };
+      const post=async(path,body)=>{
+        active();const controller=new AbortController(),stop=()=>controller.abort();let timedOut=false;
+        upgradeController=controller;signal?.addEventListener('abort',stop,{once:true});
+        const timeout=setTimer(()=>{timedOut=true;controller.abort();},30000);
+        try{const result=await api('/api/client-report/upgrade/'+path,{method:'POST',signal:controller.signal,body:JSON.stringify(body)});active();if(controller.signal.aborted)throw aborted();return result;}
+        catch(error){active();if(timedOut)throw Object.assign(new Error('Uma etapa da preparação demorou mais de 30 segundos. Use Atualizar visão para retomar; as bases foram preservadas.'),{code:'UPGRADE_TIMEOUT'});throw error;}
+        finally{clearTimer(timeout);signal?.removeEventListener('abort',stop);if(upgradeController===controller)upgradeController=null;}
+      };
+      discardWorker();active();onProgress({phase:'projection',loaded:0,total:0});
+      let state=validate(await post('start',{}));
+      onProgress({phase:'projection',loaded:state.completed,total:state.totalParts});
+      while(!state.ready&&state.completed<state.totalParts){
+        const previous=state;state=validate(await post('part',{revision:state.revision,part:state.nextPart}),previous);
+        if(state.completed===previous.completed&&!state.ready)throw new Error('A preparação da leitura não avançou. Use Atualizar visão para retomar.');
+        onProgress({phase:'projection',loaded:state.completed,total:state.totalParts});
+      }
+      if(!state.ready)state=validate(await post('commit',{revision:state.revision}),state);
+      if(!state.ready)throw new Error('A preparação ainda não foi concluída. Use Atualizar visão para retomar.');
+      discardWorker();active();
     }
     return {
       clear,
@@ -74,11 +101,21 @@
         })().finally(()=>{if(maintenanceController===controller)maintenanceController=null;maintenanceTask=null;});
         return maintenanceTask;
       },
-      async load(options,{api,signal,onProgress=()=>{}}={}){
-        check(signal);onProgress({phase:'manifest'});const started=epoch,manifest=await api('/api/client-report',{signal});check(signal);if(started!==epoch)throw aborted();
-        if(!manifest?.revision){clear();return {model:null,revision:null,files:null,updatedAt:null,updatedBy:null};}
-        const model=await run(manifest,options,signal,onProgress);check(signal);
-        return {model,revision:manifest.revision,files:manifest.files,updatedAt:manifest.updatedAt,updatedBy:manifest.updatedBy,asOf:manifest.asOf};
+      async load(options,{api,signal,onProgress=()=>{},canUpgrade=()=>false}={}){
+        upgradeController?.abort();
+        const started=epoch,loadId=++loadSerial,guard=()=>{check(signal);if(started!==epoch||loadId!==loadSerial)throw aborted();};
+        for(let attempt=0;attempt<2;attempt++){
+          try{
+            guard();onProgress({phase:'manifest'});const manifest=await api('/api/client-report',{signal});guard();
+            if(!manifest?.revision){discardWorker();return {model:null,revision:null,files:null,updatedAt:null,updatedBy:null};}
+            const model=await run(manifest,options,signal,onProgress);guard();
+            return {model,revision:manifest.revision,projectionVersion:manifest.projectionVersion??1,files:manifest.files,updatedAt:manifest.updatedAt,updatedBy:manifest.updatedBy,asOf:manifest.asOf};
+          }catch(error){
+            guard();
+            if(attempt||error.status!==409||error.code!=='REPORT_PROJECTION_OUTDATED'||!canUpgrade())throw error;
+            await upgradeProjection({api,signal,onProgress,guard,canUpgrade});
+          }
+        }
       },
       async publish(payload,{api,expectedRevision,signal,onProgress=()=>{}}={}){
         const started=epoch,guard=()=>{check(signal);if(started!==epoch)throw aborted();};guard();

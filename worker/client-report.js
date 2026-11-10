@@ -25,8 +25,10 @@ export function createClientReportHandler(deps){
  const isId=id=>typeof id==='string'&&/^[a-f0-9-]{36}$/i.test(id);
  const stageKey=id=>'private/client-staging/'+id+'.json';
  const objectKey=(id,sheet,index,original=false)=>`private/client-reports/${id}/${sheet}/${index}.${original?'original':'projected'}.json`;
+ const derivedKey=(id,sheet,index)=>`private/client-reports/${id}/${sheet}/${index}.projected-v${CLIENT_REPORT_PROJECTION_VERSION}.json`;
+ const upgradeKey=id=>`private/client-reports/${id}/projection-${CLIENT_REPORT_PROJECTION_VERSION}-upgrade.json`;
  const projectionVersion=value=>value?.projectionVersion??1;
- const requireCurrentProjection=value=>{if(value&&projectionVersion(value)!==CLIENT_REPORT_PROJECTION_VERSION)fail(409,'REPORT_PROJECTION_OUTDATED','A administração precisa importar e publicar novamente as duas bases para disponibilizar o Status da coluna F no Controle de claim.');};
+ const requireCurrentProjection=value=>{if(value&&projectionVersion(value)!==CLIENT_REPORT_PROJECTION_VERSION)fail(409,'REPORT_PROJECTION_OUTDATED','A cópia de leitura das bases armazenadas precisa ser preparada pela administração. Os arquivos já publicados estão preservados; não é necessário importá-los novamente.');};
  const meta=value=>value?{revision:value.revision,updatedAt:value.updatedAt,updatedBy:actorLabel(value.updatedBy,value.updatedByUserId),files:value.files,asOf:value.asOf,projectionVersion:projectionVersion(value)}:null;
  const fields=(body,allowed)=>{if(Object.keys(body).some(key=>!allowed.includes(key)))fail(400,'INVALID_REQUEST','A solicitação contém campos inesperados.');};
  const label=(value,fallback)=>{if(value==null)return fallback;if(typeof value!=='string'||value.length>240||/[\u0000-\u001f]/.test(value))fail(400,'INVALID_FILENAME','Confira o nome do arquivo.');return value.trim()||fallback;};
@@ -42,6 +44,70 @@ export function createClientReportHandler(deps){
   return found;
  }
  function publicParts(saved,original=false){return saved.parts.map(part=>({sheet:part.sheet,index:part.index,firstRow:part.firstRow,rowCount:part.rowCount,sha256:original?part.originalSha256:part.sha256,url:`/api/client-report/parts?revision=${saved.revision}&sheet=${part.sheet}&index=${part.index}${original?'&original=1':''}`}));}
+ function upgradeResult(saved,stage){const ready=projectionVersion(saved)===CLIENT_REPORT_PROJECTION_VERSION,completed=ready?saved.parts.length:stage?.hashes?.length||0;return {revision:saved.revision,projectionVersion:CLIENT_REPORT_PROJECTION_VERSION,totalParts:saved.parts.length,completed,nextPart:completed,ready};}
+ async function upgradeState(bucket,revision){
+  if(!isId(revision))fail(400,'INVALID_UPGRADE','A preparação da base é inválida.');
+  const current=await published(bucket);
+  if(current.value?.revision!==revision)fail(409,'REPORT_CHANGED','A base publicada mudou. Atualize a visão antes de continuar.');
+  if(projectionVersion(current.value)===CLIENT_REPORT_PROJECTION_VERSION)return {...current,ready:true};
+  const found=await jsonObject(bucket,upgradeKey(revision)),stage=found.value;
+  if(!stage||stage.schemaVersion!==1||stage.revision!==revision||stage.targetVersion!==CLIENT_REPORT_PROJECTION_VERSION||!Array.isArray(stage.hashes)||stage.hashes.length>current.value.parts.length)fail(409,'UPGRADE_NOT_STARTED','Inicie a preparação da base armazenada.');
+  if(stage.expectedEtag!==current.etag)fail(409,'REPORT_CHANGED','A base publicada mudou durante a preparação. Atualize a visão.');
+  return {...current,stage,stageEtag:found.etag,ready:false};
+ }
+ async function upgradeStart(bucket,request,access){
+  const body=await readBody(request,1024);fields(body,[]);
+  const current=await published(bucket),saved=current.value;
+  if(!saved)fail(409,'REPORT_NOT_FOUND','Não há base publicada para preparar.');
+  if(projectionVersion(saved)===CLIENT_REPORT_PROJECTION_VERSION)return response(upgradeResult(saved));
+  if(![1,2].includes(projectionVersion(saved))||saved.parts.length<2||saved.parts.length>MAX_PARTS)fail(409,'UPGRADE_UNSUPPORTED','A versão da base armazenada precisa ser conferida.');
+  const found=await jsonObject(bucket,upgradeKey(saved.revision));
+  if(found.value){const state=await upgradeState(bucket,saved.revision);return response(upgradeResult(state.value,state.stage));}
+  const stage={schemaVersion:1,revision:saved.revision,targetVersion:CLIENT_REPORT_PROJECTION_VERSION,expectedEtag:current.etag,createdAt:stamp(),hashes:[]};
+  await confirmEditorPermission(bucket,access);
+  if(!await putConditional(bucket,upgradeKey(saved.revision),stage,null)){const state=await upgradeState(bucket,saved.revision);return response(upgradeResult(state.value,state.stage));}
+  return response(upgradeResult(saved,stage),201);
+ }
+ async function upgradePart(bucket,request,access){
+  const body=await readBody(request,1024);fields(body,['revision','part']);
+  if(!Number.isInteger(body.part)||body.part<0||body.part>=MAX_PARTS)fail(400,'INVALID_PART','Selecione uma parte válida da base armazenada.');
+  const state=await upgradeState(bucket,body.revision),saved=state.value;
+  if(state.ready)return response(upgradeResult(saved));
+  const stage=state.stage;
+  if(body.part<stage.hashes.length)return response(upgradeResult(saved,stage));
+  if(body.part!==stage.hashes.length||body.part>=saved.parts.length)fail(409,'PART_ORDER','Prepare as partes na ordem indicada.');
+  const part=saved.parts[body.part];
+  if(!Object.hasOwn(clientReportColumns,part.sheet)||!Number.isInteger(part.index)||part.index<0||!Number.isInteger(part.firstRow)||part.firstRow<0||!Number.isInteger(part.rowCount)||part.rowCount<1||part.rowCount>1000||!Number.isInteger(part.size)||part.size>MAX_PART||part.size<1||!/^[a-f0-9]{64}$/.test(part.originalSha256||''))fail(503,'REPORT_INVALID','A identificação da parte original precisa ser conferida.');
+  const object=await bucket.get(objectKey(saved.revision,part.sheet,part.index,true));
+  if(!object)fail(503,'REPORT_INCOMPLETE','Uma parte original da base armazenada não foi encontrada.');
+  const original=await object.text(),size=new TextEncoder().encode(original).length;
+  if(size!==part.size||size>MAX_PART||await hashToken(original)!==part.originalSha256)fail(503,'ORIGINAL_HASH_MISMATCH','A integridade da parte original não foi confirmada. A base publicada foi preservada.');
+  let rows;try{rows=JSON.parse(original).rows;}catch{fail(503,'REPORT_INVALID','A parte original da base precisa ser conferida.');}
+  if(!Array.isArray(rows)||rows.length!==part.rowCount||rows.some(row=>!Array.isArray(row)||row.length>80))fail(503,'REPORT_INVALID','As linhas da parte original não correspondem ao manifesto.');
+  const projected=JSON.stringify({rows:projectClientRows(part.sheet,rows,part.firstRow)}),digest=await hashToken(projected),key=derivedKey(saved.revision,part.sheet,part.index);
+  await confirmEditorPermission(bucket,access);
+  const written=await bucket.put(key,projected,{onlyIf:{etagDoesNotMatch:'*'},httpMetadata:{contentType:'application/json; charset=utf-8'},customMetadata:{sha256:digest}});
+  if(!written){const previous=typeof bucket.head==='function'?await bucket.head(key):await bucket.get(key);if(previous?.customMetadata?.sha256!==digest)fail(409,'PART_CHANGED','A cópia preparada desta parte possui outro conteúdo. A publicação foi preservada.');}
+  stage.hashes.push(digest);
+  if(!await putConditional(bucket,upgradeKey(saved.revision),stage,state.stageEtag)){
+   const concurrent=await upgradeState(bucket,saved.revision);
+   if(!concurrent.ready&&concurrent.stage.hashes[body.part]!==digest)fail(409,'UPGRADE_CHANGED','Outra preparação avançou. Atualize a visão para retomar.');
+   return response(upgradeResult(concurrent.value,concurrent.stage));
+  }
+  return response(upgradeResult(saved,stage));
+ }
+ async function upgradeCommit(bucket,request,access){
+  const body=await readBody(request,1024);fields(body,['revision']);
+  const state=await upgradeState(bucket,body.revision),saved=state.value;
+  if(state.ready)return response(upgradeResult(saved));
+  if(state.stage.hashes.length!==saved.parts.length||state.stage.hashes.some(hash=>!/^[a-f0-9]{64}$/.test(hash)))fail(409,'INCOMPLETE_UPGRADE','Prepare todas as partes antes de ativar a leitura.');
+  // The report identity, original descriptors and all publication timestamps
+  // stay intact. Only the derived reader projection changes atomically.
+  const next={...saved,projectionVersion:CLIENT_REPORT_PROJECTION_VERSION,parts:saved.parts.map((part,index)=>({...part,sha256:state.stage.hashes[index],projectedVersion:CLIENT_REPORT_PROJECTION_VERSION}))};
+  await confirmEditorPermission(bucket,access);
+  if(!await putConditional(bucket,REPORT,next,state.etag))fail(409,'REPORT_CHANGED','A base publicada mudou. Atualize a visão para continuar.');
+  return response(upgradeResult(next));
+ }
  async function start(bucket,request,access){
   const body=await readBody(request,4096);fields(body,['expectedRevision','expectedRows','files','asOf','demo']);
   if(!body.expectedRows||Object.keys(body.expectedRows).some(key=>!['bd','control'].includes(key))||['bd','control'].some(key=>!Number.isInteger(body.expectedRows[key])||body.expectedRows[key]<2||body.expectedRows[key]>25000))fail(400,'INVALID_ROW_COUNT','Informe a quantidade completa de linhas das duas bases.');
@@ -120,6 +186,12 @@ export function createClientReportHandler(deps){
   }
   if(url.pathname==='/api/correction-progress'&&request.method==='POST')return saveProgress(bucket,request,access);
   if(url.pathname==='/api/report')fail(409,'BROWSER_ANALYSIS_REQUIRED','Atualize a página para usar o processamento no navegador.');
+  if(/^\/api\/client-report\/upgrade\/(start|part|commit)$/.test(url.pathname)){
+   if(access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode preparar a leitura das bases armazenadas.');
+   if(request.method!=='POST')fail(405,'METHOD_NOT_ALLOWED','Use a solicitação de preparação.');
+   if(url.pathname.endsWith('/start'))return upgradeStart(bucket,request,access);
+   return url.pathname.endsWith('/part')?upgradePart(bucket,request,access):upgradeCommit(bucket,request,access);
+  }
   if(url.pathname==='/api/client-report/start'&&request.method==='POST')return start(bucket,request,access);
   if(url.pathname==='/api/client-report/cleanup'&&request.method==='POST'){
    const body=await readBody(request,10000);fields(body,['cursor']);await confirmEditorPermission(bucket,access);
@@ -150,7 +222,8 @@ export function createClientReportHandler(deps){
    const {value:saved}=await published(bucket);if(saved?.revision!==revision)fail(409,'REPORT_CHANGED','O relatório mudou. Atualize a visão.');
    if(!original)requireCurrentProjection(saved);
    const part=saved.parts.find(item=>item.sheet===sheet&&item.index===index);if(!part)fail(404,'PART_NOT_FOUND','Este trecho não pertence à publicação.');
-   const object=await bucket.get(objectKey(revision,sheet,index,original));if(!object)fail(503,'REPORT_INCOMPLETE','A base publicada precisa ser conferida.');
+   const key=!original&&part.projectedVersion===CLIENT_REPORT_PROJECTION_VERSION?derivedKey(revision,sheet,index):objectKey(revision,sheet,index,original);
+   const object=await bucket.get(key);if(!object)fail(503,'REPORT_INCOMPLETE','A base publicada precisa ser conferida.');
    return new Response(object.body,{headers:{'content-type':'application/json; charset=utf-8','cache-control':'private, no-store','x-content-type-options':'nosniff','etag':`"${original?part.originalSha256:part.sha256}"`}});
   }
   if(url.pathname==='/api/migration/export')fail(409,'BROWSER_BACKUP_REQUIRED','Atualize a página para baixar o backup pelo navegador.');

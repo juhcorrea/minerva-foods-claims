@@ -67,7 +67,7 @@ export async function cleanup(bucket, currentRevision, {now = () => Date.now(), 
   const prefix = 'private/client-reports/' + id + '/';
   const parts = await bucket.list({prefix,limit:cleanupBatchSize});
   cleanupNextCursor(parts);
-  if (parts.objects.length > cleanupBatchSize || parts.objects.some(part=>typeof part.key !== 'string' || !part.key.startsWith(prefix) || !/^(bd|control)\/(0|[1-9]\d*)\.(original|projected)\.json$/.test(part.key.slice(prefix.length)))) return cleanupResult(next,0,'unknown-part');
+  if (parts.objects.length > cleanupBatchSize || parts.objects.some(part=>typeof part.key !== 'string' || !part.key.startsWith(prefix) || !/^(?:(bd|control)\/(0|[1-9]\d*)\.(original|projected|projected-v3)|projection-3-upgrade)\.json$/.test(part.key.slice(prefix.length)))) return cleanupResult(next,0,'unknown-part');
   let deleted = 0;
   for (const part of parts.objects) {await bucket.delete(part.key);deleted++;}
   if (!parts.truncated && deleted < cleanupBatchSize) {

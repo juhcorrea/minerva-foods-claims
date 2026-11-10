@@ -125,3 +125,31 @@ test('cache retains only two models, clears old publications and supports explic
  c.put('d',payload('r2'));assert.equal(c.get('b'),undefined);assert.equal(c.get('c'),undefined);c.clear();assert.equal(c.get('d'),undefined);
  assert.match(source,/session = null;\s*reportCache.clear\(\)/);assert.match(source,/refresh:\(\) => \{reportCache.clear\(\)/);
 });
+
+test('projection changes invalidate and replace all models even when report revision and dates stay unchanged',()=>{
+ const c=createReportCache(),old={...payload(),projectionVersion:2},fresh={...payload(),projectionVersion:3},current={...metadata(),reportMeta:{revision:'r1',projectionVersion:3}};
+ c.put('old',old);assert.equal(c.valid(old,current),false);assert.equal(c.valid(fresh,current),true);assert.equal(c.valid(payload(),current),false);
+ c.put('new',fresh);assert.equal(c.get('old'),undefined);assert.equal(c.get('new'),fresh);
+});
+test('outdated cached metadata delegates to the browser upgrade with current admin authorization and never applies the old model',async()=>{
+ const h=harness(),jobs=[],old={...payload(),projectionVersion:2},fresh={...payload(),projectionVersion:3};h.context.session={approved:true,role:'admin',analysisMode:'browser'};
+ h.context.reportCache.put(reportQuery(opts),old);
+ h.context.api=async url=>{h.requests.push(url);throw Object.assign(Error('Preparar leitura'),{status:409,code:'REPORT_PROJECTION_OUTDATED'});};
+ h.context.global.MinervaClientAnalysis={load:async(_opts,job)=>{jobs.push(job);assert.equal(job.canUpgrade(),true);return fresh;}};
+ assert.equal(await h.load(),true);assert.deepEqual(h.requests,['/api/report/meta']);assert.equal(h.applied.length,1);assert.equal(h.applied[0],fresh);assert.equal(h.context.reportCache.get(reportQuery(opts)),fresh);
+ h.context.session.role='editor';assert.equal(jobs[0].canUpgrade(),false);h.context.session=null;assert.equal(jobs[0].canUpgrade(),false);
+});
+test('projection preparation gets its own bounded deadline and completion restarts the download budget',async()=>{
+ const h=harness(),clock=virtualTimers(h);h.context.session={approved:true,role:'admin',analysisMode:'browser'};let job,complete;
+ const status={textContent:''};h.context.global.document={getElementById:()=>status};
+ h.context.global.MinervaClientAnalysis={load:(_opts,options)=>{job=options;return new Promise(resolve=>complete=resolve);}};
+ const loading=h.load();job.onProgress({phase:'projection',loaded:0,total:231});
+ clock.advance(599000);job.onProgress({phase:'projection',loaded:231,total:231});assert.equal(job.signal.aborted,false);assert.match(status.textContent,/Preparando leitura 231\/231/);assert.match(h.messages.at(-1)[0],/Nenhuma importação/);
+ job.onProgress({phase:'manifest'});clock.advance(179000);assert.equal(job.signal.aborted,false);job.onProgress({phase:'analysis'});clock.advance(59000);complete({...payload(),projectionVersion:3});assert.equal(await loading,true);assert.equal(clock.timers.size,0);
+});
+test('preparation timeout releases controls and explains resumability instead of requesting a new import',async()=>{
+ const h=harness(),clock=virtualTimers(h);h.context.session={approved:true,role:'admin',analysisMode:'browser'};let job;
+ h.context.global.MinervaClientAnalysis={load:(_opts,options)=>{job=options;return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Object.assign(Error('Cancelled'),{name:'AbortError'}))));}};
+ const loading=h.load();job.onProgress({phase:'projection',loaded:12,total:231});clock.advance(599000);job.onProgress({phase:'projection',loaded:120,total:231});clock.advance(1000);
+ assert.equal(await loading,false);assert.equal(job.signal.aborted,true);assert.equal(h.context.loadingReport,false);assert.match(h.messages.at(-1)[0],/10 minutos.*preservadas.*retomar/);assert.equal(h.applied.length,0);assert.equal(clock.timers.size,0);
+});

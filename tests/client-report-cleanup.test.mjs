@@ -59,3 +59,9 @@ test('partial deletion failure retains the stage for a safe retry and concurrent
   await assert.rejects(cleanup(bucket,ids[0],{now}),/Temporary/);assert(bucket.objects.has(stageKey(ids[1])));assert.equal(bucket.objects.size,3);
   bucket.delete=remove;await Promise.all([cleanup(bucket,ids[0],{now}),cleanup(bucket,ids[0],{now})]);assert.equal(bucket.objects.size,0);
 });
+
+test('projection upgrade derivatives are cleaned only with an expired obsolete revision',async()=>{
+ const bucket=new MemoryBucket().stage(ids[0],now-4*hour).stage(ids[1],now-4*hour);
+ for(const id of [ids[0],ids[1]]){bucket.objects.set(partKey(id,0,'bd','projected-v3'),'derived');bucket.objects.set('private/client-reports/'+id+'/projection-3-upgrade.json','stage');}
+ const current=[...bucket.objects].filter(([key])=>key.includes(ids[0]));await drain(bucket,ids[0]);for(const [key,value]of current)assert.equal(bucket.objects.get(key),value);assert(![...bucket.objects.keys()].some(key=>key.includes(ids[1])));
+});

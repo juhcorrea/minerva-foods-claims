@@ -23,7 +23,7 @@ function manifestFixture(input=sources(),revision='revision-a'){
       const selected=rows.slice(firstRow,firstRow+2),url='/api/client-report/parts?revision='+revision+'&sheet='+sheet+'&index='+index,text=JSON.stringify({rows:selected});texts.set(origin+url,text);parts.push({sheet,index,firstRow,rowCount:selected.length,sha256:hash(text),url});
     }
   }
-  const manifest={schemaVersion:2,revision,parts,asOf:'2026-11-10',files:{bd:'Synthetic BD.xlsx',control:'Synthetic Control.xlsx'},updatedBy:'Example',updatedAt:'2026-11-10T12:00:00Z',progress:{entries:{},revision:'none'}};
+  const manifest={schemaVersion:2,projectionVersion:3,revision,parts,asOf:'2026-11-10',files:{bd:'Synthetic BD.xlsx',control:'Synthetic Control.xlsx'},updatedBy:'Example',updatedAt:'2026-11-10T12:00:00Z',progress:{entries:{},revision:'none'}};
   const reads=[],fetcher=async url=>{reads.push(url);assert(texts.has(url));return new Response(texts.get(url),{headers:{'content-type':'application/json'}});};
   return {input,texts,manifest,reads,runner:createRunner({engine:E,fetcher,crypto:webcrypto,baseURL:origin+'/analysis-worker.js'})};
 }
@@ -59,7 +59,7 @@ class FakeWorker{
   finish(model={meta:{},summary:{}}){for(const listener of this.listeners.get('message')||[])listener({data:{id:this.messages.at(-1).id,model}});}
   progress(progress,id=this.messages.at(-1).id){for(const listener of this.listeners.get('message')||[])listener({data:{id,type:'progress',progress}});}
 }
-function clientFixture(){const workers=[],client=createClient({makeWorker:()=>{const worker=new FakeWorker();workers.push(worker);return worker;}}),manifest={revision:'a',files:{},updatedBy:'Example'},api=async()=>manifest;return {workers,client,manifest,api};}
+function clientFixture(extra={}){const workers=[],client=createClient({makeWorker:()=>{const worker=new FakeWorker();workers.push(worker);return worker;},...extra}),manifest={revision:'a',projectionVersion:3,files:{},updatedBy:'Example'},api=async()=>manifest;return {workers,client,manifest,api};}
 
 test('worker progress is forwarded without resolving a partial model and ignores stale or malformed events',async()=>{
  const f=clientFixture(),events=[],controller=new AbortController();let resolved=false;
@@ -116,4 +116,68 @@ test('cleanup stops quietly on access change, logout, failure and invalid contin
   await f.client.maintain({allowed:()=>allowed,api:async(_url,options)=>{calls++;signal=options.signal;if(mode==='failure')throw Error('Temporary failure');if(mode==='logout')f.client.clear();if(mode==='access')allowed=false;return {hasMore:true,cursor:mode==='cursor'?'':'next'};}});
   assert.equal(calls,1);if(mode==='logout')assert(signal.aborted);
  }
+});
+
+const outdated=()=>Object.assign(Error('A leitura precisa ser preparada.'),{status:409,code:'REPORT_PROJECTION_OUTDATED'});
+const upgradeState=(completed=0,ready=false)=>({revision:'a',projectionVersion:3,totalParts:4,completed,nextPart:completed,ready});
+function upgradeFixture(f,startAt=0){
+ let completed=startAt,ready=false;const calls=[];
+ const api=async(url,options={})=>{const body=options.body?JSON.parse(options.body):null;calls.push({url,body,options});
+  if(url==='/api/client-report'){if(!ready)throw outdated();return {...f.manifest,updatedAt:'2026-11-10T12:00:00Z'};}
+  assert.equal(options.method,'POST');assert(options.signal);
+  if(url.endsWith('/start')){assert.deepEqual(body,{});return upgradeState(completed,ready);}
+  if(url.endsWith('/part')){assert.deepEqual(body,{revision:'a',part:completed});return upgradeState(++completed);}
+  assert(url.endsWith('/commit'));assert.deepEqual(body,{revision:'a'});assert.equal(completed,4);ready=true;return upgradeState(completed,true);
+ };
+ return {api,calls,get completed(){return completed;}};
+}
+test('admin automatically resumes stored projection parts and commits without publishing or changing revision/date',async()=>{
+ const f=clientFixture(),g=upgradeFixture(f,2),events=[];
+ const loading=f.client.load({years:[2026]},{api:g.api,canUpgrade:()=>true,onProgress:p=>events.push(p)});await tick();f.workers[0].finish({complete:true});const result=await loading;
+ assert.equal(result.revision,'a');assert.equal(result.projectionVersion,3);assert.equal(result.updatedAt,'2026-11-10T12:00:00Z');assert.deepEqual(result.model,{complete:true});
+ assert.deepEqual(g.calls.map(c=>c.url),['/api/client-report','/api/client-report/upgrade/start','/api/client-report/upgrade/part','/api/client-report/upgrade/part','/api/client-report/upgrade/commit','/api/client-report']);
+ assert.deepEqual(g.calls.filter(c=>c.url.endsWith('/part')).map(c=>c.body.part),[2,3]);assert.deepEqual(events.filter(p=>p.phase==='projection').map(p=>p.loaded),[0,2,3,4]);
+ assert(g.calls.every(c=>!c.body||!('rows' in c.body)&&!('files' in c.body)&&!('expectedRevision' in c.body)));
+});
+test('viewer and editor never prepare stored projection or start analysis on the outdated response',async()=>{
+ for(const role of ['viewer','editor']){const f=clientFixture(),calls=[];await assert.rejects(f.client.load({},{api:async url=>{calls.push(url);throw outdated();},canUpgrade:()=>role==='admin'}),e=>e.code==='REPORT_PROJECTION_OUTDATED');assert.deepEqual(calls,['/api/client-report']);assert.equal(f.workers.length,0);}
+});
+test('navigation cancellation stops projection work and a later load resumes the saved part',async()=>{
+ const f=clientFixture(),g=upgradeFixture(f),controller=new AbortController();let held=false,signal;
+ const api=async(url,options)=>{if(url.endsWith('/part')&&g.completed===1&&!held){held=true;signal=options.signal;return new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(Object.assign(Error('Cancelled'),{name:'AbortError'})),{once:true}));}return g.api(url,options);};
+ const first=f.client.load({},{api,signal:controller.signal,canUpgrade:()=>true});await tick();const rejected=assert.rejects(first,{name:'AbortError'});controller.abort();await rejected;
+ assert(signal.aborted);assert.equal(g.completed,1);assert(!g.calls.some(c=>c.url.endsWith('/commit')));assert.equal(f.workers.length,0);
+ const second=f.client.load({},{api,canUpgrade:()=>true});await tick();f.workers[0].finish();await second;assert.deepEqual(g.calls.filter(c=>c.url.endsWith('/part')).map(c=>c.body.part),[0,1,2,3]);
+});
+test('logout and revoked admin permission reject late preparation responses before any next write',async()=>{
+ for(const mode of ['logout','role']){const f=clientFixture(),calls=[];let finish,allowed=true;
+  const api=async(url)=>{calls.push(url);if(url==='/api/client-report')throw outdated();return new Promise(resolve=>finish=resolve);};
+  const pending=f.client.load({},{api,canUpgrade:()=>allowed});await tick();const rejected=assert.rejects(pending,{name:'AbortError'});if(mode==='logout')f.client.clear();else allowed=false;finish(upgradeState());await rejected;
+  assert.deepEqual(calls,['/api/client-report','/api/client-report/upgrade/start']);assert.equal(f.workers.length,0);
+ }
+});
+test('each preparation request has a bounded timeout and leaves a resumable failure',async()=>{
+ let timeout;const timers=new Set(),f=clientFixture({setTimer(fn,ms){assert.equal(ms,30000);timeout=fn;timers.add(fn);return fn;},clearTimer:fn=>timers.delete(fn)}),calls=[];
+ const pending=f.client.load({},{canUpgrade:()=>true,api:async(url,options)=>{calls.push(url);if(url==='/api/client-report')throw outdated();return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Object.assign(Error('Cancelled'),{name:'AbortError'})),{once:true}));}});
+ await tick();const rejected=assert.rejects(pending,e=>e.code==='UPGRADE_TIMEOUT'&&/retomar/.test(e.message));timeout();await rejected;assert.equal(timers.size,0);assert.equal(calls.length,2);assert.equal(f.workers.length,0);
+});
+test('stalled, malformed or changed revision preparation responses never commit or analyze',async()=>{
+ for(const mode of ['stalled','malformed','changed']){const f=clientFixture(),calls=[];
+  const api=async(url)=>{calls.push(url);if(url==='/api/client-report')throw outdated();if(url.endsWith('/start'))return upgradeState();if(mode==='changed')throw Object.assign(Error('Base mudou'),{status:409,code:'REPORT_CHANGED'});return mode==='stalled'?upgradeState():{...upgradeState(1),revision:'different'};};
+  await assert.rejects(f.client.load({},{api,canUpgrade:()=>true}),/avançou|confirmada|mudou/);assert(!calls.some(url=>url.endsWith('/commit')));assert.equal(f.workers.length,0);
+ }
+});
+test('same revision with a changed projection discards worker memory and old manifests cannot reuse cached rows',async()=>{
+ const f=clientFixture();f.manifest.projectionVersion=2;const old=f.client.load({},{api:f.api});await tick();f.workers[0].finish();await old;
+ f.manifest.projectionVersion=3;const current=f.client.load({},{api:f.api});await tick();assert(f.workers[0].terminated);assert.equal(f.workers.length,2);f.workers[1].finish();await current;
+ const g=manifestFixture();await g.runner.analyze(g.manifest,{years:[2026],asOf:'2026-11-10'});const reads=g.reads.length;
+ await assert.rejects(g.runner.analyze({...g.manifest,projectionVersion:2},{}),e=>e.code==='REPORT_PROJECTION_OUTDATED');assert.equal(g.reads.length,reads);
+ const blocked=createRunner({engine:E,crypto:webcrypto,baseURL:origin,fetcher:async()=>new Response(JSON.stringify({code:'REPORT_PROJECTION_OUTDATED'}),{status:409})});await assert.rejects(blocked.analyze(g.manifest,{}),e=>e.status===409&&e.code==='REPORT_PROJECTION_OUTDATED');
+});
+test('outdated part responses can trigger preparation after worker failure and a completed concurrent upgrade is reused',async()=>{
+ const f=clientFixture(),calls=[],api=async(url)=>{calls.push(url);if(url==='/api/client-report')return f.manifest;assert.equal(url,'/api/client-report/upgrade/start');return upgradeState(4,true);};
+ const loading=f.client.load({},{api,canUpgrade:()=>true});await tick();const worker=f.workers[0];
+ for(const listener of worker.listeners.get('message'))listener({data:{id:worker.messages[0].id,error:{message:'Preparar',status:409,code:'REPORT_PROJECTION_OUTDATED'}}});
+ await tick();assert(worker.terminated);assert.equal(f.workers.length,2);f.workers[1].finish({complete:true});assert.deepEqual((await loading).model,{complete:true});
+ assert.deepEqual(calls,['/api/client-report','/api/client-report/upgrade/start','/api/client-report']);
 });

@@ -20,6 +20,7 @@
   }
   const failure=message=>{throw new Error(message);};
   function manifestParts(manifest,baseURL){
+    if((manifest?.projectionVersion??1)!==3)throw Object.assign(new Error('A cópia de leitura precisa ser preparada pela administração. As bases publicadas foram preservadas.'),{status:409,code:'REPORT_PROJECTION_OUTDATED'});
     if(manifest?.schemaVersion!==2||typeof manifest.revision!=='string'||!manifest.revision||!Array.isArray(manifest.parts)||manifest.parts.length<2||manifest.parts.length>768)failure('A publicação possui um manifesto inválido. Atualize a visão.');
     const origin=new URL(baseURL).origin,ordered=[];
     for(const sheet of ['bd','control']){
@@ -39,14 +40,15 @@
     let revision=null,source=null;
     async function load(manifest,onProgress){
       const parts=manifestParts(manifest,baseURL);
-      if(revision===manifest.revision&&source)return source;
+      const sourceKey=JSON.stringify([manifest.revision,manifest.projectionVersion]);
+      if(revision===sourceKey&&source)return source;
       revision=null;source=null;
       const next={bd:[],control:[]},controller=new AbortController();let cursor=0,loaded=0;
       onProgress({phase:'download',loaded,total:parts.length});
       async function take(){
         while(!controller.signal.aborted&&cursor<parts.length){
           const part=parts[cursor++],response=await fetcher(part.url,{credentials:'same-origin',cache:'no-store',signal:controller.signal,headers:{Accept:'application/json'}});
-          if(!response.ok){const error=new Error(response.status===401||response.status===403?'Seu acesso à publicação foi encerrado.':'Não foi possível baixar uma parte da publicação.');error.status=response.status;throw error;}
+          if(!response.ok){const error=new Error(response.status===401||response.status===403?'Seu acesso à publicação foi encerrado.':'Não foi possível baixar uma parte da publicação.');error.status=response.status;if(response.status===409){const body=await response.json().catch(()=>null);if(body?.code==='REPORT_PROJECTION_OUTDATED')error.code=body.code;}throw error;}
           const bytes=new Uint8Array(await response.arrayBuffer());if(bytes.length>192*1024||await digest(crypto,bytes)!==part.sha256)failure('Uma parte da publicação não passou na conferência de integridade. Atualize a visão.');
           let value;try{value=JSON.parse(new TextDecoder().decode(bytes));}catch{failure('Uma parte da publicação não contém dados válidos.');}
           const width=part.sheet==='bd'?64:32;
@@ -57,7 +59,7 @@
       }
       await Promise.all(Array.from({length:Math.min(8,parts.length)},take)).catch(error=>{controller.abort();throw error;});
       engine.validateHeaders(next.bd,'BD');engine.validateHeaders(next.control,'Controle Recebimento');
-      revision=manifest.revision;source=next;return source;
+      revision=sourceKey;source=next;return source;
     }
     return {async analyze(manifest,options={}, {onProgress=()=>{}}={}){
       const rows=await load(manifest,onProgress);onProgress({phase:'analysis'});

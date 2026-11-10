@@ -30,13 +30,14 @@
       delete(key) { entries.delete(key); },
       valid(payload, meta) {
         return Boolean(payload?.revision && payload.revision === meta?.reportMeta?.revision &&
+          (payload.projectionVersion ?? null) === (meta?.reportMeta?.projectionVersion ?? null) &&
           payload.model?.meta?.correctionProgressRevision === meta?.correctionProgressRevision &&
           typeof meta?.correctionProgressRevision === 'string' &&
           (payload.model?.meta?.agingDate ?? payload.model?.procurementReport?.meta?.agingDate) === meta?.agingDate && typeof meta?.agingDate === 'string');
       },
       put(key, payload) {
         if (!payload?.model || !payload.revision) return;
-        for (const [id, value] of entries) if (value.revision !== payload.revision) entries.delete(id);
+        for (const [id, value] of entries) if (value.revision !== payload.revision || (value.projectionVersion ?? null) !== (payload.projectionVersion ?? null)) entries.delete(id);
         entries.delete(key); entries.set(key, payload);
         while (entries.size > limit) entries.delete(entries.keys().next().value);
       },
@@ -323,7 +324,12 @@
     const onProgress = progress => {
       if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return;
       const visibleStatus = global.document?.getElementById('sidebarLoadLabel');
-      if (progress.phase === 'analysis') {
+      if (progress.phase === 'projection') {
+        if (phase !== 'projection') { phase = 'projection'; deadline(600000); }
+        const parts = progress.total > 0 ? ' '+progress.loaded+'/'+progress.total : '';
+        if (visibleStatus) visibleStatus.textContent = 'Preparando leitura'+parts+'…';
+        setMessage('Preparando a leitura das bases já armazenadas'+parts+'. Nenhuma importação ou nova publicação será feita.');
+      } else if (progress.phase === 'analysis') {
         if (phase !== 'analysis') { phase = 'analysis'; deadline(60000); }
         if (visibleStatus) visibleStatus.textContent = 'Calculando relatório…';
         setMessage('Bases conferidas. Calculando o relatório no navegador…');
@@ -331,6 +337,7 @@
         if (visibleStatus) visibleStatus.textContent = 'Carregando '+progress.loaded+'/'+progress.total+' partes';
         setMessage('Carregando a publicação: '+progress.loaded+' de '+progress.total+' partes conferidas…');
       } else if (progress.phase === 'manifest') {
+        if (phase === 'projection') { phase = 'download'; deadline(180000); }
         if (visibleStatus) visibleStatus.textContent = 'Conferindo publicação…';
         setMessage('Conferindo a versão publicada…');
       }
@@ -344,7 +351,12 @@
       // A complete model can serve the comparison, but a comparison cannot serve other tabs.
       let payload = reportCache.get(fullKey) || (opts.reportView === 'suppliers' ? reportCache.get(key) : null);
       if (payload) {
-        const metadata = await api('/api/report/meta', {signal:controller.signal});
+        let metadata;
+        try { metadata = await api('/api/report/meta', {signal:controller.signal}); }
+        catch(error) {
+          if (!browserAnalysis || error.status !== 409 || error.code !== 'REPORT_PROJECTION_OUTDATED') throw error;
+          reportCache.clear(); payload = null;
+        }
         if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return false;
         if (!reportCache.valid(payload, metadata)) { reportCache.clear(); payload = null; }
       }
@@ -352,7 +364,7 @@
       if (!payload) {
         if (session.analysisMode === 'browser') {
           if (!global.MinervaClientAnalysis) throw new Error('Atualize a página para carregar o cálculo no navegador.');
-          payload = await global.MinervaClientAnalysis.load(opts, {api, signal:controller.signal, onProgress});
+          payload = await global.MinervaClientAnalysis.load(opts, {api, signal:controller.signal, onProgress, canUpgrade:() => Boolean(session?.approved && session.role === 'admin')});
         } else payload = await api('/api/report?' + key, {signal:controller.signal});
       }
       if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return false;
@@ -378,7 +390,7 @@
     } catch (error) {
       if (requestVersion !== loadVersion) return false;
       if (error.name === 'AbortError') {
-        if (timedOut) setMessage(phase === 'download' ? 'O carregamento das bases ultrapassou 3 minutos. A publicação foi preservada; tente novamente em Atualizar visão.' : phase === 'analysis' ? 'O cálculo no navegador ultrapassou 1 minuto. Tente novamente em Atualizar visão.' : 'A atualização demorou mais de 30 segundos. Tente novamente em Atualizar visão.', true);
+        if (timedOut) setMessage(phase === 'projection' ? 'A preparação da leitura ultrapassou 10 minutos. As bases foram preservadas; use Atualizar visão para retomar de onde parou.' : phase === 'download' ? 'O carregamento das bases ultrapassou 3 minutos. A publicação foi preservada; tente novamente em Atualizar visão.' : phase === 'analysis' ? 'O cálculo no navegador ultrapassou 1 minuto. Tente novamente em Atualizar visão.' : 'A atualização demorou mais de 30 segundos. Tente novamente em Atualizar visão.', true);
         return false;
       }
       if (error.status === 401 || error.status === 403) {

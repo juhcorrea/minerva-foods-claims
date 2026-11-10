@@ -39,7 +39,7 @@ test('Somente este replaces all 2209 selected options and leaves other tables un
  const popup=t.open('orders');assert.equal(popup.querySelector('[data-filter-search-apply]').hidden,true);
  t.search(popup,'PO/DEMO-1876');
  assert.equal(popup.querySelectorAll('.column-filter-option').length,1);
- assert.match(popup.querySelector('.column-filter-count').textContent,/1 resultado.*2209 opções/);
+ assert.match(popup.querySelector('.column-filter-count').textContent,/1 resultado.*2209 de 2209 opções/);
  assert.equal(t.prepare('orders',rows).length,2209,'Typing a query must not commit a filter');
  t.click(popup.querySelector('.column-filter-only'));
  assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['PO/DEMO-1876']);
@@ -52,10 +52,10 @@ test('search action applies only matching options, retaining other columns and t
  const t=fixture(),rows=[{order:'Búsqueda 1',status:'Aberto'},{order:'Busca 2',status:'Aberto'},{order:'Busca 3',status:'Fechado'},{order:'Outra',status:'Aberto'}];
  t.F.importState({tables:[{id:'orders',filters:[{column:1,values:['Aberto']}],sort:{column:0,direction:'desc'}}]});t.prepare('orders',rows);
  const popup=t.open('orders');t.search(popup,'bus');const apply=popup.querySelector('[data-filter-search-apply]');
- assert.equal(apply.hidden,false);assert.equal(apply.disabled,false);assert.match(apply.textContent,/\(3\)/);
+ assert.equal(apply.hidden,false);assert.equal(apply.disabled,false);assert.match(apply.textContent,/\(2\)/);
  t.click(apply);
  assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['Búsqueda 1','Busca 2']);
- assert.deepEqual(plain(t.F.exportState()),{tables:[{id:'orders',filters:[{column:1,values:['Aberto']},{column:0,values:['Busca 2','Busca 3','Búsqueda 1']}],sort:{column:0,direction:'desc'}}]});
+ assert.deepEqual(plain(t.F.exportState()),{tables:[{id:'orders',filters:[{column:1,values:['Aberto']},{column:0,values:['Busca 2','Búsqueda 1']}],sort:{column:0,direction:'desc'}}]});
 });
 
 test('no matching options disables search action; cancelling preserves filters and sort',()=>{
@@ -79,12 +79,66 @@ test('checkbox selections stay a cancellable multi-value draft; ordinary Apply c
  assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['B','A']);assert.deepEqual(t.changed,['orders']);
 });
 
-test('blank option remains selectable alone and all/none act only on search results',()=>{
+test('blank option remains selectable alone and all/none act globally during search',()=>{
  const t=fixture(),rows=[{order:'',status:'Aberto'},{order:'Alpha 1',status:'Aberto'},{order:'Alpha 2',status:'Aberto'},{order:'Beta',status:'Aberto'}];t.prepare('orders',rows);
  let popup=t.open('orders');t.search(popup,'sem informacao');t.click(popup.querySelector('.column-filter-only'));
  assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['']);
  popup=t.open('orders');t.search(popup,'alpha');t.click(popup.querySelector('[data-filter-all]'));t.click(popup.querySelector('[data-filter-apply]'));
- assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['','Alpha 1','Alpha 2']);
+ assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['','Alpha 1','Alpha 2','Beta']);assert.equal(t.F.has('orders'),false);
  popup=t.open('orders');t.search(popup,'alpha');t.click(popup.querySelector('[data-filter-none]'));t.click(popup.querySelector('[data-filter-apply]'));
- assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['']);
+ assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),[]);assert.equal(t.F.has('orders'),true);
+});
+
+test('372 options: clear during search A then check A and B across searches applies exactly A+B',()=>{
+ const t=fixture(),rows=Array.from({length:372},(_,i)=>({order:'Fornecedor '+String(i).padStart(3,'0'),status:'Aberto'}));t.prepare('orders',rows);
+ const popup=t.open('orders');assert.equal(popup.querySelector('[data-filter-all]').textContent,'Marcar todos');
+ assert.equal(popup.querySelector('.column-sort-disclosure').hasAttribute('open'),false,'Sorting starts collapsed');
+ t.search(popup,'Fornecedor 011');t.click(popup.querySelector('[data-filter-none]'));
+ assert.match(popup.querySelector('.column-filter-count').textContent,/0 de 372/);
+ const checkVisible=()=>{const input=popup.querySelector('.column-filter-option input');input.checked=true;input.dispatchEvent({type:'change'});};
+ checkVisible();t.search(popup,'Fornecedor 295');checkVisible();t.search(popup,'Fornecedor 011');
+ assert.equal(popup.querySelector('.column-filter-option input').checked,true);
+ assert.equal(t.prepare('orders',rows).length,372,'A draft must not change table/export source rows');
+ t.click(popup.querySelector('[data-filter-apply]'));
+ assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['Fornecedor 011','Fornecedor 295']);
+ assert.deepEqual(plain(t.F.exportState()).tables[0].filters,[{column:0,values:['Fornecedor 011','Fornecedor 295']}]);
+});
+
+test('select search results adds to the draft across queries without applying or replacing prior choices',()=>{
+ const t=fixture(),rows=['Alpha 1','Alpha 2','Beta','Other'].map(order=>({order,status:'Aberto'}));t.prepare('orders',rows);
+ const popup=t.open('orders');t.search(popup,'alpha');t.click(popup.querySelector('[data-filter-none]'));t.click(popup.querySelector('[data-filter-search-select]'));
+ t.search(popup,'beta');t.click(popup.querySelector('[data-filter-search-select]'));
+ assert.deepEqual(t.changed,[]);assert.equal(t.prepare('orders',rows).length,4);
+ t.search(popup,'missing');assert.equal(popup.querySelector('[data-filter-search-select]').disabled,true);
+ t.click(popup.querySelector('[data-filter-apply]'));assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['Alpha 1','Alpha 2','Beta']);
+});
+
+test('choices cascade through other columns, ignore their own filter, and Mark all clears only that column',()=>{
+ const t=fixture(),rows=[{order:'A',status:'Aberto'},{order:'B',status:'Aberto'},{order:'C',status:'Fechado'},{order:'A',status:'Fechado'}];
+ t.F.importState({tables:[{id:'orders',filters:[{column:0,values:['A']},{column:1,values:['Aberto']}],sort:null}]});t.prepare('orders',rows);
+ let popup=t.open('orders');assert.deepEqual(popup.querySelectorAll('.column-filter-option label span').map(n=>n.textContent),['A','B']);
+ t.search(popup,'A');t.click(popup.querySelector('[data-filter-all]'));assert.match(popup.querySelector('.column-filter-count').textContent,/2 de 2/);assert.doesNotMatch(popup.querySelector('.column-filter-count').textContent,/fora do recorte/);
+ t.click(popup.querySelector('[data-filter-apply]'));assert.deepEqual(plain(t.F.exportState()).tables[0].filters,[{column:1,values:['Aberto']}]);
+ assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['A','B']);
+ popup=t.open('orders',1);assert.deepEqual(popup.querySelectorAll('.column-filter-option label span').map(n=>n.textContent),['Aberto','Fechado'],'The current column never filters its own options');t.click(popup.querySelector('[data-filter-cancel]'));
+ t.F.importState({tables:[]});t.prepare('orders',rows);popup=t.open('orders');assert.equal(popup.querySelectorAll('.column-filter-option').length,3,'Removing the related filter restores the available choices');
+});
+
+test('hidden selections are retained on cancel/apply and global clear still empties them with no search matches',()=>{
+ const t=fixture(),rows=[{order:'A',status:'Aberto'},{order:'B',status:'Aberto'},{order:'C',status:'Fechado'}];
+ t.F.importState({tables:[{id:'orders',filters:[{column:0,values:['A','C']},{column:1,values:['Aberto']}],sort:null}]});t.prepare('orders',rows);
+ let popup=t.open('orders');assert.match(popup.querySelector('.column-filter-count').textContent,/1 de 2.*1 seleção\(ões\) fora/);
+ t.search(popup,'none');t.click(popup.querySelector('[data-filter-none]'));t.click(popup.querySelector('[data-filter-cancel]'));
+ assert.deepEqual(plain(t.F.exportState()).tables[0].filters[0].values,['A','C']);
+ popup=t.open('orders');t.click(popup.querySelector('[data-filter-apply]'));assert.deepEqual(plain(t.F.exportState()).tables[0].filters[0].values,['A','C']);
+ popup=t.open('orders');t.search(popup,'none');t.click(popup.querySelector('[data-filter-none]'));t.click(popup.querySelector('[data-filter-apply]'));
+ assert.deepEqual(t.prepare('orders',rows),[]);assert.deepEqual(plain(t.F.exportState()).tables[0].filters[0].values,[]);
+ popup=t.open('orders');assert.equal(popup.querySelectorAll('.column-filter-option').length,2,'Zero selected still lets users recover through this column');
+});
+
+test('an empty related facet cannot silently erase an intentional empty selection',()=>{
+ const t=fixture(),rows=[{order:'A',status:'Aberto'}];
+ t.F.importState({tables:[{id:'orders',filters:[{column:0,values:[]},{column:1,values:['Fechado']}],sort:null}]});t.prepare('orders',rows);
+ const popup=t.open('orders');assert.equal(popup.querySelectorAll('.column-filter-option').length,0);assert.match(popup.querySelector('.column-filter-options').textContent,/demais filtros/);
+ t.click(popup.querySelector('[data-filter-apply]'));assert.deepEqual(plain(t.F.exportState()).tables[0].filters,[{column:0,values:[]},{column:1,values:['Fechado']}]);
 });
