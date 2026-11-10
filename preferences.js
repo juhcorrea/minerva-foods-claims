@@ -32,11 +32,13 @@
     $('textSizeSelect').value = String(preferences.textSize);
     const collapsed = preferences.menuCollapsed;
     $('menuToggle').setAttribute('aria-expanded', String(!collapsed));
-    $('menuToggle').setAttribute('aria-label', collapsed ? 'Mostrar menu lateral' : 'Recolher menu lateral');
-    $('menuToggle').title = collapsed ? 'Mostrar menu lateral' : 'Recolher menu lateral';
-    $('menuToggleLabel').textContent = collapsed ? 'Mostrar menu' : 'Recolher menu';
+    $('menuToggle').setAttribute('aria-label', collapsed ? 'Expandir menu lateral' : 'Recolher menu para ícones');
+    $('menuToggle').title = collapsed ? 'Expandir menu lateral' : 'Recolher menu para ícones';
+    $('menuToggleLabel').textContent = collapsed ? 'Expandir menu' : 'Recolher menu';
+    const compact=$('sidebarCompactToggle');
+    if(compact){compact.setAttribute('aria-expanded',String(!collapsed));compact.setAttribute('aria-label',$('menuToggle').title);compact.title=$('menuToggle').title;}
     const sidebar = document.querySelector('.sidebar');
-    if (sidebar) {sidebar.inert = collapsed;if (collapsed) sidebar.setAttribute('aria-hidden','true');else sidebar.removeAttribute('aria-hidden');}
+    if (sidebar) {sidebar.inert = false;sidebar.removeAttribute('aria-hidden');}
   }
   applyPreferences();
 
@@ -145,7 +147,7 @@
       $('profileSignout').hidden=true;
       return;
     }
-    const name=hosted?currentProfile.name:'Prévia local',role=hosted?currentProfile.role==='admin'?(name==='Desenvolvimento'?'Acesso administrativo':'Administradora'):currentProfile.role==='editor'?'Atualizar bases':'Consulta':'Sem perfil conectado';
+    const name=hosted?currentProfile.name:'Prévia local',role=hosted?currentProfile.role==='admin'?(name==='Desenvolvimento'?'Acesso administrativo':'Administradora'):currentProfile.role==='editor'?'Atualizar bases':currentProfile.role==='reviewer'?'Conferente':'Consulta':'Sem perfil conectado';
     $('profileName').textContent=name;
     $('profileRole').textContent=role;
     $('profileAvatar').textContent=hosted?initials(name)||'P':'PL';
@@ -155,7 +157,7 @@
     $('profilePanelRole').textContent=role;
     $('profilePanelContact').textContent=hosted?currentProfile.email||'':'';
     $('profilePanelContact').hidden=!hosted||!currentProfile.email;
-    $('profilePanelNote').textContent=hosted?(currentProfile.role==='admin'?'Este acesso pode publicar atualizações e controlar quem consulta o relatório.':currentProfile.role==='editor'?'Este acesso pode importar e publicar as bases e marcar correções. A gestão de acessos continua com a administração.':'Este acesso permite consultar o relatório publicado.'):'Esta é uma prévia local. Nenhum acesso de administradora foi ativado.';
+    $('profilePanelNote').textContent=hosted?(currentProfile.role==='admin'?'Este acesso pode publicar atualizações e gerenciar usuários e seus perfis.':currentProfile.role==='editor'?'Este acesso pode importar e publicar as bases e marcar correções. A gestão de acessos continua com a administração.':currentProfile.role==='reviewer'?'Este acesso permite consultar o relatório e marcar ou desmarcar os ajustes na Correção de base.':'Este acesso permite consultar o relatório publicado.'):'Esta é uma prévia local. Nenhum acesso de administradora foi ativado.';
     $('profileSignout').hidden=!hosted;
     $('profileSignout').disabled=false;
   }
@@ -180,6 +182,10 @@
     controls.innerHTML='<button id="menuToggle" class="window-control" type="button" aria-expanded="true" aria-controls="appSidebar" aria-label="Recolher menu lateral" title="Recolher menu lateral"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"/></svg><span id="menuToggleLabel" class="sr-only">Recolher menu</span></button><button id="fullscreenToggle" class="window-control" type="button" aria-pressed="false" aria-label="Abrir painel em tela cheia" title="Abrir painel em tela cheia"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></svg><span id="fullscreenLabel" class="sr-only">Tela cheia</span></button>';
     const leading=document.createElement('div');leading.className='topbar-leading';leading.append(controls);const breadcrumb=topbar.querySelector('.breadcrumb');if(breadcrumb)leading.append(breadcrumb);topbar.prepend(leading);
     const sidebar=document.querySelector('.sidebar');if (sidebar) sidebar.id='appSidebar';
+    if(sidebar){
+      for(const item of sidebar.querySelectorAll('.nav-item')){const label=item.querySelector('span')?.textContent?.trim();if(label){item.setAttribute('aria-label',label);item.title=label;}}
+      const compact=document.createElement('button');compact.id='sidebarCompactToggle';compact.type='button';compact.className='sidebar-compact-toggle';compact.setAttribute('aria-controls','appSidebar');compact.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6m5-12v12"/></svg>';compact.addEventListener('click',()=>setMenuCollapsed(!preferences.menuCollapsed));sidebar.querySelector('.brand-lockup')?.append(compact);
+    }
     const profile=document.createElement('button');profile.id='profileButton';profile.type='button';profile.className='profile-button';profile.hidden=global.MINERVA_HOSTED===true;profile.setAttribute('aria-haspopup','dialog');profile.setAttribute('aria-expanded','false');profile.setAttribute('aria-controls','profilePanel');
     profile.innerHTML='<span id="profileAvatar" class="profile-avatar" aria-hidden="true"></span><span class="profile-label"><small>PERFIL EM USO</small><strong id="profileName"></strong><span id="profileRole"></span></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>';
     const account=$('sidebarAccount');

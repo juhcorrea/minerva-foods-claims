@@ -117,6 +117,11 @@
     const result=(ready,mismatch)=>!ready||typeof mismatch!=='boolean'?'A conferir':mismatch?'Divergência':'Confere';
     return {claimValue:result(linked&&single&&finite(row.claimed)&&finite(row.originalClaimValue),row.hasClaimValueMismatch),installments:result(linked&&finite(row.bdReceived)&&finite(row.controlExpected)&&finite(row.deltaReceived),row.hasReceivedMismatch)};
   }
+  function auditResultMarkup(value) {
+    const kind=value==='Confere'?'ok':value==='Divergência'?'error':'review';
+    const mark=kind==='ok'?'<path d="m6 12 4 4 8-8"/>':kind==='error'?'<path d="m8 8 8 8m0-8-8 8"/>':'<path d="M12 7v6m0 4h.01"/>';
+    return `<span class="comparison-result comparison-result--${kind}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10"/>${mark}</svg><strong>${esc(value)}</strong></span>`;
+  }
   const claimHeaders = original => ['Ordem / referência', 'Fornecedor · BD', original ? 'Valor integral · Controle · USD' : 'Valor reclamado · BD · USD', original ? 'Total das parcelas · Controle · USD' : 'Total registrado · BD · USD', 'Diferença parcelas − BD · USD', 'Reclamado × integral', 'Total registrado × parcelas', 'O que conferir', 'Linhas BD', 'Linhas Controle'];
   function claimValues(row, original = state.original) {
     const comparison=auditComparisons(row);
@@ -124,7 +129,7 @@
   }
   function claimCells(row) {
     const values = claimValues(row), reasons = Array.isArray(row.reasons) ? row.reasons : [];
-    const badge=value=>`<span class="badge ${value==='Confere'?'positive':value==='Divergência'?'warning':'neutral'}">${esc(value)}</span>`;
+    const badge=auditResultMarkup;
     const status = problemMarkup(reviewProblems({audits:[row]}))+`${reasons.length ? `<details class="claim-value-reasons"><summary>Ver observações da origem</summary><ul>${reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details>` : ''}`;
     return [`<span class="reference-with-copy"><span>${esc(row.reference || 'Sem referência')}</span>${global.MinervaCopy?.button(row.reference) || ''}</span>`, esc(row.supplier || 'Não informado'), moneyExact(values[2]), moneyExact(values[3]), moneyExact(values[4]), badge(values[5]), badge(values[6]), status||'—', esc(values[8] || '—'), esc(values[9] || '—')];
   }
@@ -210,5 +215,5 @@
   });
   document.addEventListener('click', event => { const button = event.target.closest('[data-impact-page],[data-claim-impact-page]'); if (button && !button.disabled) { if (button.dataset.claimImpactPage) state.claimPage = Number(button.dataset.claimImpactPage); else state.page = Number(button.dataset.impactPage); render(); } });
   document.addEventListener('minerva:model-updated', () => { if (!global.MinervaApp?.state.model) clear(); });
-  global.MinervaCorrectionImpact = {render,clear,label,buildQueue,issueSource,issueProblem,problemText,problemMarkup,auditComparisons,addWorksheets,handlesTable:id => id.startsWith('correction-impact-'),handleFilter:() => {state.page=1;state.claimPage=1;render();},beforePrint:() => {state.printing=true;render();},afterPrint:() => {state.printing=false;render();}};
+  global.MinervaCorrectionImpact = {render,clear,label,buildQueue,issueSource,issueProblem,problemText,problemMarkup,auditComparisons,auditResultMarkup,addWorksheets,handlesTable:id => id.startsWith('correction-impact-'),handleFilter:() => {state.page=1;state.claimPage=1;render();},beforePrint:() => {state.printing=true;render();},afterPrint:() => {state.printing=false;render();}};
 })(window);
