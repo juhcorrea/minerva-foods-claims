@@ -20,6 +20,7 @@
   function bind(key, kind, targets, heading, label) {
     targets = targets.filter(Boolean);
     if (!targets.length) return;
+    if (!states.has(key) && key === 'base:claim-records') states.set(key, true);
     const id = idFor(key), primary = targets[0];
     let button = document.getElementById(id + '-button');
     if (!button) {
@@ -123,5 +124,5 @@
   if (global.MutationObserver) observer = new global.MutationObserver(schedule);
   document.addEventListener('minerva:model-updated', schedule);
   refresh();
-  global.MinervaSectionCollapse = {refresh, isCollapsed: key => states.get(key) === true};
+  global.MinervaSectionCollapse = {refresh, isCollapsed: key => states.get(key) === true, setCollapsed(key, collapsed) { states.set(key, collapsed === true); refresh(); if (!collapsed) global.requestAnimationFrame?.(() => global.MinervaColumnLayout?.refresh()); }};
 })(window);

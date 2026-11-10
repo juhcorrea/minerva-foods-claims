@@ -27,7 +27,12 @@
   const mounted=new WeakSet();
   let procurementWide=false;
   function areaToggle(){return '<button type="button" class="cc-area-toggle" data-cc-toggle-width aria-pressed="'+procurementWide+'" aria-controls="procurementContent" title="'+(procurementWide?'Restaurar o visual e o menu lateral':'Expandir todo o visual do FUP na largura da janela')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+(procurementWide?'<path d="M9 3v6H3m12-6v6h6M9 21v-6H3m12 6v-6h6"/>':'<path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><path d="m3 3 6 6m12-6-6 6M3 21l6-6m12 6-6-6"/>')+'</svg><span>'+(procurementWide?'Restaurar visual':'Expandir visual')+'</span></button>';}
-  let model=null,dialog=null,procurementDetail=null;
+  let model=null,dialog=null,procurementDetail=null,claimDrill=null,claimSourceIdentity=null;
+  const claimStages={analysis:{label:'Em análise',test:row=>/^EM ANALISE$/.test(norm(row.status))},costs:{label:'Aguardando custos',test:row=>/^AGUARDANDO CUSTOS$/.test(norm(row.status))},negotiating:{label:'Em negociação',test:row=>/^EM NEGOCIACAO(?:\s*-\s*PROCEDENTE)?$/.test(norm(row.status))}};
+  const drillLabel=key=>({all:'Todos os casos no filtro',open:'Casos abertos · F',closed:'Casos fechados · F',unknown:'Status F não informado / outro',...Object.fromEntries(Object.entries(claimStages).map(([key,item])=>[key,item.label+' · G']))})[key]||'';
+  function drillRows(rows){if(!claimDrill)return rows;const cases=rows.filter(row=>norm(row.sgr));if(claimDrill==='all')return cases;if(claimStages[claimDrill])return cases.filter(claimStages[claimDrill].test);return cases.filter(row=>caseKey(row)===claimDrill);}
+  function openClaimBase(){global.MinervaSectionCollapse?.setCollapsed('base:claim-records',false);const target=document.getElementById('claimRecords');target?.scrollIntoView?.({block:'start',behavior:'smooth'});}
+  function claimScopeLabel(){const app=global.MinervaApp?.state,filename=String(app?.bdName||'Planilha BD').split(/[\\/]/).pop(),years=model?.meta?.allYears?'Todos os anos':(model?.meta?.years||[]).join(' + ')||'Todos os anos';return '<div class="cc-case-scope"><span><strong>Base:</strong> '+esc(filename)+'</span><span><strong>Ano · Data RNC (B):</strong> '+esc(years)+'</span><span>Uma linha com SGR (A) = um caso · Status F · Situação G</span></div>';}
 
   function selectRows(rows,filters){
     const query=norm(filters.query);
@@ -42,17 +47,17 @@
     const rows=selectRows(state.rows,state.filters).sort(byClaimed);
     return global.MinervaTableFilters?global.MinervaTableFilters.prepare(state.table,columns,rows,cells,state===states.claims?'Controle de claims':'FUP Suprimentos',{types,sortValues}):rows;
   }
-  function metric(label,value,sub='',title=''){return '<article class="cc-kpi"'+(title?' title="'+esc(title)+'"':'')+'><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong>'+(sub?'<small>'+esc(sub)+'</small>':'')+'</article>';}
+  function metric(label,value,sub='',title='',key=''){const tag=key?'button':'article';return '<'+tag+' class="cc-kpi"'+(key?' type="button" data-cc-case-metric="'+key+'" aria-controls="claimRecords" aria-pressed="'+(claimDrill===key)+'"':'')+(title?' title="'+esc(title)+'"':'')+'><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong>'+(sub?'<small>'+esc(sub)+'</small>':'')+'</'+tag+'>';}
   function metrics(rows,scope){
     const validDays=rows.map(r=>number(r.daysWithoutUpdate)).filter(n=>n!==null&&n>=0),oldest=validDays.length?Math.max(...validDays):null;
     const age=metric('Sem atualização',days(oldest),oldest===null?'BL sem informação':'Maior intervalo · dias','Dias sem atualização informados na coluna BL da BD.');
     if(scope==='procurement')return metric('Claims',integer(distinct(rows,'sgr')),'SGR únicos')+metric('Fornecedores',integer(distinct(rows,'supplier')))+metric('Países',integer(distinct(rows,'country')))+age;
-    return metric('Casos no filtro',integer(caseCount(rows)),'Cada linha com SGR preenchido','SGR repetidos em linhas diferentes contam separadamente. Linhas sem SGR permanecem na base, fora desta contagem.')+metric('Abertos',integer(caseCount(rows.filter(row=>caseKey(row)==='open'))),'Status F = ABERTO')+metric('Fechados',integer(caseCount(rows.filter(row=>caseKey(row)==='closed'))),'Status F = FECHADO')+(rows.some(row=>caseKey(row)==='unknown')?metric('Status não informado / outro',integer(caseCount(rows.filter(row=>caseKey(row)==='unknown'))),'Conferir coluna F da BD'):'')+age;
+    return metric('Casos no filtro',integer(caseCount(rows)),'BD A · SGR preenchido','Abrir os casos contados neste recorte. SGR repetidos em linhas diferentes contam separadamente.','all')+metric('Abertos',integer(caseCount(rows.filter(row=>caseKey(row)==='open'))),'BD F = ABERTO','Abrir somente os casos abertos dentro dos filtros atuais.','open')+metric('Fechados',integer(caseCount(rows.filter(row=>caseKey(row)==='closed'))),'BD F = FECHADO','Abrir somente os fechados nos filtros atuais; para consultar outros fechados, altere Status F.','closed')+(rows.some(row=>caseKey(row)==='unknown')?metric('Status não informado / outro',integer(caseCount(rows.filter(row=>caseKey(row)==='unknown'))),'BD F · conferir origem','Abrir casos cujo Status F não é ABERTO nem FECHADO.','unknown'):'')+Object.entries(claimStages).map(([key,stage])=>metric(stage.label,integer(caseCount(rows.filter(stage.test))),'BD G · situação no filtro','Abrir os casos desta situação, mantendo ano, Status F e todos os filtros atuais.',key)).join('');
   }
   function caseCountries(rows){
     const map=new Map();for(const row of rows){if(!norm(row.sgr))continue;const country=text(row.country);if(!map.has(country))map.set(country,{country,open:0,closed:0,unknown:0,total:0});const item=map.get(country);item[caseKey(row)]++;item.total++;}
     const list=[...map.values()].sort((a,b)=>b.total-a.total||a.country.localeCompare(b.country,'pt-BR')),max=Math.max(1,...list.map(row=>row.total));
-    return '<section class="cc-panel cc-case-countries"><header><div><h3>Casos por país</h3><span>Status da coluna F · mesmos filtros da base</span></div><strong>'+integer(caseCount(rows))+' casos no filtro</strong></header><div class="cc-case-legend">'+Object.entries(caseLabels).map(([key,label])=>'<span><i class="cc-case-'+key+'"></i>'+esc(label)+'</span>').join('')+'</div><div class="cc-case-country-list">'+(list.length?list.map(row=>'<button type="button" class="cc-case-country" data-cc-case-country="'+esc(row.country)+'" aria-label="Filtrar '+esc(row.country)+': '+integer(row.total)+' casos"><span>'+esc(row.country)+'</span><span class="cc-case-track">'+Object.entries(caseLabels).map(([key,label])=>row[key]?'<span class="cc-case-'+key+'" style="width:'+row[key]/max*100+'%" title="'+esc(label)+': '+integer(row[key])+'">'+integer(row[key])+'</span>':'').join('')+'</span><strong>'+integer(row.total)+'</strong></button>').join(''):'<p class="cc-empty">Nenhum caso com SGR preenchido neste filtro.</p>')+'</div></section>';
+    return '<section class="cc-panel cc-case-countries"><header><div><h3>Casos por país</h3><span>Status da coluna F · filtros da aba</span></div><strong>'+integer(caseCount(rows))+' casos no filtro</strong></header><div class="cc-case-legend">'+Object.entries(caseLabels).map(([key,label])=>'<span><i class="cc-case-'+key+'"></i>'+esc(label)+'</span>').join('')+'</div><div class="cc-case-country-list">'+(list.length?list.map(row=>'<button type="button" class="cc-case-country" data-cc-case-country="'+esc(row.country)+'" aria-label="Filtrar '+esc(row.country)+': '+integer(row.total)+' casos"><span>'+esc(row.country)+'</span><span class="cc-case-track">'+Object.entries(caseLabels).map(([key,label])=>row[key]?'<span class="cc-case-'+key+'" style="width:'+row[key]/max*100+'%" title="'+esc(label)+': '+integer(row[key])+'">'+integer(row[key])+'</span>':'').join('')+'</span><strong>'+integer(row.total)+'</strong></button>').join(''):'<p class="cc-empty">Nenhum caso com SGR preenchido neste filtro.</p>')+'</div></section>';
   }
   function optionList(rows,key,selected){
     if(key==='caseStatusKey')return '<option value="">Todos</option>'+Object.entries(caseLabels).map(([value,label])=>'<option value="'+value+'"'+(choices(selected).includes(value)?' selected':'')+'>'+esc(label)+'</option>').join('');
@@ -80,17 +85,20 @@
   function renderScope(scope){
     if(scope==='procurement'){renderProcurement();return;}
     const state=states[scope],host=document.getElementById(state.host);if(!host)return;
-    state.view=filtered(state);
+    const summaryRows=filtered(state);state.view=drillRows(summaryRows);
     host.classList.add('cc-root');
     if(!mounted.has(host)){host.addEventListener('submit',onSubmit);host.addEventListener('click',onClick);mounted.add(host);}
     const excluded=state.view.filter(r=>r.financialEligible===false).length;
-    const summaryHost=document.getElementById('claimCaseSummary'),summary='<section class="cc-panel">'+filters(state,scope)+'</section><div class="cc-kpis cc-kpis-'+scope+'">'+metrics(state.view,scope)+'</div>'+caseCountries(state.view),base='<section class="cc-panel">'+table(state,scope)+'<p class="cc-basis">'+(excluded?integer(excluded)+' linhas fora do financeiro · ':'')+'Contagem por linha com SGR preenchido, inclusive SGR repetidos. Status F e Situação G são campos distintos. Linhas sem SGR continuam nesta base. Detalhes ao abrir o registro.</p></section><p class="cc-feedback" role="status" aria-live="polite"></p>';
+    const drill=claimDrill?'<div class="cc-case-drill" role="status"><div><strong>'+esc(drillLabel(claimDrill))+'</strong><span>'+integer(state.view.length)+' casos · detalhamento da base; filtros da aba preservados</span>'+(!state.view.length&&claimDrill==='closed'?'<span>Nenhum fechado nos filtros atuais; altere Status F para consultar.</span>':'')+'</div><button type="button" class="button button-text" data-cc-clear-metric>Remover detalhamento</button></div>':'';
+    const summaryHost=document.getElementById('claimCaseSummary'),summary='<section class="cc-panel">'+filters(state,scope)+'</section>'+claimScopeLabel()+'<div class="cc-kpis cc-kpis-'+scope+'">'+metrics(summaryRows,scope)+'</div>'+caseCountries(summaryRows),base=drill+'<section class="cc-panel">'+table(state,scope)+'<p class="cc-basis">'+(excluded?integer(excluded)+' linhas fora do financeiro · ':'')+'Contagem por linha com SGR preenchido, inclusive SGR repetidos. Status F e Situação G são campos distintos. Linhas sem SGR continuam nesta base. Detalhes ao abrir o registro.</p></section><p class="cc-feedback" role="status" aria-live="polite"></p>';
     if(summaryHost){summaryHost.classList.add('cc-root');if(!mounted.has(summaryHost)){summaryHost.addEventListener('submit',onSubmit);summaryHost.addEventListener('click',onClick);mounted.add(summaryHost);}summaryHost.innerHTML=summary;host.innerHTML=base;}else host.innerHTML=summary+base;
-    global.MinervaColumnLayout?.refresh();
+    global.MinervaSectionCollapse?.refresh();global.MinervaColumnLayout?.refresh();
   }
   function render(currentModel){
-    if(model!==currentModel){for(const state of Object.values(states))state.page=1;if(dialog?.open)dialog.close();}
+    if(model!==currentModel){for(const state of Object.values(states))state.page=1;if(dialog?.open)dialog.close();claimDrill=null;}
     model=currentModel;
+    const sourceIdentity=model?(global.MinervaApp?.state.bd||global.MinervaApp?.state.publishedMeta?.revision||'local'):null;
+    if(sourceIdentity!==claimSourceIdentity){claimSourceIdentity=sourceIdentity;global.MinervaSectionCollapse?.setCollapsed('base:claim-records',true);}
     const rows=Array.isArray(model?.executiveReport?.controlClaims)?model.executiveReport.controlClaims:[];
     const yearSet=new Set((model?.meta?.years||[]).map(Number)),allYears=model?.meta?.allYears!==false||!yearSet.size;
     states.claims.rows=rows.filter(row=>allYears||yearSet.has(row.rncYear??Number(String(row.rncDate||'').slice(0,4)))).map(row=>({...row,caseStatusKey:caseKey(row)}));states.procurement.rows=Array.isArray(model?.procurementReport?.rows)?model.procurementReport.rows.filter(row=>row.included!==false&&row.category!=='legal'):[];
@@ -99,6 +107,7 @@
   function onSubmit(event){
     const form=event.target.closest('[data-cc-form]');if(!form)return;event.preventDefault();
     const scope=form.dataset.ccForm,state=states[scope],data=new FormData(form);
+    if(scope==='claims')claimDrill=null;
     const selectedValues=key=>{const select=form.elements?.namedItem?.(key)||form.querySelector?.('select[name="'+key+'"]');return choices(select&&global.MinervaMultiSelect?.values?global.MinervaMultiSelect.values(select):select?.selectedOptions?Array.from(select.selectedOptions,option=>option.value):data.getAll?data.getAll(key):data.get(key));};
     state.filters={query:String(data.get('query')||''),...Object.fromEntries(fields.map(([key])=>[key,selectedValues(key)])),supplier:state.filters.supplier||''};state.page=1;renderScope(scope);
   }
@@ -109,7 +118,9 @@
   }
   function onClick(event){
     const button=event.target.closest('button');if(!button)return;
-    if(button.dataset.ccCaseCountry!==undefined){states.claims.filters.country=[button.dataset.ccCaseCountry];states.claims.page=1;renderScope('claims');return;}
+    if(button.dataset.ccCaseMetric!==undefined){const key=button.dataset.ccCaseMetric;if(!drillLabel(key))return;claimDrill=key;states.claims.page=1;renderScope('claims');openClaimBase();return;}
+    if(button.dataset.ccClearMetric!==undefined){claimDrill=null;states.claims.page=1;renderScope('claims');openClaimBase();return;}
+    if(button.dataset.ccCaseCountry!==undefined){claimDrill=null;states.claims.filters.country=[button.dataset.ccCaseCountry];states.claims.page=1;renderScope('claims');return;}
     if(button.dataset.ccToggleWidth!==undefined){procurementWide=!procurementWide;document.body?.classList?.toggle('cc-fup-wide',procurementWide);button.setAttribute('aria-pressed',String(procurementWide));button.title=procurementWide?'Restaurar o visual e o menu lateral':'Expandir todo o visual do FUP na largura da janela';const label=button.querySelector('span');if(label)label.textContent=procurementWide?'Restaurar visual':'Expandir visual';global.MinervaColumnLayout?.refresh();return;}
     if(button.dataset.ccSupplier!==undefined){states.procurement.selectedSupplier=norm(button.dataset.ccSupplier);renderProcurement();return;}
     if(button.dataset.ccReasons&&procurementDetail){const action=button.dataset.ccReasons,groups=reasonGroups(detailRows(procurementDetail.supplier));procurementDetail.openReasons=action==='expand'?new Set(groups.map(group=>group.key)):new Set();showProcurementDetail(procurementDetail.supplier);document.getElementById('ccProcurementDetail')?.querySelector?.('[data-cc-reasons="'+action+'"]')?.focus?.();return;}
@@ -119,7 +130,7 @@
     if(button.dataset.ccExportSupplier!==undefined){exportFile('procurement',button.dataset.ccExportSupplier);return;}
     if(button.dataset.ccDetail!==undefined){const row=states.claims.rows.find(r=>String(r.row)===button.dataset.ccDetail);if(row)showDetail(row);return;}
     if(button.dataset.ccPage){const state=states[button.dataset.ccPage];state.page+=Number(button.dataset.ccStep);renderScope(button.dataset.ccPage);return;}
-    if(button.dataset.ccClear){const scope=button.dataset.ccClear,state=states[scope];state.filters={};state.page=1;clearColumns(state);renderScope(scope);return;}
+    if(button.dataset.ccClear){const scope=button.dataset.ccClear,state=states[scope];if(scope==='claims')claimDrill=null;state.filters={};state.page=1;clearColumns(state);renderScope(scope);return;}
     if(button.dataset.ccClearSupplier){const scope=button.dataset.ccClearSupplier;delete states[scope].filters.supplier;states[scope].page=1;renderScope(scope);return;}
     if(button.dataset.ccGroup){states.procurement.filters[button.dataset.ccGroup]=button.dataset.ccValue;states.procurement.page=1;renderScope('procurement');return;}
     if(button.dataset.ccExport)exportFile(button.dataset.ccExport);
@@ -191,10 +202,10 @@
   function scopes(scope){return scope==='procurement'||scope==='fup'?['procurement']:scope==='claims'||scope==='claim-control'?['claims']:scope==='all'?['claims','procurement']:[];}
   function criteria(scope,rows){
     const state=states[scope],report=model?.executiveReport;
-    return [['Origem','BD · Controle operacional'],['Recorte global',report?.meta?.controlClaimBasis||report?.controlClaimBasis||'Período de Data RNC, operações e fornecedor selecionados no painel. Todas as situações e motivos da BD.'],['Registros',rows.length],['Casos no filtro · linhas com SGR preenchido',caseCount(rows)],['Contagem','Cada linha com SGR preenchido conta uma vez; SGR repetidos em linhas distintas contam separadamente.'],['Anos dos casos',model?.meta?.allYears?'Todos os anos':(model?.meta?.years||[]).join(', ')],['Filtro FUP',scope==='procurement'?'Pendência H contendo FUP SUPRIMENTOS é excluída dos totais e das listas.':'Não aplicado'],['Busca',state.filters.query||'Todas'],...fields.map(([key,label])=>[label,key==='caseStatusKey'?choices(state.filters[key]).map(value=>caseLabels[value]||value).join(', ')||'Todos':choiceLabel(state.filters[key])]),['Fornecedor local',choiceLabel(state.filters.supplier)],['Filtros de coluna',global.MinervaTableFilters?.describe(state.table)||'Nenhum'],['Atualização','Datas I e dias BL informados na BD. Não há prazo ou meta adicional.'],['Financeiro','financialEligible e motivo da exclusão identificam linhas fora do cálculo financeiro. Valores AJ são preservados por linha.'],['Escopo','Todas as linhas do filtro, inclusive outras páginas. Planilha original preservada.']];
+    return [['Origem','BD · Controle operacional'],['Recorte global',report?.meta?.controlClaimBasis||report?.controlClaimBasis||'Período de Data RNC, operações e fornecedor selecionados no painel. Todas as situações e motivos da BD.'],['Registros',rows.length],['Detalhamento do card',drillLabel(claimDrill)||'Nenhum'],['Casos no filtro · linhas com SGR preenchido',caseCount(rows)],['Contagem','Cada linha com SGR preenchido conta uma vez; SGR repetidos em linhas distintas contam separadamente.'],['Anos dos casos',model?.meta?.allYears?'Todos os anos':(model?.meta?.years||[]).join(', ')],['Filtro FUP',scope==='procurement'?'Pendência H contendo FUP SUPRIMENTOS é excluída dos totais e das listas.':'Não aplicado'],['Busca',state.filters.query||'Todas'],...fields.map(([key,label])=>[label,key==='caseStatusKey'?choices(state.filters[key]).map(value=>caseLabels[value]||value).join(', ')||'Todos':choiceLabel(state.filters[key])]),['Fornecedor local',choiceLabel(state.filters.supplier)],['Filtros de coluna',global.MinervaTableFilters?.describe(state.table)||'Nenhum'],['Atualização','Datas I e dias BL informados na BD. Não há prazo ou meta adicional.'],['Financeiro','financialEligible e motivo da exclusão identificam linhas fora do cálculo financeiro. Valores AJ são preservados por linha.'],['Escopo','Todas as linhas do filtro, inclusive outras páginas. Planilha original preservada.']];
   }
   function worksheets(wb,worksheet,scope='all',supplier){
-    for(const kind of scopes(scope)){if(kind==='procurement'){procurementWorksheets(wb,worksheet,supplier);continue;}const rows=filtered(states[kind]);worksheet(wb,'Controle de claims',exportHeaders,rows.map(exportRow));worksheet(wb,'Critérios claims',['Critério','Valor'],criteria(kind,rows));}
+    for(const kind of scopes(scope)){if(kind==='procurement'){procurementWorksheets(wb,worksheet,supplier);continue;}const rows=kind==='claims'?drillRows(filtered(states[kind])):filtered(states[kind]);worksheet(wb,'Controle de claims',exportHeaders,rows.map(exportRow));worksheet(wb,'Critérios claims',['Critério','Valor'],criteria(kind,rows));}
   }
   function procurementExportPayload(supplier){
     let exportCriteria=[];
@@ -226,6 +237,7 @@
   function handleFilter(id){if(id==='detail-cc-procurement'&&procurementDetail){procurementDetail.page=1;showProcurementDetail(procurementDetail.supplier);return;}const scope=Object.keys(states).find(key=>states[key].table===id);if(scope){states[scope].page=1;renderScope(scope);}}
   function getViewState(){return {claims:{...states.claims.filters},procurement:{...states.procurement.filters},supplier:states.procurement.selectedSupplier||''};}
   function setViewState(value={}){
+    claimDrill=null;
     const clean=input=>{const out={query:String(input?.query||'').slice(0,200)};for(const key of ['country','status','pending','analyst','supplier','caseStatusKey'])out[key]=choices(input?.[key]).slice(0,100).map(v=>v.slice(0,200));return out;};
     states.claims.filters=clean(value.claims);states.procurement.filters=clean(value.procurement);states.claims.page=states.procurement.page=1;
     const supplier=String(value.supplier||'').slice(0,200);states.procurement.selectedSupplier=norm(supplier)||null;states.procurement.restoreSelection=true;procurementDetail=supplier?{supplier,page:1,openReasons:new Set(),reasonPages:new Map()}:null;

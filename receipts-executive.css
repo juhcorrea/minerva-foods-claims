@@ -78,3 +78,16 @@
 @media(max-width:480px){.rx-rankings{grid-template-columns:minmax(0,1fr)}.rx-panel-heading{padding:13px 12px 11px;gap:8px}.rx-panel-heading h3{font-size:calc(12px * var(--minerva-text-scale,1))}.rx-kpi>strong{font-size:calc(22px * var(--minerva-text-scale,1))}}
 @media print{.executive-mode #view-installments .receipt-heading{display:none}}
 @media print{.rx-dashboard{gap:10px}.rx-kpis{grid-template-columns:repeat(4,minmax(0,1fr))}.rx-kpi>strong{font-size:20px}.rx-main-grid{grid-template-columns:1.8fr 1fr}.rx-rank-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.rx-status-list{display:grid;grid-template-columns:1fr;gap:10px}.rx-rankings{grid-template-columns:1fr;gap:9px}.rx-panel,.rx-kpis{break-inside:avoid}.rx-monthly-scroll{overflow:visible}.rx-monthly{min-width:0}.rx-month-bars{height:120px}.rx-month-bar>span{font-size:7px}.rx-dashboard button{display:flex!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.rx-dashboard .rx-status-row{display:grid!important}.rx-rank-body>i>b,.rx-month-bar>i,.rx-status-row>i>b{-webkit-print-color-adjust:exact;print-color-adjust:exact}.rx-detail-dialog{display:none!important}}
+
+/* Labels describe applied data, without reading an unsubmitted filter form. */
+.rx-panel{overflow:visible}
+.rx-panel-heading{align-items:flex-start}
+.rx-title-block{min-width:0;flex:1}
+.rx-panel-scope{margin:5px 0 0;font-size:calc(10px * var(--minerva-text-scale,1));font-weight:500;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.rx-view-scope{margin:0;padding:9px 12px;border-left:3px solid var(--blue);border-radius:4px;background:var(--paper);color:var(--ink);font-size:calc(10px * var(--minerva-text-scale,1));font-weight:550;line-height:1.55;overflow-wrap:anywhere}
+.rx-heading-meta{display:flex;align-items:center;gap:7px;flex-shrink:0;padding-top:2px;font-size:calc(9px * var(--minerva-text-scale,1));color:var(--ink)}
+.rx-info{position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;flex:0 0 16px;border:1px solid var(--line);border-radius:50%;font-size:10px;font-weight:650;line-height:1;color:var(--ink);cursor:help}
+.rx-info:after{content:attr(data-rx-tip);display:none;position:absolute;z-index:80;top:23px;right:0;width:min(350px,calc(100vw - 48px));max-height:min(400px,65dvh);overflow:auto;padding:10px 12px;background:var(--paper);border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 22px #0002;color:var(--ink);font-size:11px;line-height:1.5;font-weight:450;text-align:left;white-space:normal;overflow-wrap:anywhere}
+.rx-info:hover:after,.rx-info:focus:after{display:block}
+.rx-info:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+@media print{.rx-info{display:none}}
