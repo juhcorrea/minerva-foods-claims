@@ -81,10 +81,23 @@ test('the original situation chart and both financial rankings stay visible befo
  assert.equal(JSON.stringify(model),before);assert.doesNotMatch(visible(html),columnCodes);
 });
 
+test('country chart total is prominent and opens exactly the union of case rows, preserving repeated SGR and cents',()=>{
+ const ui=executive(),model=fixture(),report=model.executiveReport,original=report.claimRows.find(row=>row.sgr==='NEG-KEEP');
+ report.claimRows.push({...original,row:99,country:'ARG',claimed:10.25},{...original,row:100,country:'ARG',claimed:20.75});
+ report.openByCountry.push({country:'ARG',negotiating:2,inAnalysis:0,awaitingCosts:0,total:2,rows:[99,100]});const before=JSON.stringify(model);
+ ui.api.renderClaims(model,ui.claims);const html=ui.claims.innerHTML,button=html.match(/class="exec-open-total" data-exec-detail="([^"]+)"[^>]*><span>Total geral<\/span><strong>(\d+)<\/strong><small>casos<\/small>/);assert(button);assert.equal(Number(button[2]),6);assert(html.indexOf('exec-open-total')<html.indexOf('exec-country-bars'));
+ ui.claims.events.click({target:{closest:()=>({dataset:{execDetail:button[1]}})}});assert.match(ui.content.innerHTML,/6 de 6 linhas/);assert.match(ui.content.innerHTML,/10,25/);assert.match(ui.content.innerHTML,/20,75/);assert.equal((ui.content.innerHTML.match(/<td>NEG-KEEP<\/td>/g)||[]).length,3);assert.doesNotMatch(ui.content.innerHTML,/FORWARDED|DENIED/);assert.equal(JSON.stringify(model),before);
+ report.openByCountry=[];ui.api.renderClaims(model,ui.claims);const empty=ui.claims.innerHTML.match(/class="exec-open-total" data-exec-detail="([^"]+)"[^>]*><span>Total geral<\/span><strong>0<\/strong>/);assert(empty);ui.claims.events.click({target:{closest:()=>({dataset:{execDetail:empty[1]}})}});assert.match(ui.content.innerHTML,/0 de 0 linhas/);
+});
+
 test('all-year and long selected periods use short truthful labels in both chart modules',()=>{
  const ui=executive(),model=fixture();model.meta.allYears=true;model.meta.years=Array.from({length:11},(_,i)=>2018+i);ui.api.renderClaims(model,ui.claims);
  assert.match(ui.claims.innerHTML,/Claims em aberto por país · BD · Todos os anos/);assert.doesNotMatch(visible(ui.claims.innerHTML),/BD · 2018[– ]/);
  model.meta.allYears=false;model.meta.years=[2018,2020,2026];ui.api.renderClaims(model,ui.claims);assert.match(ui.claims.innerHTML,/3 anos selecionados desde 2018/);assert.doesNotMatch(ui.claims.innerHTML,/2018 e 2020 e 2026/);
  const dashboard=host(),document={getElementById:id=>id==='receiptsExecutive'?dashboard:null,addEventListener(){}},window={};vm.runInNewContext(read('receipts-executive.js'),{window,document});model.meta.allYears=true;window.MinervaReceiptsExecutive.render(model,[]);assert.match(dashboard.innerHTML,/Recebido por mês · Todos os anos/);
  model.meta.allYears=false;model.meta.years=[2024,2025,2026];window.MinervaReceiptsExecutive.render(model,[]);assert.match(dashboard.innerHTML,/Recebido por mês · 2024–2026/);
+});
+
+test('pipeline country bars retain labels and use only the five existing official flag assets',()=>{
+ const ui=executive(),m=fixture(),countries=[['BRA','br','Brasil'],['PRY','py','Paraguai'],['URY','uy','Uruguai'],['COL','co','Colômbia'],['ARG','ar','Argentina'],['N/I',null,null]];m.executiveReport.openByCountry=countries.map(([country],i)=>({country,negotiating:1,inAnalysis:0,awaitingCosts:0,total:1,rows:[i+2]}));ui.api.render(m);ui.api.renderClaims(m,ui.claims);const labels=[...ui.claims.innerHTML.matchAll(/<span class="exec-country-name">([^]*?)<\/span>/g)].map(match=>match[1]);assert.equal(labels.length,6);for(let i=0;i<5;i++){const [code,asset,name]=countries[i];assert(labels[i].includes('src="assets/flags/'+asset+'.svg"'));assert(labels[i].includes('alt="Bandeira: '+name+'"'));assert(labels[i].endsWith(code));}assert.equal(labels[5],'N/I');
 });

@@ -30,8 +30,19 @@ function fixture(){
  function open(id,column=0){let trigger=document.querySelector(`[data-filter-table="${id}"][data-filter-column="${column}"]`);if(!trigger)trigger=dom.element('button',{'data-filter-table':id,'data-filter-column':String(column)});click(trigger);return document.querySelector('.column-filter-popup');}
  function search(popup,value){const input=popup.querySelector('input[type=search]');input.value=value;input.dispatchEvent({type:'input',target:input});}
  const prepare=(id,rows)=>F.prepare(id,['Ordem / referência','Status'],rows,row=>[row.order,row.status]);
- return {F,document,changed,click,open,search,prepare};
+ return {F,document,window,changed,click,open,search,prepare};
 }
+
+test('Claim cards ignore only case status while their base facets, drill and real callbacks stay coherent',()=>{
+ const t=fixture(),host=t.document.createElement('div');host.id='claimRecords';t.document.body.append(host);vm.runInNewContext(fs.readFileSync(require.resolve('../dist/claim-control.js'),'utf8'),{window:t.window,document:t.document,Intl});
+ const api=t.window.MinervaClaimControl,id='cc-claims-table',rows=[{row:2,sgr:'CASE-A',supplier:'Analysis open',country:'BRA',status:'EM ANÁLISE',caseStatus:'ABERTO',caseStatusKey:'open',rncYear:2026,claimed:10},{row:3,sgr:'CASE-B',supplier:'Analysis closed',country:'BRA',status:'EM ANÁLISE',caseStatus:'FECHADO',caseStatusKey:'closed',rncYear:2026,claimed:20},{row:4,sgr:'CASE-C',supplier:'Forwarded open',country:'BRA',status:'RESSARCIMENTO ENCAMINHADO',caseStatus:'ABERTO',caseStatusKey:'open',rncYear:2026,claimed:30}],model={meta:{allYears:true,caseYears:[2026]},executiveReport:{controlClaims:rows}},original=JSON.stringify(model);
+ t.F.importState({tables:[{id,filters:[{column:1,values:['BRA']},{column:8,values:['Aberto']}],sort:{column:6,direction:'asc'}},{id:'other',filters:[{column:0,values:['preserve']}]}]});let callbacks=0;t.F.onChange(table=>{callbacks++;api.handleFilter(table);});api.render(model);
+ const count=key=>host.querySelector('[data-cc-case-metric="'+key+'"]').querySelector('strong').textContent,options=()=>{const popup=t.open(id,2),values=popup.querySelectorAll('.column-filter-option').map(node=>node.querySelector('span').textContent);t.click(popup.querySelector('[data-filter-cancel]'));return values;},records=()=>host.querySelectorAll('[data-cc-detail]').map(node=>Number(node.dataset.ccDetail));
+ assert.equal(count('all'),'3');assert.equal(count('closed'),'1');assert.deepEqual(options(),['Analysis open','Forwarded open']);
+ t.click(host.querySelector('[data-cc-case-metric="closed"]'));assert.deepEqual(records(),[3]);assert.deepEqual(options(),['Analysis closed']);let saved=plain(t.F.exportState());assert.deepEqual(saved.tables.find(table=>table.id===id),{id,filters:[{column:1,values:['BRA']}],sort:{column:6,direction:'asc'}});assert(saved.tables.some(table=>table.id==='other'));
+ t.click(host.querySelector('[data-cc-case-metric="analysis"]'));assert.deepEqual(records(),[2,3]);assert.deepEqual(options(),['Analysis closed','Analysis open']);
+ const popup=t.open(id,2);t.search(popup,'Analysis open');t.click(popup.querySelector('.column-filter-only'));assert.equal(callbacks,1);assert.deepEqual(records(),[2]);assert.equal(count('all'),'1');assert.equal(count('closed'),'0');assert.deepEqual(options(),['Analysis closed','Analysis open'],'Own column may expose every option within the actual stage for changing the selection');assert.equal(JSON.stringify(model),original);
+});
 
 test('Somente este replaces all 2209 selected options and leaves other tables unchanged',()=>{
  const t=fixture(),rows=Array.from({length:2209},(_,i)=>({order:'PO/DEMO-'+i,status:'Aberto'}));

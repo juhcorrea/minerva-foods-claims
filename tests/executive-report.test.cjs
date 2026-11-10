@@ -24,8 +24,8 @@ test('operational pipeline includes analysis and costs without changing financia
  const rows=[bd({sgr:'A',status:'EM ANÁLISE'}),bd({sgr:'B',status:'AGUARDANDO CUSTOS'}),bd({sgr:'C',status:'EM NEGOCIAÇÃO - PROCEDENTE'}),bd({sgr:'C',status:'EM NEGOCIAÇÃO - PROCEDENTE'}),bd({sgr:'D',status:'RESPONDIDO - NÃO PROCEDE'}),bd({sgr:'E',status:'EM ANÁLISE',rnc:'2025-01-01'}),bd({sgr:'F',status:'EM ANÁLISE',rnc:'2026-12-01'}),bd({sgr:'G',status:'EM ANÁLISE',reason:'INTERFERÊNCIA EXTERNA'}),bd({sgr:'H',status:'EM ANÁLISE',operation:'COMERCIAL'}),bd({sgr:null,status:'EM ANÁLISE',country:null})];
  const m=run(rows),x=m.executiveReport,bra=x.openByCountry.find(r=>r.country==='BRA');
  assert.equal(m.claims.length,2);assert.equal(m.summary.claimed,200);assert.equal(m.summary.negotiating,200);
- assert.deepEqual({negotiating:bra.negotiating,inAnalysis:bra.inAnalysis,awaitingCosts:bra.awaitingCosts,total:bra.total,recordCount:bra.recordCount},{negotiating:1,inAnalysis:2,awaitingCosts:1,total:4,recordCount:5});
- assert.equal(x.openByCountry.find(r=>r.country==='Não informado').inAnalysis,1);assert.equal(x.meta.totals.pipelineCases,5);assert.equal(x.meta.totals.pipelineRecords,6);
+ assert.deepEqual({negotiating:bra.negotiating,inAnalysis:bra.inAnalysis,awaitingCosts:bra.awaitingCosts,total:bra.total,recordCount:bra.recordCount},{negotiating:2,inAnalysis:2,awaitingCosts:1,total:5,recordCount:5});
+ assert.equal(x.openByCountry.find(r=>r.country==='Não informado'),undefined);assert.equal(x.meta.totals.pipelineCases,5);assert.equal(x.meta.totals.pipelineRecords,5);
  assert.equal(x.negotiationByCountry[0].count,1);assert.equal(x.negotiationByCountry[0].recordCount,2);assert.deepEqual(x.negotiationByCountry[0].rows,[4,5]);
  assert(x.claimRows.some(r=>r.status==='AGUARDANDO CUSTOS'));assert(!m.claims.some(r=>r.status==='AGUARDANDO CUSTOS'));
 });

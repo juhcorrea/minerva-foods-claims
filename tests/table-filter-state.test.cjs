@@ -19,3 +19,11 @@ test('sanitization whitelists bounded selections and preserves intentional empty
  const large=F.sanitizeState({tables:Array.from({length:110},(_,i)=>({id:'t'+i,filters:[{column:0,values:Array.from({length:510},(_,j)=>'v'+j)}],sort:null}))});assert.equal(large.tables.length,100);assert.equal(large.tables[0].filters[0].values.length,500);
  assert.deepEqual(plain(F.sanitizeState(null)),{tables:[]});
 });
+
+test('summary preparation can ignore one column without changing registered table scope, filters or sort',()=>{
+ const F=fixture();let changes=0;F.onChange(()=>changes++);F.importState({tables:[{id:'claims',filters:[{column:0,values:['A']},{column:1,values:['Aberto']}],sort:{column:2,direction:'desc'}}]});
+ const headers=['Fornecedor','Status','USD'],rows=[{name:'A',status:'Aberto',amount:10},{name:'A',status:'Fechado',amount:20},{name:'B',status:'Fechado',amount:30}],cells=r=>[r.name,r.status,r.amount];
+ F.prepare('claims',headers,rows,cells,'Tabela registrada');const before=plain(F.exportState());
+ const summary=F.prepare('claims',['Outro título','Outro status','USD'],rows,cells,'Resumo temporário',{ignoreColumns:[1],register:false});assert.deepEqual(summary.map(r=>r.amount),[20,10]);assert.deepEqual(plain(F.exportState()),before);assert.equal(F.criteria()[0][0],'Tabela registrada');assert.match(F.describe('claims'),/Fornecedor: A.*Status: Aberto/);
+ F.clearColumn('claims',1);assert.deepEqual(plain(F.exportState()).tables[0],{id:'claims',filters:[{column:0,values:['A']}],sort:{column:2,direction:'desc'}});assert.equal(changes,0);assert.deepEqual(F.prepare('claims',headers,rows,cells).map(r=>r.amount),[20,10]);
+});

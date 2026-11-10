@@ -1266,10 +1266,10 @@
         controlClaims.push({...row,caseStatus,caseStatusKey,rncYear:rncDate?Number(rncDate.slice(0,4)):null,order:text(source[22]),...claimFollowUpFields(bdRows[0],source,agingDate),financialEligible:financialRows.has(row.row),reasonExcluded:excluded.join('; '),pending:text(read(source,'pending')),lastUpdateDate:parseDate(read(source,'negotiationDate')),daysWithoutUpdate:days!=null&&days>=0?days:null,analyst:text(source[56])||'Não informado'});
       }
       if(war)continue;
-      if(periodEligible&&statuses[statusKey]){
+      if(periodEligible&&statuses[statusKey]&&row.sgr){
         const key=norm(row.country),bucket=statuses[statusKey];
         if(!pipeline.has(key))pipeline.set(key,{country:row.country,negotiating:0,inAnalysis:0,awaitingCosts:0,total:0,rows:[],_ids:new Set(),_negotiating:new Set(),_inAnalysis:new Set(),_awaitingCosts:new Set()});
-        const item=pipeline.get(key),id=identity(row);item.rows.push(row.row);item._ids.add(id);item[`_${bucket}`].add(id);remember(row);
+        const item=pipeline.get(key),id=`ROW:${row.row}`;item.rows.push(row.row);item._ids.add(id);item[`_${bucket}`].add(id);remember(row);
       }
       addSla(row,source,'analysis','analysisDate','analysisEvent');
       if(statusKey===FORWARDED)addSla(row,source,'negotiation','negotiationDate','negotiationEvent');
@@ -1288,7 +1288,7 @@
         financialBasis:'Motivo, causador e negociação por país usam os claims financeiros já selecionados. Causador vem de AX da BD, separado do fornecedor em AC. Valores financeiros existentes não são recalculados por este relatório.',
         pipelineBasis:'BD: ano de Data RNC selecionado, Data RNC até a análise, operações e fornecedor do recorte global, sem INTERFERÊNCIA EXTERNA. Situações: EM ANÁLISE, AGUARDANDO CUSTOS e EM NEGOCIAÇÃO - PROCEDENTE. Sem listas manuais de exclusões de pendência do BI. Não representa o saldo de parcelas do Controle.',
         controlClaimBasis:'Controle operacional da BD: todos os anos, situações e motivos, inclusive Seguro, INTERFERÊNCIA EXTERNA e linhas sem Data RNC, nos filtros globais de fornecedor e operação. Aberto e Fechado seguem exclusivamente o Status F; Situação G permanece separada. F ausente, inválida ou desconhecida não é inferida por G. Cada linha com SGR preenchido conta um caso, inclusive SGR repetido; linhas sem SGR permanecem identificadas. Anos e status operacionais são filtrados na própria aba, sem alterar o financeiro. Pendência H e dias BL são preservados; financialEligible e reasonExcluded indicam a participação no recorte financeiro.',
-        occurrenceBasis:'Contagens de casos: SGR distinto por grupo; sem SGR, linha Excel. Valores somam linhas e recordCount mostra registros. O mesmo SGR pode aparecer em mais de uma categoria; total de um país deduplica o SGR entre situações.',
+        occurrenceBasis:'Situações por país: cada linha BD com SGR preenchido conta um caso, inclusive SGR repetido; etapas, total por país, total geral e detalhe usam as mesmas linhas. Linhas sem SGR não entram nessa contagem. Nos rankings monetários, count continua SGR distinto por grupo, com linha Excel quando ausente; valores somam linhas e recordCount mostra registros.',
         slaBasis:'Média do indicador BF por data J; média de dias BJ por data I somente com RESSARCIMENTO ENCAMINHADO; média de dias BK por data N. Datas dos eventos nos anos selecionados e até a análise, independentemente do ano RNC, com fornecedor/operação/expurgo do recorte global. Zero válido participa; ausentes, inválidos e dias negativos não participam.',
         analysisBasis:'BF é o índice SLA da base entre 0 e 1. A média é exibida como percentual do índice; esta projeção não recria nem presume a fórmula do prazo de 25 dias.',
         rounding:'Precisão de origem preservada nos detalhes; grupos monetários arredondados após a soma. A soma de grupos arredondados pode diferir por centavos do total arredondado.',
