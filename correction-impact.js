@@ -89,20 +89,9 @@
   // intact; no amounts, corrections or ambiguous references are deduplicated.
   function buildQueue(model, groups = model?.correctionGroups || []) {
     const claimDates=new Map([...(model?.executiveReport?.controlClaims||[]),...(model?.claims||[])].map(claim=>[claim.row,claim.rncDate]));
-    const audits=model?.claimValueAudit?.rows||[],nodes=[...groups.map(group=>({groups:[group],audits:[],issues:[],bdRows:group.bdRows||[],controlRows:group.rows||[]})),...audits.map(audit=>({groups:[],audits:[audit],issues:[],bdRows:audit.connectedBdRows||audit.bdRows||[],controlRows:audit.controlRows||[]})),...(model?.baseReconciliation?.rows||[]).map(issue=>({groups:[],audits:[],issues:[issue],bdRows:issue.bdRows||[],controlRows:issue.controlRows||[]}))];
-    const parents=nodes.map((_,index)=>index),find=index=>parents[index]===index?index:(parents[index]=find(parents[index]));
-    const validRows=values=>(values||[]).filter(value=>Number.isInteger(value)&&value>0);
-    const keys=node=>[...validRows(node.bdRows).map(row=>'BD:'+row),...validRows(node.controlRows).map(row=>'Controle:'+row)];
-    const owners=new Map();nodes.forEach((node,index)=>{for(const key of keys(node)){if(owners.has(key))parents[find(index)]=find(owners.get(key));else owners.set(key,index);}});
-    const components=new Map();nodes.forEach((node,index)=>{const root=find(index);if(!components.has(root))components.set(root,{groups:[],audits:[],issues:[],bdRows:[],controlRows:[]});const entry=components.get(root);for(const key of ['groups','audits','issues','bdRows','controlRows'])entry[key].push(...node[key]);});
-    const sourceOwners=new Map();for(const entry of components.values())for(const key of keys(entry))sourceOwners.set(key,entry);
-    const standalone=new Map();for(const [index,issue] of (model?.issues||[]).entries()){
-      const source=issueSource(issue),key=Number.isInteger(issue.row)&&issue.row>0?source+':'+issue.row:'unlinked:'+index;
-      let entry=sourceOwners.get(key);if(!entry){if(!standalone.has(key))standalone.set(key,{groups:[],audits:[],issues:[],bdRows:source==='BD'?validRows([issue.row]):[],controlRows:source==='Controle'?validRows([issue.row]):[]});entry=standalone.get(key);}entry.issues.push(issue);
-    }
+    const entries=global.ClaimsEngine.buildCorrectionReviewItems(model,groups);
     const unique=values=>[...new Set(values.filter(value=>value!=null&&String(value).trim()!==''))];
-    const warning=audit=>audit.uncertain||audit.hasClaimValueMismatch||audit.hasReceivedMismatch||audit.status!=='Conferido';
-    return [...components.values(),...standalone.values()].filter(entry=>entry.groups.length||entry.issues.length||entry.audits.some(warning)).map((entry,index)=>{
+    return entries.map((entry,index)=>{
       const sources=[...entry.groups,...entry.audits,...entry.issues],references=unique(sources.flatMap(row=>row.references?.length?row.references:[row.reference])),suppliers=unique(sources.flatMap(row=>row.suppliers?.length?row.suppliers:[row.supplier])),analysts=unique(sources.flatMap(row=>row.analysts||[row.analyst]));
       const problems=reviewProblems(entry),types=unique(problems.map(problem=>problem.title));
       const known=entry.audits.length&&entry.audits.every(audit=>audit.claimed!=null&&Number.isFinite(Number(audit.claimed)));
