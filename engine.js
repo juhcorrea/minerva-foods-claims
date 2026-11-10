@@ -31,6 +31,8 @@
   };
   const norm = v => {const value=text(v);return memo(analysisMemo?.norm,value,()=>value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' '));};
   const normalizeStatus = v => {const value=norm(v);return memo(analysisMemo?.status,value,()=>value.replace(/\s*[-–—]\s*/g, ' - '));};
+  const requiresControlLink = source => normalizeStatus(source?.[6]) === FORWARDED && norm(source?.[16]) !== 'SEGURO';
+  const controlLinkBasis = 'Exigir vínculo BD → Controle somente para G = RESSARCIMENTO ENCAMINHADO e Q — Área negociação diferente de SEGURO. A área segue Q, nunca AC — Negociação. Demais situações e Seguro não geram pendência por ausência de Controle.';
   function filterValues(options, plural, singular, normalize) {
     const input=Object.prototype.hasOwnProperty.call(options,plural)?options[plural]:options[singular],values=Array.isArray(input)?input:[input],seen=new Set();
     return values.map(text).filter(value=>{const key=normalize(value);if(!key||seen.has(key))return false;seen.add(key);return true;});
@@ -213,7 +215,7 @@
       const c = {
         row: a + 1, sgr: text(r[0]), order: text(r[22]), nf: text(r[24]), supplier, analyst: analystAt(a + 1),
         supplierKey: norm(supplier), rncDate, year, market: text(r[3]), marketKey: normalizeMarket(r[3]),
-        status: text(r[6]), statusKey, operation: text(r[25]), claimed: claimedValue ?? 0,
+        status: text(r[6]), statusKey, negotiationArea:text(r[16]), controlLinkRequired:requiresControlLink(r), operation: text(r[25]), claimed: claimedValue ?? 0,
         ...claimDimensions(bdRows[0], r),
         keys, war, baseEligible: (allOperations || OPS.has(opKey)) && !EXCLUDED_STATUSES.has(statusKey) && !war,
         eligible: otherFilters && periodEligible && !war, matchedControlRows: [], candidateControlRows: [], linkState: 'unmatched',
@@ -393,7 +395,7 @@
     for (const c of claims) {
       const linked = c.matchedControlRows.map(row => installmentByRow.get(row)).filter(Boolean);
       c.linkState = linked.length ? linked.some(i => i.grouped) ? 'grouped' : 'matched' : c.candidateControlRows.length ? 'review' : 'unmatched';
-      if (c.linkState === 'unmatched' && c.statusKey === FORWARDED) {
+      if (c.linkState === 'unmatched' && c.controlLinkRequired) {
         supplierRow(c.supplierKey).unmatchedClaims++;
         issue('CLAIM_WITHOUT_LINK', {row: c.row, reference: c.order || c.nf, supplier: c.supplier, bdRows: [c.row], amount: c.claimed, detail: 'Sem correspondência no Controle. Isso não comprova ausência de pagamento; revisar a referência.'});
       }
@@ -456,7 +458,7 @@
       claimed: money(totalClaimed), forwarded: money(rawTotals.forwarded), negotiating: money(rawTotals.negotiating), otherClaimed: money(rawTotals.otherClaimed), received: money(rawTotals.received),
       receivedNegotiating: money(rawTotals.receivedNegotiating), receivedOtherStatuses: money(rawTotals.receivedOtherStatuses), receivedConfirmed: money(rawTotals.receivedConfirmed), balance: money(rawTotals.balance), recoveryRate: ratio(rawTotals.received, totalClaimed), occurrences: claims.filter(c => c.sgr).length, recordCount: claims.length,
       installments: sum(suppliers, 'installments'), paid: sum(suppliers, 'paid'), overdue: sum(suppliers, 'overdue'), onTime: sum(suppliers, 'onTime'), loss: null, lossRate: null, explicitLoss: money(rawTotals.explicitLoss), openBalance: money(rawTotals.openBalance), overdueBalance: money(rawTotals.overdueBalance), onTimeBalance: money(rawTotals.onTimeBalance), noDueBalance: money(rawTotals.noDueBalance), missingExpectedAmounts: sum(suppliers, 'missingExpectedAmounts'), openBalanceIncomplete: sum(suppliers, 'missingExpectedAmounts') > 0, lossInstallments: sum(suppliers, 'lossInstallments'),
-      unmatchedClaims: claims.filter(c => c.linkState === 'unmatched' && c.statusKey === FORWARDED).length, reviewCount: issues.length, correctionCount: corrections.length, excludedWar, excludedWarAmount: money(excludedWarAmount), processes: processes.length, settledProcesses: processes.filter(p => p.settled).length,
+      unmatchedClaims: claims.filter(c => c.linkState === 'unmatched' && c.controlLinkRequired).length, reviewCount: issues.length, correctionCount: corrections.length, excludedWar, excludedWarAmount: money(excludedWarAmount), processes: processes.length, settledProcesses: processes.filter(p => p.settled).length,
     };
     // Keep the reported formula exact at the displayed two-decimal precision.
     summary.balance = money(summary.claimed - summary.received - summary.negotiating);
@@ -786,8 +788,8 @@
   // link is an alert, never permission to discard confirmed M/R/T receipts.
   function applyBaseReconciliation(model, bdRows, controlRows, index) {
     const rows=[],linked=new Set(),changes=[],correctedCells=new Set(model.corrections.map(change=>change.cell));
-    const meta={allYears:true,totalBdRows:0,totalControlRows:0,forwardedBdRows:0,bdWithoutControl:0,controlWithoutBd:0,partialLinks:0,yearDifferences:0,missingOperationRows:0,
-      scope:'Base completa, de todos os anos, independente dos filtros financeiros. Operação em branco na BD; ressarcimento sem vínculo no Controle; referências do Controle sem BD; vínculos parciais e divergências de Ano Entrada.',
+    const meta={allYears:true,totalBdRows:0,totalControlRows:0,forwardedBdRows:0,controlRequiredBdRows:0,insuranceExemptBdRows:0,bdWithoutControl:0,controlWithoutBd:0,partialLinks:0,yearDifferences:0,missingOperationRows:0,
+      scope:'Base completa, de todos os anos, independente dos filtros financeiros. Operação em branco na BD; ressarcimento fora de Seguro sem vínculo no Controle; referências do Controle sem BD; vínculos parciais e divergências de Ano Entrada.',controlLinkBasis,
       operationBasis:'BD Z — Operação em branco nas linhas úteis de qualquer ano ou situação. Conferir e preencher na origem, sem inferir pela ordem, fornecedor ou companhia marítima e sem alterar os cálculos.',
       yearBasis:'Controle B comparado ao ano de BD B — Data RNC, somente com referência completa e um único ano válido. Datas de pagamento/compensação e valores M/R/T permanecem intactos.'};
     const analysts=claims=>unique(claims.map(claim=>text(bdRows[claim.row-1]?.[56])||'Não identificado'));
@@ -833,8 +835,9 @@
         add('BD_MISSING_OPERATION','Operação em branco','BD',row,order||nf||sgr,supplier,[{row}],`BD!Z${row}: Operação em branco. Conferir e preencher na BD de origem. SGR em A${row}: ${sgr||'não informado'}; Ordem em W${row}: ${order||'não informada'}; NF em Y${row}: ${nf||'não informada'}; Negociação em AC${row}: ${supplier}. Nenhuma operação foi inferida; valores e critérios financeiros permanecem preservados.`,{sourceCells:['BD!Z'+row],cell:'Z'+row,field:'Operação',sgr,order,nf,originalOperation:source[25]??null});
       }
       meta.totalBdRows++;if(normalizeStatus(source[6])!==FORWARDED)continue;meta.forwardedBdRows++;
+      if(!requiresControlLink(source)){meta.insuranceExemptBdRows++;continue;}meta.controlRequiredBdRows++;
       if(linked.has(row))continue;meta.bdWithoutControl++;
-      add('CLAIM_FORWARDED_WITHOUT_CONTROL','Ressarcimento sem vínculo no Controle','BD',row,text(source[22])||text(source[24]),text(source[28])||'Não informado',[{row}],`BD!G${row}: Claim com situação RESSARCIMENTO ENCAMINHADO na BD, sem ordem/NF correspondente identificada no Controle. Conferir a referência em BD!W${row} (Ordem) / Y${row} (NF) ou o lançamento no Controle; a ausência de vínculo pode decorrer de uma referência divergente.`,{sourceCells:['BD!G'+row,'BD!W'+row,'BD!Y'+row]});
+      add('CLAIM_FORWARDED_WITHOUT_CONTROL','Ressarcimento sem vínculo no Controle','BD',row,text(source[22])||text(source[24]),text(source[28])||'Não informado',[{row}],`BD!G${row}: Claim com situação RESSARCIMENTO ENCAMINHADO na BD, fora da área Seguro em Q${row}, sem ordem/NF correspondente identificada no Controle. Conferir a referência em BD!W${row} (Ordem) / Y${row} (NF) ou o lançamento no Controle; a ausência de vínculo pode decorrer de uma referência divergente.`,{sourceCells:['BD!G'+row,'BD!Q'+row,'BD!W'+row,'BD!Y'+row],negotiationArea:text(source[16])});
     }
     appendBaseYearCorrections(model,changes,bdRows);meta.warningCount=rows.length;meta.yearCorrectionRows=meta.yearDifferences;model.baseReconciliation={rows,meta};
   }
@@ -889,7 +892,8 @@
   // for several BD claims; grouped amounts are never allocated arbitrarily.
   function claimValueAudit(model, bdRows, controlRows) {
     const available = {AJ:true, AO:['RECEBIDOUSD','VALORRECEBIDOUSD'].includes(headerKey(bdRows[0]?.[40])), O:true, U:headerKey(controlRows[0]?.[20]) === 'VALORINTEGRALCLAIM'};
-    const selected = new Set(model.claims.map(claim => claim.row));
+    const selected = new Set(model.claims.filter(claim=>requiresControlLink(bdRows[claim.row-1])).map(claim => claim.row));
+    const exemptBdRows=model.claims.filter(claim=>!selected.has(claim.row)).map(claim=>claim.row),excludedMixedComponents=[];
     const claims = new Map(), controls = new Map(), index = new Map(), parents = new Map();
     const find = node => {let key=node;while(parents.get(key)!==key)key=parents.get(key);while(node!==key){const next=parents.get(node);parents.set(node,key);node=next;}return key;};
     const ensure = node => {if(!parents.has(node))parents.set(node,node);};
@@ -916,6 +920,10 @@
     const rows=[],uCorrections=[];
     for(const component of components.values()){
       const scoped=component.claims.filter(claim=>selected.has(claim.row));if(!scoped.length)continue;
+      const exempt=component.claims.filter(claim=>!requiresControlLink(claim.source));
+      // A shared installment cannot be compared to only its required claims.
+      // Insurance and other statuses are outside this audit; never allocate O.
+      if(exempt.length){excludedMixedComponents.push({bdRows:component.claims.map(claim=>claim.row).sort((a,b)=>a-b),requiredBdRows:scoped.map(claim=>claim.row).sort((a,b)=>a-b),exemptBdRows:exempt.map(claim=>claim.row).sort((a,b)=>a-b),controlRows:component.controls.map(control=>control.row).sort((a,b)=>a-b),reason:'Componente com claims dentro e fora do escopo de vínculo obrigatório; auditoria monetária não aplicada, sem rateio de parcelas.'});continue;}
       component.controls.sort((a,b)=>a.row-b.row);scoped.sort((a,b)=>a.row-b.row);
       const outside=component.claims.filter(claim=>!selected.has(claim.row)),complete=component.controls.length>0&&!outside.length&&component.controls.every(control=>control.complete);
       const rawClaimed=sumComplete(scoped.map(claim=>number(claim.source[35])));
@@ -956,13 +964,13 @@
       }
     }
     rows.sort((a,b)=>a.reference.localeCompare(b.reference,'pt-BR'));
-    const summary={claims:selected.size,groups:rows.length,controlRows:unique(rows.flatMap(row=>row.controlRows)).length,claimValueMismatches:rows.filter(row=>row.hasClaimValueMismatch).length,claimValueCorrectionRows:uCorrections.length,receivedMismatches:rows.filter(row=>row.hasReceivedMismatch).length,uncertainGroups:rows.filter(row=>row.uncertain).length,groupedClaims:rows.filter(row=>row.grouped).length,missingAmounts:{},knownTotals:{}};
+    const summary={claims:unique(rows.flatMap(row=>row.bdRows)).length,requiredClaims:selected.size,exemptClaims:exemptBdRows.length,excludedMixedGroups:excludedMixedComponents.length,groups:rows.length,controlRows:unique(rows.flatMap(row=>row.controlRows)).length,claimValueMismatches:rows.filter(row=>row.hasClaimValueMismatch).length,claimValueCorrectionRows:uCorrections.length,receivedMismatches:rows.filter(row=>row.hasReceivedMismatch).length,uncertainGroups:rows.filter(row=>row.uncertain).length,groupedClaims:rows.filter(row=>row.grouped).length,missingAmounts:{},knownTotals:{}};
     for(const field of ['claimed','bdReceived','controlExpected','prejudice','originalClaimValue','originalPrejudice']){
       const values=rows.map(row=>row[field]),missing=values.filter(value=>value==null).length;
       summary.missingAmounts[field]=missing;summary.knownTotals[field]=values.some(value=>value!=null)?money(values.reduce((total,value)=>total+(value??0),0)):null;
       summary[field]=rows.length&&!missing?summary.knownTotals[field]:null;
     }
-    return {rows,summary,uCorrections,meta:{sourcesAvailability:available,scope:'Claims selecionados na BD; todas as parcelas do Controle ligadas pelas referências de ordem/NF, independentemente de status, ano de entrada ou data de compensação.',receivedDefinition:'AO — Recebido (USD) da BD deve corresponder à soma de O — Valor USD de todas as parcelas vinculadas. Não é o recebido realizado de T.',claimDefinition:'U — Valor Integral Claim do Controle deve corresponder a AJ da BD somente quando o vínculo identifica uma única ocorrência.',prejudiceFormula:'Prejuízo do claim = AJ − AO.',originalPrejudiceFormula:'Visão original = U único do claim − soma de O das parcelas.',lossDistinction:'A Perda agregada do painel permanece Reclamado − (Recebido realizado em T + Em negociação).',allocation:'Componentes de referências compartilhadas são somados uma vez, sem distribuir valores entre claims. Vínculos incompletos ficam para conferência.',totals:'Cada claim e parcela aparece em um único grupo. Totais com dados incompletos ficam indisponíveis; knownTotals informa somente o subtotal conhecido.',toleranceUSD:.01}};
+    return {rows,summary,uCorrections,meta:{sourcesAvailability:available,scope:controlLinkBasis+' Dentro desse escopo, claims selecionados na BD e todas as parcelas do Controle ligadas por ordem/NF, independentemente do status da parcela, ano de entrada ou data de compensação.',controlLinkBasis,exemptBdRows,excludedMixedComponents,receivedDefinition:'AO — Recebido (USD) da BD deve corresponder à soma de O — Valor USD de todas as parcelas vinculadas no escopo auditável. Não é o recebido realizado de T.',claimDefinition:'U — Valor Integral Claim do Controle deve corresponder a AJ da BD somente quando o vínculo identifica uma única ocorrência no escopo auditável.',prejudiceFormula:'Prejuízo do claim = AJ − AO.',originalPrejudiceFormula:'Visão original = U único do claim − soma de O das parcelas.',lossDistinction:'A Perda agregada do painel permanece Reclamado − (Recebido realizado em T + Em negociação).',allocation:'Componentes de referências compartilhadas são somados uma vez, sem distribuir valores entre claims. Componentes mistos com Seguro ou situações fora do escopo não geram comparação parcial nem correção de U. Vínculos incompletos entre claims do escopo ficam para conferência.',totals:'Cada claim e parcela auditável aparece em um único grupo. Totais com dados incompletos ficam indisponíveis; knownTotals informa somente o subtotal conhecido.',toleranceUSD:.01}};
   }
   function appendClaimValueCorrections(model,bdRows){
     const changes=model.claimValueAudit.uCorrections;if(!changes.length)return;
