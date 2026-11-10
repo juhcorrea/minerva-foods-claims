@@ -786,8 +786,9 @@
   // link is an alert, never permission to discard confirmed M/R/T receipts.
   function applyBaseReconciliation(model, bdRows, controlRows, index) {
     const rows=[],linked=new Set(),changes=[],correctedCells=new Set(model.corrections.map(change=>change.cell));
-    const meta={allYears:true,totalBdRows:0,totalControlRows:0,forwardedBdRows:0,bdWithoutControl:0,controlWithoutBd:0,partialLinks:0,yearDifferences:0,
-      scope:'Base completa, de todos os anos, independente dos filtros financeiros. BD encaminhada sem Controle; referências do Controle sem BD; vínculos parciais e divergências de Ano Entrada.',
+    const meta={allYears:true,totalBdRows:0,totalControlRows:0,forwardedBdRows:0,bdWithoutControl:0,controlWithoutBd:0,partialLinks:0,yearDifferences:0,missingOperationRows:0,
+      scope:'Base completa, de todos os anos, independente dos filtros financeiros. Operação em branco na BD; ressarcimento sem vínculo no Controle; referências do Controle sem BD; vínculos parciais e divergências de Ano Entrada.',
+      operationBasis:'BD Z — Operação em branco nas linhas úteis de qualquer ano ou situação. Conferir e preencher na origem, sem inferir pela ordem, fornecedor ou companhia marítima e sem alterar os cálculos.',
       yearBasis:'Controle B comparado ao ano de BD B — Data RNC, somente com referência completa e um único ano válido. Datas de pagamento/compensação e valores M/R/T permanecem intactos.'};
     const analysts=claims=>unique(claims.map(claim=>text(bdRows[claim.row-1]?.[56])||'Não identificado'));
     const add=(kind,type,source,row,reference,supplier,matched,detail,extra={})=>{
@@ -825,9 +826,15 @@
     }
     for(let n=1;n<bdRows.length;n++){
       const source=bdRows[n];if(!source||!source.slice(0,36).some(value=>value!=null&&value!==''))continue;
+      const row=n+1;
+      if(!text(source[25])&&source.slice(0,36).some(value=>text(value)!=='')){
+        meta.missingOperationRows++;
+        const sgr=text(source[0]),order=text(source[22]),nf=text(source[24]),supplier=text(source[28])||'Não informado';
+        add('BD_MISSING_OPERATION','Operação em branco','BD',row,order||nf||sgr,supplier,[{row}],`BD!Z${row}: Operação em branco. Conferir e preencher na BD de origem. SGR em A${row}: ${sgr||'não informado'}; Ordem em W${row}: ${order||'não informada'}; NF em Y${row}: ${nf||'não informada'}; Negociação em AC${row}: ${supplier}. Nenhuma operação foi inferida; valores e critérios financeiros permanecem preservados.`,{sourceCells:['BD!Z'+row],cell:'Z'+row,field:'Operação',sgr,order,nf,originalOperation:source[25]??null});
+      }
       meta.totalBdRows++;if(normalizeStatus(source[6])!==FORWARDED)continue;meta.forwardedBdRows++;
-      const row=n+1;if(linked.has(row))continue;meta.bdWithoutControl++;
-      add('CLAIM_FORWARDED_WITHOUT_CONTROL','BD encaminhada sem Controle','BD',row,text(source[22])||text(source[24]),text(source[28])||'Não informado',[{row}],`BD!G${row}: RESSARCIMENTO ENCAMINHADO sem referência correspondente no Controle. Conferir BD!W${row} (Ordem) / Y${row} (NF) e o lançamento no Controle.`,{sourceCells:['BD!G'+row,'BD!W'+row,'BD!Y'+row]});
+      if(linked.has(row))continue;meta.bdWithoutControl++;
+      add('CLAIM_FORWARDED_WITHOUT_CONTROL','Ressarcimento sem vínculo no Controle','BD',row,text(source[22])||text(source[24]),text(source[28])||'Não informado',[{row}],`BD!G${row}: Claim com situação RESSARCIMENTO ENCAMINHADO na BD, sem ordem/NF correspondente identificada no Controle. Conferir a referência em BD!W${row} (Ordem) / Y${row} (NF) ou o lançamento no Controle; a ausência de vínculo pode decorrer de uma referência divergente.`,{sourceCells:['BD!G'+row,'BD!W'+row,'BD!Y'+row]});
     }
     appendBaseYearCorrections(model,changes,bdRows);meta.warningCount=rows.length;meta.yearCorrectionRows=meta.yearDifferences;model.baseReconciliation={rows,meta};
   }
