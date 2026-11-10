@@ -2,18 +2,18 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../dist/claim-control.js'),'utf8');
 function harness(){
- const hosts={},filters=new Map(),sorts=new Map(),sortMeta=new Map(),bodyClasses=new Set();let modal;
+ const hosts={},filters=new Map(),sorts=new Map(),sortMeta=new Map(),bodyClasses=new Set(),exports=[];let modal;
  for(const id of ['claimRecords','procurementContent','ccProcurementDetail'])hosts[id]={innerHTML:'',classList:{add(){}},listeners:{},addEventListener(k,fn){this.listeners[k]=fn;},querySelector(){return {textContent:''};}};
  const document={getElementById:id=>hosts[id],querySelector:()=>null,body:{append(el){modal=el;},classList:{toggle(name,value){value?bodyClasses.add(name):bodyClasses.delete(name);}}},createElement:()=>({open:false,innerHTML:'',dataset:{},classList:{add(){},remove(){}},listeners:{},setAttribute(){},addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);},showModal(){this.open=true;},close(){this.open=false;}})};
  const F={prepare(id,headers,rows){const result=filters.has(id)?rows.filter(filters.get(id)):[...rows];return sorts.has(id)?result.sort(sorts.get(id)):result;},heading:(id,col,label)=>label,ariaSort:()=> 'none',describe:id=>filters.has(id)?'Filtro de teste':'',has:id=>filters.has(id),hasSort:id=>sorts.has(id),getSort:id=>sortMeta.get(id),clearDetails(){filters.delete('detail-cc-procurement');sorts.delete('detail-cc-procurement');sortMeta.delete('detail-cc-procurement');}};
  class FormDataFake{constructor(form){this.values=form.values;}get(key){return Array.isArray(this.values[key])?this.values[key][0]:this.values[key]??'';}getAll(key){return this.values[key]===undefined?[]:Array.isArray(this.values[key])?this.values[key]:[this.values[key]];}}
  class FixedDate extends Date{constructor(...args){super(...(args.length?args:['2026-11-06T01:00:00Z']));}static now(){return Date.parse('2026-11-06T01:00:00Z');}}
- const window={MinervaTableFilters:F},context={window,document,FormData:FormDataFake,Date:FixedDate};vm.createContext(context);vm.runInContext(source,context);
+ const window={MinervaTableFilters:F,MinervaFupExport:{download:payload=>exports.push(JSON.parse(JSON.stringify(payload)))}},context={window,document,FormData:FormDataFake,Date:FixedDate};vm.createContext(context);vm.runInContext(source,context);
  const event=dataset=>({target:{closest:selector=>selector==='button'?{dataset}:null}});
  const click=(host,dataset)=>hosts[host].listeners.click(event(dataset));
  const submit=(scope,values)=>hosts[scope==='claims'?'claimRecords':'procurementContent'].listeners.submit({preventDefault(){},target:{closest:()=>({dataset:{ccForm:scope},values})}});
  const sheets=(scope,supplier)=>{const output=[];window.MinervaClaimControl.worksheets({},(wb,title,headers,rows)=>output.push({title,headers,rows}),scope,supplier);return JSON.parse(JSON.stringify(output));};
- return {api:window.MinervaClaimControl,hosts,filters,sorts,sortMeta,bodyClasses,click,submit,sheets,get modal(){return modal;},get detail(){return hosts.ccProcurementDetail;},toggle(key){click('procurementContent',{ccReason:key});}};
+ return {api:window.MinervaClaimControl,hosts,filters,sorts,sortMeta,bodyClasses,exports,click,submit,sheets,get modal(){return modal;},get detail(){return hosts.ccProcurementDetail;},toggle(key){click('procurementContent',{ccReason:key});}};
 }
 const record=(row,supplier,reason,claimed,extra={})=>({row,sgr:'SGR-'+row,order:'ORDEM-'+row,supplier,reason,claimed,category:'negotiation',included:true,country:'País exemplo',pending:'Aguardando retorno',invoiceDate:'2026-01-01',openingDate:'2026-11-04',nf:'NF-'+row,container:'NF-'+row,originalContainer:'',...extra});
 const model=(rows,claims=[])=>({executiveReport:{controlClaims:claims},procurementReport:{rows,negotiationTotal:100,legalTotal:20,grandTotal:120,meta:{}}});
@@ -104,4 +104,15 @@ test('saved Claim/FUP filters restore against new rows and keep a supplier beyon
  const h=harness(),rows=Array.from({length:52},(_,i)=>record(i+2,'Fornecedor '+String(i).padStart(2,'0'),'Motivo',100-i));h.api.render(model(rows,[record(1,'Fornecedor A','Motivo',10,{country:'País A'})]));
  h.submit('claims',{country:['País A'],query:''});const saved=h.api.getViewState();saved.supplier='Fornecedor 51';assert(!JSON.stringify(saved).includes('claimed'));h.api.setViewState(saved);
  h.api.render(model(rows.map(r=>({...r,claimed:r.claimed*2})),[record(3,'Fornecedor novo','Motivo',900,{country:'País A'})]));assert(h.detail.innerHTML.includes('Fornecedor 51'));assert(h.hosts.procurementContent.innerHTML.includes('<span>2 / 2</span>'));assert.equal(sheet(h.sheets('claims'),'Controle de claims').rows[0][13],900);assert.deepEqual(Array.from(h.api.getViewState().claims.country),['País A']);
+});
+
+test('meeting Excel includes all macro-filtered suppliers and pages, but never legal or excluded detail',()=>{
+ const h=harness(),rows=Array.from({length:55},(_,i)=>record(i+2,'Fornecedor '+String(i).padStart(2,'0'),'Motivo',i+1,{country:i===0?'Fora':'Dentro'}));rows.push(record(100,'Jurídico oculto','Jurídico',999,{category:'legal'}),record(101,'FUP excluído','Excluído',999,{included:false}));
+ const m=model(rows),before=JSON.stringify(m);h.api.render(m);h.submit('procurement',{country:['Dentro']});h.filters.set('cc-procurement-table',group=>group.negotiation>=3);h.api.handleFilter('cc-procurement-table');h.click('procurementContent',{ccExport:'procurement'});
+ const output=h.exports[0];assert.equal(output.groups.length,53);assert.equal(output.rowCount,53);assert.equal(output.groups[0].supplier,'Fornecedor 54');assert.equal(output.total,rows.slice(2,55).reduce((sum,row)=>sum+row.claimed,0));assert.equal(output.globalTotals.legal,20);assert.equal(output.globalTotals.total,120);assert.equal(output.selectedSupplier,null);assert(output.groups.every(group=>group.reasons.every(reason=>reason.expanded)));assert(!JSON.stringify(output.groups).includes('Jurídico oculto'));assert(!JSON.stringify(output.groups).includes('FUP excluído'));assert.equal(JSON.stringify(m),before);
+});
+
+test('selected supplier meeting Excel preserves micro filters, order and collapsed reasons without dropping hidden rows',()=>{
+ const h=harness(),rows=[record(2,'Fornecedor A','Zeta',30),record(3,'Fornecedor A','Alfa',20),record(4,'Fornecedor A','Alfa',10),record(5,'Fornecedor B','Outro',5)];h.api.render(model(rows));h.click('procurementContent',{ccSupplier:'Fornecedor A'});h.filters.set('detail-cc-procurement',row=>row.row!==2);h.sortMeta.set('detail-cc-procurement',{column:0,direction:'asc'});h.sorts.set('detail-cc-procurement',(a,b)=>a.claimed-b.claimed);h.api.handleFilter('detail-cc-procurement');h.click('procurementContent',{ccReasons:'collapse'});h.click('procurementContent',{ccExportSupplier:'Fornecedor A'});
+ const output=h.exports[0];assert.equal(output.selectedSupplier,'Fornecedor A');assert.equal(output.groups.length,1);assert.equal(output.total,30);assert.equal(output.rowCount,2);assert.equal(output.groups[0].reasons[0].expanded,false);assert.deepEqual(output.groups[0].reasons[0].rows.map(row=>row.claimed),[10,20]);assert.equal(output.groups[0].reasons[0].total,30);assert.equal(output.groups[0].reasons[0].rows[0].days,1);assert(output.criteria.some(row=>row[0]==='Colunas micro'&&row[1]==='Filtro de teste'));
 });

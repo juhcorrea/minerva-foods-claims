@@ -57,8 +57,30 @@ class FakeWorker{
   postMessage(value){this.messages.push(value);}
   terminate(){this.terminated=true;}
   finish(model={meta:{},summary:{}}){for(const listener of this.listeners.get('message')||[])listener({data:{id:this.messages.at(-1).id,model}});}
+  progress(progress,id=this.messages.at(-1).id){for(const listener of this.listeners.get('message')||[])listener({data:{id,type:'progress',progress}});}
 }
 function clientFixture(){const workers=[],client=createClient({makeWorker:()=>{const worker=new FakeWorker();workers.push(worker);return worker;}}),manifest={revision:'a',files:{},updatedBy:'Example'},api=async()=>manifest;return {workers,client,manifest,api};}
+
+test('worker progress is forwarded without resolving a partial model and ignores stale or malformed events',async()=>{
+ const f=clientFixture(),events=[],controller=new AbortController();let resolved=false;
+ const pending=f.client.load({},{api:f.api,signal:controller.signal,onProgress:value=>events.push(value)}).then(value=>{resolved=true;return value;});await tick();
+ f.workers[0].progress({phase:'download',loaded:10,total:231});f.workers[0].progress({phase:'download',loaded:999,total:231});f.workers[0].progress({phase:'analysis'},-1);await tick();
+ assert.equal(resolved,false);assert.deepEqual(events,[{phase:'manifest'},{phase:'download',loaded:10,total:231}]);
+ f.workers[0].progress({phase:'analysis'});f.workers[0].finish({complete:true});assert.deepEqual((await pending).model,{complete:true});assert.equal(events.at(-1).phase,'analysis');
+});
+
+test('231 delayed verified parts use at most eight simultaneous requests and report monotonic completion',async()=>{
+ const input=sources();for(const sheet of ['bd','control'])input[sheet]=Array.from({length:sheet==='bd'?232:230},(_row,index)=>input[sheet][index?1:0].slice());
+ const f=manifestFixture(input),events=[];let active=0,maxActive=0,reads=0;
+ const runner=createRunner({engine:E,crypto:webcrypto,baseURL:origin,fetcher:async(url,options)=>{
+  active++;maxActive=Math.max(active,maxActive);reads++;assert.equal(options.credentials,'same-origin');assert.equal(options.cache,'no-store');assert(options.signal);
+  await new Promise(resolve=>setTimeout(resolve,2));active--;return new Response(f.texts.get(url));
+ }});
+ const model=await runner.analyze(f.manifest,{years:[2026],asOf:'2026-11-10'},{onProgress:value=>events.push(value)});
+ assert.equal(f.manifest.parts.length,231);assert.equal(reads,231);assert.equal(maxActive,8);assert.equal(model.summary.received,11478.63);
+ assert.deepEqual(events.filter(value=>value.phase==='download').map(value=>value.loaded),Array.from({length:232},(_v,index)=>index));assert(events.filter(value=>value.phase==='download').every(value=>value.total===231));assert.equal(events.at(-1).phase,'analysis');
+ events.length=0;await runner.analyze(f.manifest,{years:[2026],asOf:'2026-11-10'},{onProgress:value=>events.push(value)});assert.equal(reads,231);assert.deepEqual(events,[{phase:'analysis'}]);
+});
 
 test('aborting, changing revision and signing out terminate the worker and never accept a stale result',async()=>{
   const f=clientFixture(),controller=new AbortController(),first=f.client.load({years:[2026]},{api:f.api,signal:controller.signal});await tick();const rejected=assert.rejects(first,{name:'AbortError'});controller.abort();await rejected;assert(f.workers[0].terminated);

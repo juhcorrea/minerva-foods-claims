@@ -17,6 +17,42 @@ function harness(){
  vm.createContext(context);vm.runInContext(code,context);
  return {context,requests,applied,messages,load:(options=opts)=>context.loadReport(options),setFresh:value=>fresh=value,setMeta:value=>meta=value,deny:()=>failMeta=true,pause:value=>pauseMeta=value};
 }
+
+function virtualTimers(h){
+ let now=0,serial=0;const timers=new Map();
+ h.context.global.setTimeout=(fn,delay)=>{const id=++serial;timers.set(id,{fn,at:now+delay});return id;};
+ h.context.global.clearTimeout=id=>timers.delete(id);
+ return {timers,advance(ms){const end=now+ms;for(;;){const next=[...timers.entries()].filter(([,job])=>job.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!next)break;now=next[1].at;timers.delete(next[0]);next[1].fn();}now=end;}};
+}
+
+test('browser initial loading survives slow multipart transfer past 30 seconds and gets a separate calculation deadline',async()=>{
+ const h=harness(),clock=virtualTimers(h);h.context.session.analysisMode='browser';let complete,job;
+ const visibleStatus={textContent:''};h.context.global.document={getElementById:id=>id==='sidebarLoadLabel'?visibleStatus:null};
+ h.context.global.MinervaClientAnalysis={load:(_options,options)=>{job=options;options.onProgress({phase:'manifest'});return new Promise((resolve,reject)=>{complete=resolve;options.signal.addEventListener('abort',()=>reject(Object.assign(Error('Cancelled'),{name:'AbortError'})));});}};
+ const result=h.load();job.onProgress({phase:'download',loaded:0,total:231});
+ for(let loaded=1;loaded<=231;loaded++){clock.advance(700);job.onProgress({phase:'download',loaded,total:231});}
+ assert.equal(job.signal.aborted,false,'161.7 second transfer is allowed, unlike the previous 30 second limit');assert.match(h.messages.at(-1)[0],/231 de 231 partes conferidas/);assert.equal(visibleStatus.textContent,'Carregando 231/231 partes');assert.equal(h.applied.length,0);
+ job.onProgress({phase:'analysis'});clock.advance(59000);assert.equal(job.signal.aborted,false,'Calculation receives its own bounded deadline');assert.match(h.messages.at(-1)[0],/Calculando/);assert.equal(visibleStatus.textContent,'Calculando relatório…');
+ complete(payload());assert.equal(await result,true);assert.equal(h.applied.length,1);assert.equal(clock.timers.size,0);
+});
+
+test('browser progress cannot extend the download or calculation deadlines indefinitely',async()=>{
+ for(const phase of ['download','analysis']){
+  const h=harness(),clock=virtualTimers(h);h.context.session.analysisMode='browser';let job;
+  h.context.global.MinervaClientAnalysis={load:(_options,options)=>{job=options;return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Object.assign(Error('Cancelled'),{name:'AbortError'}))));}};
+  const result=h.load();if(phase==='analysis')job.onProgress({phase});
+  clock.advance(phase==='download'?179000:59000);job.onProgress(phase==='download'?{phase,loaded:230,total:231}:{phase});clock.advance(1000);
+  assert.equal(await result,false);assert.equal(job.signal.aborted,true);assert.equal(h.applied.length,0);assert.match(h.messages.at(-1)[0],phase==='download'?/3 minutos/:/1 minuto/);assert.equal(clock.timers.size,0);assert.equal(h.context.loadingReport,false);
+ }
+});
+
+test('late progress and completion from an aborted browser load cannot replace the latest scope',async()=>{
+ const h=harness(),clock=virtualTimers(h),jobs=[];h.context.session.analysisMode='browser';
+ h.context.global.MinervaClientAnalysis={load:(_options,options)=>new Promise(resolve=>jobs.push({...options,resolve}))};
+ const first=h.load(),second=h.load({...opts,allYears:true});assert.equal(jobs[0].signal.aborted,true);jobs[1].onProgress({phase:'download',loaded:20,total:231});const count=h.messages.length;
+ jobs[0].onProgress({phase:'analysis'});assert.equal(h.messages.length,count);jobs[0].resolve(payload('stale'));assert.equal(await first,false);assert.equal(h.applied.length,0);
+ jobs[1].resolve(payload('latest'));assert.equal(await second,true);assert.equal(h.applied[0].revision,'latest');assert.equal(clock.timers.size,0);
+});
 test('returning to a visited scope checks only metadata and reuses the matching model',async()=>{
  const h=harness();await h.load();await h.load({...opts,allYears:true});await h.load();
  assert.equal(h.requests.length,3);assert.equal(h.requests[2],'/api/report/meta');assert.equal(h.applied[2],h.applied[0]);

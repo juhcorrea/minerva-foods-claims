@@ -31,7 +31,7 @@ test('M is authoritative for supplier debt while existing Control reports keep d
 test('open-only suppliers without claims or receipts are retained with zero financial metrics',()=>{
  const m=run([],[cr({ref:'NO LINK',supplier:'Fornecedor somente saldo',status:'Vencido',amount:25})]),s=own(m,'Fornecedor somente saldo');
  assert(s);assert.equal(s.claimed,0);assert.equal(s.received,0);assert.equal(s.receivedComparable,0);assert.equal(s.loss,0);assert.equal(s.comparableLoss,0);assert.equal(s.openBalance,25);assert.equal(s.overdueBalance,25);assert.equal(s.recoveryRate,null);assert.equal(s.comparableRecoveryRate,null);
- assert.deepEqual(s.receivedByClaimYear,{2024:0,2025:0,2026:0,other:0});assert.equal(s.openInstallments[0].linkState,'unmatched');
+ assert.deepEqual(s.receivedByClaimYear,Object.fromEntries([...m.meta.claimYearDisplayYears,'other','unknown'].map(year=>[year,0])));assert.equal(s.openInstallments[0].linkState,'unmatched');
 });
 
 test('global correction scenario and supplier filter govern attribution while M and O remain intact',()=>{

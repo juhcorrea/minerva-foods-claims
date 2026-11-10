@@ -91,6 +91,9 @@
     const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
     return `${p.year}-${p.month}-${p.day}`;
   }
+  function recentClaimYears() {const year=Number(today().slice(0,4));return [year-1,year];}
+  const claimYearBucket=(year,displayYears)=>year==null?'unknown':displayYears.includes(year)?year:'other';
+  const emptyClaimYears=displayYears=>Object.fromEntries([...displayYears,'other','unknown'].map(year=>[year,0]));
 
   function normalizeRef(v) {
     if (v == null) return null;
@@ -736,7 +739,7 @@
     const annualRow = (name,year) => {
       if (!annual.has(name)) annual.set(name,new Map());
       const supplier = annual.get(name);
-      if (!supplier.has(year)) supplier.set(year,{name,year,claimed:0,received:0,financialReceived:0,byYear:{2024:0,2025:0,2026:0},rate:null});
+      if (!supplier.has(year)) supplier.set(year,{name,year,claimed:0,received:0,financialReceived:0,byYear:emptyClaimYears(model.meta.claimYearDisplayYears),rate:null});
       return supplier.get(year);
     };
     for (const claim of model.claims) annualRow(claim.supplier,claim.year).claimed += claim.claimed;
@@ -744,7 +747,7 @@
       const entry = annualRow(receipt.supplier,receipt.compensationYear);
       entry.financialReceived += receipt.received;
       if (years.has(receipt.claimYear)) entry.received += receipt.received;
-      if (Object.hasOwn(entry.byYear,receipt.claimYear)) entry.byYear[receipt.claimYear] += receipt.received;
+      entry.byYear[claimYearBucket(receipt.claimYear,model.meta.claimYearDisplayYears)] += receipt.received;
     }
     const supplierAnnual = model.suppliers.flatMap(supplier => model.meta.years.map(year => {
       const entry = annualRow(supplier.name,year);
@@ -979,13 +982,14 @@
   // different year. Claim eligibility still governs claimed/negotiating amounts.
   function applyReceiptCohorts(model,controlRows,index,options){
     const claimStatusFilter=new Set(options.claimStatuses.map(claimStatusKey));
+    const displayYears=recentClaimYears();model.meta.claimYearDisplayYears=displayYears;
     const years=new Set(model.meta.years),supplierFilter=new Set(options.suppliers.map(norm)),operationFilter=new Set(options.operations.map(normalizeStatus)),useOriginal=model.meta.correctionScenario==='original';
     const rows=[],excluded=[],suppliers=new Map(),annual=new Map(),monthly=new Map(),canonicalSuppliers=new Map(model.suppliers.map(supplier=>[norm(supplier.name),supplier.name]));
     const meta={years:[...years],supplier:text(options.supplier),operation:text(options.operation),scope:'Recebimentos do Controle Claim no período de R. A BD valida a classificação; referência ausente ou incompleta não exclui o caixa. Sem filtro de operação, entram todas as operações e a operação não identificada. Com operação específica, somente a operação validada entra.',sameYearDefinition:'Ano da compensação R igual ao ano único de Data RNC validado na BD, ou ao Ano Entrada B quando não houver validação segura.',differentYearDefinition:'Ano da compensação R diferente do ano único de Data RNC validado na BD, ou do Ano Entrada B quando não houver validação segura.',unknownYearDefinition:'Não há ano de claim seguro na BD nem Ano Entrada B válido no Controle; pagamento mantido em Ano a conferir.',receivedBasis:'M = Pago; R = Data compensação válida; T = Valor Recebido USD positivo. Cada linha do Controle é contada uma vez, inclusive referências agregadas.',unresolvedCount:0,unresolvedAmount:0,outsideOperationCount:0,outsideOperationAmount:0,excludedUnknownOperationCount:0,excludedUnknownOperationAmount:0,receivedWithoutClaimDetailCount:0,receivedWithoutClaimDetail:0};
     const accum=(map,key,base,row)=>{
-      if(!map.has(key))map.set(key,{...base,received:0,sameYear:0,differentYear:0,unknownYear:0,count:0,receivedWithoutClaimDetail:0,receivedWithoutClaimDetailCount:0,receivedComparable:0,receivedByClaimYear:{2024:0,2025:0,2026:0,other:0}});
+      if(!map.has(key))map.set(key,{...base,received:0,sameYear:0,differentYear:0,unknownYear:0,count:0,receivedWithoutClaimDetail:0,receivedWithoutClaimDetailCount:0,receivedComparable:0,receivedByClaimYear:emptyClaimYears(displayYears)});
       const value=map.get(key);value.received+=row.received;value.count++;value[row.cohort==='same'?'sameYear':row.cohort==='different'?'differentYear':'unknownYear']+=row.received;
-      value.receivedByClaimYear[[2024,2025,2026].includes(row.claimYear)?row.claimYear:'other']+=row.received;
+      value.receivedByClaimYear[claimYearBucket(row.claimYear,displayYears)]+=row.received;
       if(years.has(row.claimYear))value.receivedComparable+=row.received;
       if(row.validationState==='control-only'){value.receivedWithoutClaimDetail+=row.received;value.receivedWithoutClaimDetailCount++;}
     };
@@ -1027,7 +1031,7 @@
       return result;
     };
     const balancedClaimYears=value=>{
-      const keys=['2024','2025','2026','other'],raw=value?.receivedByClaimYear||{},result={};
+      const keys=[...displayYears,'other','unknown'],raw=value?.receivedByClaimYear||{},result={};
       for(const key of keys)result[key]=money(raw[key]||0);
       const residue=Math.round(money(value?.received||0)*100)-keys.reduce((total,key)=>total+Math.round(result[key]*100),0);
       const existing=keys.filter(key=>(raw[key]||0)>0).sort((a,b)=>raw[b]-raw[a]);
@@ -1046,8 +1050,9 @@
     meta.correctionScenario=model.meta.correctionScenario;
     if(useOriginal){meta.scope+=' Visão original: fornecedor K e Ano Entrada B do Controle, preservados sem classificação pela BD.';meta.sameYearDefinition='Ano da compensação R igual ao Ano Entrada B original do Controle.';meta.differentYearDefinition='Ano da compensação R diferente do Ano Entrada B original do Controle.';meta.unknownYearDefinition='Ano Entrada B original vazio ou inválido; pagamento mantido em Ano a conferir.';}
     meta.rounding='Valores de origem preservados. Totais e grupos são arredondados a centavos; o resíduo entre os três grupos de ano é reconciliado no maior grupo que já contém recebimentos, para que a soma corresponda ao total.';
-    meta.claimYearColumns='receivedByClaimYear agrupa todo o caixa do período de R pelo ano de origem do claim: 2024, 2025, 2026; other reúne demais anos e ano a conferir. O ano segue o cenário ativo. O resíduo de arredondamento é reconciliado no maior grupo de origem que já contém recebimentos.';
-    meta.comparableDefinition='receivedComparable inclui pagamentos cujo ano de compensação R e ano de origem do claim pertencem aos anos selecionados. Com 2025 e 2026 selecionados, claim 2025 pago em 2026 entra no total; claim 2024 permanece visível na coluna de origem 2024, fora desse total. received preserva todo o caixa do recorte. receivedSameYear continua como diagnóstico de igualdade entre os dois anos.';
+    meta.claimYearDisplayYears=[...displayYears];
+    meta.claimYearColumns=`receivedByClaimYear agrupa todo o caixa do período de R pelo ano de origem do claim: ${displayYears.join(', ')} são os dois anos mais recentes do calendário vigente em Brasília, independentes da data da análise e dos filtros. other (Demais anos) soma todos os outros anos conhecidos; unknown mantém separadamente o Ano a conferir. O ano segue o cenário ativo. O resíduo de arredondamento é reconciliado no maior grupo de origem que já contém recebimentos.`;
+    meta.comparableDefinition='receivedComparable inclui pagamentos cujo ano de compensação R e ano de origem do claim pertencem aos anos selecionados. Demais anos continua visível e participa desse total somente quando o ano de origem está selecionado. A organização das colunas não altera os filtros nem o total. received preserva todo o caixa do recorte, inclusive Ano a conferir. receivedSameYear continua como diagnóstico de igualdade entre os dois anos.';
     meta.comparableLossFormula='Reclamado − (Recebido comparável + Em negociação). Taxas e perda ficam nulas nos grupos sem denominador reclamado, como a série mensal de caixa.';
     Object.assign(meta,globalFilterMeta(options),{filterBasis:'OU entre fornecedores ou operações selecionados; E entre filtros. Uma parcela com múltiplas operações só entra se o vínculo for completo e todas as operações pertencerem ao conjunto selecionado. Cada linha entra uma vez, sem rateio.'});
     const receiptCohorts={rows,suppliers:finish(suppliers.values()).sort((a,b)=>b.received-a.received||a.name.localeCompare(b.name,'pt-BR')),annual:finish(annual.values()).sort((a,b)=>a.year-b.year),monthly:finish(monthly.values()).sort((a,b)=>a.month.localeCompare(b.month)),excluded,meta};
@@ -1081,7 +1086,7 @@
     model.suppliers.sort((a,b)=>b.claimed-a.claimed||a.name.localeCompare(b.name,'pt-BR'));
     let cumulative=0;for(const supplier of model.suppliers){supplier.share=ratio(supplier.claimed,model.summary.claimed)||0;cumulative+=supplier.share;supplier.pareto=cumulative;}
     const aggregate={received:sum(rows,'received'),sameYear:sum(rows.filter(row=>row.cohort==='same'),'received'),differentYear:sum(rows.filter(row=>row.cohort==='different'),'received'),unknownYear:sum(rows.filter(row=>row.cohort==='unknown'),'received'),count:rows.length,receivedWithoutClaimDetail:meta.receivedWithoutClaimDetail,receivedWithoutClaimDetailCount:meta.receivedWithoutClaimDetailCount};
-    aggregate.receivedByClaimYear={2024:0,2025:0,2026:0,other:0};for(const row of rows)aggregate.receivedByClaimYear[[2024,2025,2026].includes(row.claimYear)?row.claimYear:'other']+=row.received;
+    aggregate.receivedByClaimYear=emptyClaimYears(displayYears);for(const row of rows)aggregate.receivedByClaimYear[claimYearBucket(row.claimYear,displayYears)]+=row.received;
     aggregate.receivedComparable=sum(rows.filter(row=>years.has(row.claimYear)),'received');
     addAmounts(model.summary,aggregate);model.summary.paid=rows.length;
     model.summary.receivedNegotiating=money(sum(rows.filter(row=>normalizedStatus(row)===NEGOTIATING),'received'));
@@ -1141,7 +1146,7 @@
         excluded.push({row:n+1,reference:text(source[7]),supplier:activeSupplier,status,expected,bdRows:matched.map(claim=>claim.row),reason:knownOperation?'Operação validada fora do filtro global selecionado.':'Operação não identificada para o filtro global específico.'});continue;
       }
       if(!supplierMap.has(supplierKey)){
-        const supplier=reset({name:activeSupplier,claimed:0,forwarded:0,negotiating:0,otherClaimed:0,received:0,receivedNegotiating:0,receivedOtherStatuses:0,receivedConfirmed:0,balance:0,recoveryRate:null,occurrences:0,recordCount:0,share:0,pareto:0,paid:0,loss:model.meta.lossFormula==='pending'?null:0,lossRate:null,explicitLoss:0,lossInstallments:0,installments:0,reviewCount:0,unmatchedClaims:0,processes:0,settledProcesses:0,receivedLinkedClaims:0,receivedSameYear:0,receivedDifferentYear:0,receivedUnknownYear:0,receivedCount:0,receivedWithoutClaimDetail:0,receivedWithoutClaimDetailCount:0,receivedComparable:0,receivedByClaimYear:{2024:0,2025:0,2026:0,other:0},comparableRecoveryRate:null,comparableLoss:0,comparableLossRate:null});
+        const supplier=reset({name:activeSupplier,claimed:0,forwarded:0,negotiating:0,otherClaimed:0,received:0,receivedNegotiating:0,receivedOtherStatuses:0,receivedConfirmed:0,balance:0,recoveryRate:null,occurrences:0,recordCount:0,share:0,pareto:0,paid:0,loss:model.meta.lossFormula==='pending'?null:0,lossRate:null,explicitLoss:0,lossInstallments:0,installments:0,reviewCount:0,unmatchedClaims:0,processes:0,settledProcesses:0,receivedLinkedClaims:0,receivedSameYear:0,receivedDifferentYear:0,receivedUnknownYear:0,receivedCount:0,receivedWithoutClaimDetail:0,receivedWithoutClaimDetailCount:0,receivedComparable:0,receivedByClaimYear:emptyClaimYears(model.meta.claimYearDisplayYears),comparableRecoveryRate:null,comparableLoss:0,comparableLossRate:null});
         supplierMap.set(supplierKey,supplier);model.suppliers.push(supplier);
       }
       const supplier=supplierMap.get(supplierKey),noDueDate=source[13]==null||text(source[13])==='';
@@ -1309,5 +1314,5 @@
         financialBasis:'Relatório adicional de carteira aberta; não altera reclamado, recebido, negociação ou perda dos indicadores financeiros existentes.'}};
   }
 
-  return {analyze, validateHeaders, normalizeRef, tokenizeRefs, normalizeMarket, normalizeStatus, normalizeSupplier:norm, parseDate, number, today, version: '1.4.0'};
+  return {analyze, validateHeaders, normalizeRef, tokenizeRefs, normalizeMarket, normalizeStatus, normalizeSupplier:norm, parseDate, number, today, recentClaimYears, version: '1.4.0'};
 });

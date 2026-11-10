@@ -182,12 +182,31 @@
   function worksheets(wb,worksheet,scope='all',supplier){
     for(const kind of scopes(scope)){if(kind==='procurement'){procurementWorksheets(wb,worksheet,supplier);continue;}const rows=filtered(states[kind]);worksheet(wb,'Controle de claims',exportHeaders,rows.map(exportRow));worksheet(wb,'Critérios claims',['Critério','Valor'],criteria(kind,rows));}
   }
+  function procurementExportPayload(supplier){
+    let exportCriteria=[];
+    procurementWorksheets({},(_book,title,_headers,rows)=>{if(title==='Critérios FUP')exportCriteria=rows;},supplier);
+    const rows=supplier!==undefined?detailRows(supplier):states.procurement.filteredRows,groups=supplier!==undefined?aggregateProcurement(rows):states.procurement.view,report=model?.procurementReport||{};
+    const selected=supplier!==undefined,reasonSort=selected?global.MinervaTableFilters?.getSort?.('detail-cc-procurement'):null;
+    return {selectedSupplier:selected?supplier:null,scopeLabel:selected?'Fornecedor selecionado · '+supplier:'Todos os fornecedores do filtro',date:todaySaoPaulo(),rowCount:rows.length,total:rows.reduce((sum,row)=>sum+(number(row.claimed)||0),0),criteria:exportCriteria,
+      globalTotals:{negotiation:number(report.negotiationTotal??report.summary?.negotiation),legal:number(report.legalTotal??report.summary?.legal),total:number(report.grandTotal??report.summary?.total)},
+      groups:groups.map(group=>({supplier:group.supplier,claimCount:group.claimCount,total:group.negotiation,reasons:reasonGroups(group.records,reasonSort).map(reason=>({label:reason.label,count:reason.count,total:reason.amount,expanded:!selected||!procurementDetail||procurementDetail.openReasons.has(reason.key),rows:reason.rows.map(row=>({order:row.order||row.sgr||'',invoiceDate:row.invoiceDate||'',container:row.container||row.nf||'',openingDate:row.openingDate||'',days:openDays(row),claimed:number(row.claimed),pending:row.pending||'',sgr:row.sgr||'',nf:row.nf||'',country:row.country||'',operation:row.operation||'',row:row.row}))}))}))};
+  }
   function exportFile(scope,supplier){
     const host=document.getElementById(states[scope].host),feedback=host?.querySelector('.cc-feedback');
-    try{const X=global.XLSX;if(!X)throw new Error('Exportação indisponível. Recarregue o painel.');const wb=X.utils.book_new();
+    try{
+      if(scope==='procurement'){
+        exportProcurement(supplier);
+        if(feedback)feedback.textContent='Excel de reunião gerado: fornecedores e motivos agrupados, com todos os detalhes do recorte.';
+        return;
+      }
+      const X=global.XLSX;if(!X)throw new Error('Exportação indisponível. Recarregue o painel.');const wb=X.utils.book_new();
       worksheets(wb,(book,title,headers,rows)=>{const sheet=X.utils.aoa_to_sheet([headers,...rows]);sheet['!cols']=headers.map((_,i)=>({wch:i===0?12:26}));if(rows.length)sheet['!autofilter']={ref:X.utils.encode_range({r:0,c:0},{r:rows.length,c:headers.length-1})};for(let c=0;c<headers.length;c++)if(/USD/.test(headers[c]))for(let r=1;r<=rows.length;r++){const cell=sheet[X.utils.encode_cell({r,c})];if(cell?.t==='n')cell.z='#,##0.00';}X.utils.book_append_sheet(wb,sheet,title);},scope,supplier);
       X.writeFile(wb,(scope==='claims'?'Controle_Claims':'FUP_Suprimentos')+'_Minerva.xlsx',{compression:true});if(feedback)feedback.textContent='Excel gerado com todos os registros filtrados.';
     }catch(error){if(feedback)feedback.textContent=error.message||'Não foi possível gerar o Excel.';}
+  }
+  function exportProcurement(supplier){
+    if(!global.MinervaFupExport)throw new Error('Atualize a página para carregar a exportação de reunião.');
+    return global.MinervaFupExport.download(procurementExportPayload(supplier));
   }
   const handlesTable=id=>id==='detail-cc-procurement'||Object.values(states).some(state=>state.table===id);
   function handleFilter(id){if(id==='detail-cc-procurement'&&procurementDetail){procurementDetail.page=1;showProcurementDetail(procurementDetail.supplier);return;}const scope=Object.keys(states).find(key=>states[key].table===id);if(scope){states[scope].page=1;renderScope(scope);}}
@@ -197,5 +216,5 @@
     states.claims.filters=clean(value.claims);states.procurement.filters=clean(value.procurement);states.claims.page=states.procurement.page=1;
     const supplier=String(value.supplier||'').slice(0,200);states.procurement.selectedSupplier=norm(supplier)||null;states.procurement.restoreSelection=true;procurementDetail=supplier?{supplier,page:1,openReasons:new Set(),reasonPages:new Map()}:null;
   }
-  global.MinervaClaimControl={render,handlesTable,handleFilter,worksheets,getViewState,setViewState};
+  global.MinervaClaimControl={render,handlesTable,handleFilter,worksheets,getViewState,setViewState,exportProcurement};
 })(window);

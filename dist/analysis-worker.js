@@ -6,7 +6,7 @@
   const runner=api.createRunner({engine:global.ClaimsEngine,fetcher:(...args)=>fetch(...args),crypto:global.crypto,baseURL:global.location.href});
   global.addEventListener('message',async event=>{
     const {id,manifest,options}=event.data||{};
-    try{const model=await runner.analyze(manifest,options);global.postMessage({id,model});}
+    try{const model=await runner.analyze(manifest,options,{onProgress:progress=>global.postMessage({id,type:'progress',progress})});global.postMessage({id,model});}
     catch(error){global.postMessage({id,error:{message:error.message||'Não foi possível analisar as bases.',status:error.status||0,code:error.code||''}});}
   });
 })(typeof self==='object'?self:globalThis,function(){
@@ -37,28 +37,31 @@
   }
   function createRunner({engine,fetcher,crypto,baseURL}){
     let revision=null,source=null;
-    async function load(manifest){
+    async function load(manifest,onProgress){
       const parts=manifestParts(manifest,baseURL);
       if(revision===manifest.revision&&source)return source;
       revision=null;source=null;
-      const next={bd:[],control:[]};let cursor=0;
+      const next={bd:[],control:[]},controller=new AbortController();let cursor=0,loaded=0;
+      onProgress({phase:'download',loaded,total:parts.length});
       async function take(){
-        while(cursor<parts.length){
-          const part=parts[cursor++],response=await fetcher(part.url,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});
+        while(!controller.signal.aborted&&cursor<parts.length){
+          const part=parts[cursor++],response=await fetcher(part.url,{credentials:'same-origin',cache:'no-store',signal:controller.signal,headers:{Accept:'application/json'}});
           if(!response.ok){const error=new Error(response.status===401||response.status===403?'Seu acesso à publicação foi encerrado.':'Não foi possível baixar uma parte da publicação.');error.status=response.status;throw error;}
           const bytes=new Uint8Array(await response.arrayBuffer());if(bytes.length>192*1024||await digest(crypto,bytes)!==part.sha256)failure('Uma parte da publicação não passou na conferência de integridade. Atualize a visão.');
           let value;try{value=JSON.parse(new TextDecoder().decode(bytes));}catch{failure('Uma parte da publicação não contém dados válidos.');}
           const width=part.sheet==='bd'?64:32;
           if(!Array.isArray(value.rows)||value.rows.length!==part.rowCount||value.rows.some(row=>!Array.isArray(row)||row.length!==width||row.some(cell=>cell!==null&&!['string','number','boolean'].includes(typeof cell)||typeof cell==='number'&&!Number.isFinite(cell))))failure('Uma parte da publicação possui linhas inválidas.');
           value.rows.forEach((row,index)=>next[part.sheet][part.firstRow+index]=row);
+          if(!controller.signal.aborted)onProgress({phase:'download',loaded:++loaded,total:parts.length});
         }
       }
-      await Promise.all(Array.from({length:Math.min(4,parts.length)},take));
+      await Promise.all(Array.from({length:Math.min(8,parts.length)},take)).catch(error=>{controller.abort();throw error;});
       engine.validateHeaders(next.bd,'BD');engine.validateHeaders(next.control,'Controle Recebimento');
       revision=manifest.revision;source=next;return source;
     }
-    return {async analyze(manifest,options={}){
-      const rows=await load(manifest),model=engine.analyze(rows.bd,rows.control,options),progress=manifest.progress||{entries:{},revision:'none'};
+    return {async analyze(manifest,options={}, {onProgress=()=>{}}={}){
+      const rows=await load(manifest,onProgress);onProgress({phase:'analysis'});
+      const model=engine.analyze(rows.bd,rows.control,options),progress=manifest.progress||{entries:{},revision:'none'};
       if(typeof progress.revision!=='string'||!progress.entries||typeof progress.entries!=='object'||Array.isArray(progress.entries))failure('O acompanhamento das correções está inválido.');
       await Promise.all((model.correctionGroups||[]).map(async group=>{
         const key=await correctionProgressKey(group,crypto),entry=progress.entries[key];

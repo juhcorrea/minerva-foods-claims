@@ -31,7 +31,7 @@
       maintenanceController?.abort();maintenanceController=null;
       if(pending){const job=pending;pending=null;job.cleanup();job.reject(aborted());}
     }
-    function run(manifest,options,signal){
+    function run(manifest,options,signal,onProgress){
       check(signal);if(workerRevision!==manifest.revision)clear();
       if(pending)clear();
       if(!worker){worker=makeWorker();workerRevision=manifest.revision;}
@@ -40,7 +40,15 @@
         const stop=()=>clear();
         const cleanup=()=>{signal?.removeEventListener('abort',stop);current.removeEventListener('message',message);current.removeEventListener('error',error);};
         const finish=(failure,value)=>{if(pending?.id!==id)return;pending=null;cleanup();failure?reject(failure):resolve(value);};
-        const message=event=>{if(event.data?.id!==id||current!==worker)return;const failure=event.data.error?Object.assign(new Error(event.data.error.message),{status:event.data.error.status,code:event.data.error.code}):null;finish(failure,event.data.model);if(failure)clear();};
+        const message=event=>{
+          if(event.data?.id!==id||current!==worker)return;
+          if(event.data.type==='progress'){
+            const progress=event.data.progress;
+            if(progress?.phase==='analysis'||progress?.phase==='download'&&Number.isInteger(progress.loaded)&&Number.isInteger(progress.total)&&progress.total>0&&progress.total<=768&&progress.loaded>=0&&progress.loaded<=progress.total)onProgress(progress);
+            return;
+          }
+          const failure=event.data.error?Object.assign(new Error(event.data.error.message),{status:event.data.error.status,code:event.data.error.code}):null;finish(failure,event.data.model);if(failure)clear();
+        };
         const error=()=>{finish(new Error('Não foi possível concluir o cálculo no navegador. Atualize a visão e tente novamente.'));if(current===worker){current.terminate();worker=null;workerRevision=null;}};
         pending={id,reject,cleanup};signal?.addEventListener('abort',stop,{once:true});current.addEventListener('message',message);current.addEventListener('error',error);
         try{current.postMessage({id,manifest,options});}catch(failure){finish(failure);clear();}
@@ -66,10 +74,10 @@
         })().finally(()=>{if(maintenanceController===controller)maintenanceController=null;maintenanceTask=null;});
         return maintenanceTask;
       },
-      async load(options,{api,signal}={}){
-        check(signal);const started=epoch,manifest=await api('/api/client-report',{signal});check(signal);if(started!==epoch)throw aborted();
+      async load(options,{api,signal,onProgress=()=>{}}={}){
+        check(signal);onProgress({phase:'manifest'});const started=epoch,manifest=await api('/api/client-report',{signal});check(signal);if(started!==epoch)throw aborted();
         if(!manifest?.revision){clear();return {model:null,revision:null,files:null,updatedAt:null,updatedBy:null};}
-        const model=await run(manifest,options,signal);check(signal);
+        const model=await run(manifest,options,signal,onProgress);check(signal);
         return {model,revision:manifest.revision,files:manifest.files,updatedAt:manifest.updatedAt,updatedBy:manifest.updatedBy,asOf:manifest.asOf};
       },
       async publish(payload,{api,expectedRevision,signal,onProgress=()=>{}}={}){

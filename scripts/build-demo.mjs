@@ -15,7 +15,7 @@ const files = [
   'correction-progress.css', 'correction-impact.css', 'correction-impact.js',
   'powerpoint.js', 'portfolio.css', 'portfolio.js', 'meetings.css',
   'executive-shell.css', 'executive.css', 'executive.js',
-  'claim-control.css', 'claim-control.js', 'calculation-rules.js',
+  'claim-control.css', 'claim-control.js', 'calculation-rules.js', 'fup-export.js',
   'presentation-mode.css', 'presentation-mode.js',
   'section-collapse.css', 'section-collapse.js', 'multi-select.css', 'multi-select.js',
   'saved-views.css', 'saved-views.js',

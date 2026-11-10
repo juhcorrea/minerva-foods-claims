@@ -313,8 +313,28 @@
     const controller = new AbortController();
     reportController = controller;
     const requestVersion = ++loadVersion;
-    let timedOut = false;
-    const timeout = global.setTimeout(() => { timedOut = true; controller.abort(); }, 30000);
+    const browserAnalysis = session.analysisMode === 'browser';
+    let timedOut = false, phase = browserAnalysis ? 'download' : 'server', timeout;
+    const deadline = milliseconds => {
+      global.clearTimeout(timeout);
+      timeout = global.setTimeout(() => { timedOut = true; controller.abort(); }, milliseconds);
+    };
+    deadline(browserAnalysis ? 180000 : 30000);
+    const onProgress = progress => {
+      if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return;
+      const visibleStatus = global.document?.getElementById('sidebarLoadLabel');
+      if (progress.phase === 'analysis') {
+        if (phase !== 'analysis') { phase = 'analysis'; deadline(60000); }
+        if (visibleStatus) visibleStatus.textContent = 'Calculando relatório…';
+        setMessage('Bases conferidas. Calculando o relatório no navegador…');
+      } else if (progress.phase === 'download' && phase === 'download') {
+        if (visibleStatus) visibleStatus.textContent = 'Carregando '+progress.loaded+'/'+progress.total+' partes';
+        setMessage('Carregando a publicação: '+progress.loaded+' de '+progress.total+' partes conferidas…');
+      } else if (progress.phase === 'manifest') {
+        if (visibleStatus) visibleStatus.textContent = 'Conferindo publicação…';
+        setMessage('Conferindo a versão publicada…');
+      }
+    };
     loadingReport = true;
     refreshControls();
     try {
@@ -332,7 +352,7 @@
       if (!payload) {
         if (session.analysisMode === 'browser') {
           if (!global.MinervaClientAnalysis) throw new Error('Atualize a página para carregar o cálculo no navegador.');
-          payload = await global.MinervaClientAnalysis.load(opts, {api, signal:controller.signal});
+          payload = await global.MinervaClientAnalysis.load(opts, {api, signal:controller.signal, onProgress});
         } else payload = await api('/api/report?' + key, {signal:controller.signal});
       }
       if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return false;
@@ -358,7 +378,7 @@
     } catch (error) {
       if (requestVersion !== loadVersion) return false;
       if (error.name === 'AbortError') {
-        if (timedOut) setMessage('A atualização demorou mais de 30 segundos. Tente novamente em Atualizar visão.', true);
+        if (timedOut) setMessage(phase === 'download' ? 'O carregamento das bases ultrapassou 3 minutos. A publicação foi preservada; tente novamente em Atualizar visão.' : phase === 'analysis' ? 'O cálculo no navegador ultrapassou 1 minuto. Tente novamente em Atualizar visão.' : 'A atualização demorou mais de 30 segundos. Tente novamente em Atualizar visão.', true);
         return false;
       }
       if (error.status === 401 || error.status === 403) {
