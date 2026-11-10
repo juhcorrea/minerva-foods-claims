@@ -27,7 +27,7 @@ function harness({role='admin',hosted=true,late=false}={}){
     toolbar=element('section',{id:'teamToolbar',class:'team-toolbar'},main);
     toolbar.innerHTML='<div class="team-account"></div><div class="team-actions"><button id="teamRefresh">Atualizar</button><button id="teamManage">Acessos</button><button id="teamPublish" disabled>Publicar</button></div><div id="teamPublication">Publicação de exemplo</div><p id="teamMessage"></p>';
     document.getElementById('teamManage').hidden=profile?.role!=='admin';document.getElementById('teamPublish').hidden=!['admin','editor'].includes(profile?.role);
-    imports.hidden=profile?.role==='viewer';imports.disabled=imports.hidden;
+    imports.hidden=!['admin','editor'].includes(profile?.role);imports.disabled=imports.hidden;
     document.getElementById('teamPublish').addEventListener('click',()=>callbacks++);
     [imports,document.getElementById('teamManage')].forEach(button=>button.addEventListener('click',()=>{dialogOpened=true;}));
     return toolbar;
@@ -41,11 +41,11 @@ function harness({role='admin',hosted=true,late=false}={}){
   vm.runInNewContext(source,{window,document,URL,console},{filename:'preferences.js'});
   return {...dom,imports,main,actions,retry,addToolbar,get toolbar(){return toolbar;},get callbacks(){return callbacks;},get dialogOpened(){return dialogOpened;},session,setProfile(value){profile=value;session();},notify(){for(const observer of dom.observers.filter(o=>o.active))observer.callback([]);},get:id=>document.getElementById(id)};
 }
-for(const role of ['admin','editor','viewer'])test('profile contains original controls and preserves '+role+' permissions',()=>{
+for(const role of ['admin','editor','reviewer','viewer'])test('profile contains original controls and preserves '+role+' permissions',()=>{
   const h=harness({role}),toolbar=h.toolbar,publish=h.get('teamPublish'),manage=h.get('teamManage');
-  assert.equal(toolbar.parentElement,h.get('profileControls'));assert(!h.main.contains(toolbar));assert.equal(h.imports.parentElement,toolbar.querySelector('.team-actions'));
-  assert.equal(publish.hidden,role==='viewer');assert.equal(manage.hidden,role!=='admin');assert.equal(publish.disabled,true);
-  assert.equal(h.imports.hidden,role==='viewer');assert.equal(h.imports.disabled,role==='viewer');publish.click();assert.equal(h.callbacks,0);
+  assert.equal(toolbar.parentElement,h.get('profileControls'));assert(!h.main.contains(toolbar));assert.equal(h.imports.parentElement,toolbar.querySelector('.team-actions'));if(role==='reviewer')assert.equal(h.get('profileRole').textContent,'Conferente');
+  assert.equal(publish.hidden,!['admin','editor'].includes(role));assert.equal(manage.hidden,role!=='admin');assert.equal(publish.disabled,true);
+  assert.equal(h.imports.hidden,!['admin','editor'].includes(role));assert.equal(h.imports.disabled,!['admin','editor'].includes(role));publish.click();assert.equal(h.callbacks,0);
   publish.disabled=false;publish.click();assert.equal(h.callbacks,1);h.session();assert.equal(h.get('teamPublish'),publish);
   assert.equal(h.document.querySelectorAll('#teamMessage').length,1);assert.equal(h.get('teamPublication').textContent,'Publicação de exemplo');
 });

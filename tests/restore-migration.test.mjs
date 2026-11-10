@@ -60,6 +60,14 @@ test('restore rejects nonempty destination and damaged checksum before any write
   await assert.rejects(restoreMigrationObjects(empty,await pack()),/Confirme explicitamente/);assert.deepEqual(empty.writes,[]);
 });
 
+test('export and restore retain all approved roles and verified Access identity without migrating legacy records',async()=>{
+ const original=fixtures(),acl=original[keys[2]];
+ for(const role of ['admin','reviewer','viewer']){const id='qa-'+role,email=id+'@corp.example';acl.members[id]={id,name:'QA '+role,email,status:'approved',role,requestedAt:stamp,emailVerified:true,identity:{provider:'cloudflare-access',issuer:'https://qa-team.cloudflareaccess.com',subject:id,email}};}
+ const backup=await pack(original),checked=await validateMigrationBackup(backup.manifest,backup.files),destination=new Bucket();
+ await restoreMigrationObjects(destination,checked,{confirmNewEmptyBucket:true});assert.deepEqual(destination.objects.get(keys[2]).value,acl);
+ assert.equal(destination.objects.get(keys[2]).value.members['person-a'].role,'editor');assert.equal(destination.objects.get(keys[2]).value.members['legacy-b'].role,undefined);
+});
+
 test('unknown storage key and credential fields cannot be imported even with a rewritten checksum',async()=>{
   const altered=await pack();altered.manifest.objects[0].key='private/sessions/forged';
   await assert.rejects(restoreMigrationObjects(new Bucket(),altered,{confirmNewEmptyBucket:true}),/desconhecido/);

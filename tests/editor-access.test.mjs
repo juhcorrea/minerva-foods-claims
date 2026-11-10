@@ -90,7 +90,7 @@ test('role changes reject unapproved members, escalation, invalid bodies and mis
  const env=environment(),admin=await login(env),member=await ask(env);
  assert.equal((await setRole(env,admin,member.body.userId,'editor')).status,409);
  await approve(env,admin.cookie,member.body.userId);
- for(const body of [{},{role:'admin'},{role:'owner'},{role:null},{role:1},{role:'editor',approved:true}])assert.equal((await call(env,rolePath(member.body.userId),admin.cookie,{method:'POST',body})).status,400);
+ for(const body of [{},{role:'owner'},{role:null},{role:1},{role:'editor',approved:true}])assert.equal((await call(env,rolePath(member.body.userId),admin.cookie,{method:'POST',body})).status,400);
  assert.equal((await call(env,rolePath(member.body.userId),admin.cookie,{method:'POST',body:{role:'editor'},csrf:false})).status,403);
  assert.equal((await setRole(env,admin,'owner','viewer')).status,400);assert.equal((await setRole(env,admin,'developer','viewer')).status,400);
  assert.equal((await call(env,rolePath(member.body.userId),null,{method:'POST',body:{role:'editor'}})).status,401);
@@ -109,6 +109,49 @@ test('editor downgrade during upload is checked again before committing the snap
  const attempt=await publish(env,member.cookie);assert.equal(attempt.status,403);assert.equal(attempt.body.code,'EDITOR_PERMISSION_CHANGED');
  assert.equal(env.BUCKET.objects.get('private/report-latest-v1.json').text,before);
  assert.equal((await call(env,'/api/report',admin.cookie)).body.revision,existing.body.revision);
+});
+
+test('reviewer marks and unmarks corrections but cannot publish or manage access',async()=>{
+ const env=environment(),admin=await login(env),member=await ask(env,'Conferente QA');await approve(env,admin.cookie,member.body.userId);
+ assert.equal((await setRole(env,member,member.body.userId,'reviewer')).status,403);
+ assert.equal((await setRole(env,admin,member.body.userId,'reviewer')).status,200);
+ assert.equal((await call(env,'/api/session',member.cookie)).body.role,'reviewer');
+ const published=await publish(env,admin.cookie),before=env.BUCKET.objects.get('private/report-latest-v1.json').text;
+ const report=await call(env,'/api/report?years=2025,2026',member.cookie),key=report.body.model.correctionGroups[0].progress.key;
+ const body={key,done:true,reportRevision:published.body.revision,options:{years:[2025,2026]}};
+ assert.equal((await call(env,'/api/correction-progress',member.cookie,{method:'POST',body,csrf:false})).status,403);
+ for(const done of [true,false]){const result=await call(env,'/api/correction-progress',member.cookie,{method:'POST',body:{...body,done}});assert.equal(result.status,200);assert.equal(result.body.progress.done,done);assert.equal(result.body.progress.updatedBy,'Conferente QA');}
+ assert.equal((await publish(env,member.cookie)).status,403);assert.equal((await call(env,'/api/members',member.cookie)).status,403);assert.equal((await call(env,'/api/migration/export',member.cookie)).status,403);
+ assert.equal((await setRole(env,member,member.body.userId,'admin')).status,403);
+ assert.equal(env.BUCKET.objects.get('private/report-latest-v1.json').text,before);
+ const get=env.BUCKET.get.bind(env.BUCKET);let changed=false;
+ env.BUCKET.get=async path=>{if(path==='private/correction-progress-v1.json'&&!changed){changed=true;await setRole(env,admin,member.body.userId,'viewer');}return get(path);};
+ const denied=await call(env,'/api/correction-progress',member.cookie,{method:'POST',body});assert.equal(denied.status,403);assert.equal(denied.body.code,'PERMISSION_CHANGED');assert.equal(JSON.parse(env.BUCKET.objects.get('private/correction-progress-v1.json').text).entries[key].done,false);
+});
+
+test('delegated admins manage approved roles and requests; bootstrap administrators stay protected',async()=>{
+ const env=environment(),admin=await login(env),delegate=await ask(env,'Admin delegado QA'),member=await ask(env,'Pessoa QA');
+ assert.equal((await setRole(env,admin,delegate.body.userId,'admin')).status,409);await approve(env,admin.cookie,delegate.body.userId);await setRole(env,admin,delegate.body.userId,'admin');
+ assert.equal((await call(env,'/api/session',delegate.cookie)).body.role,'admin');assert.equal((await call(env,'/api/members',delegate.cookie)).status,200);
+ assert.equal((await approve(env,delegate.cookie,member.body.userId)).status,200);
+ for(const role of ['reviewer','editor','admin','viewer']){const result=await setRole(env,delegate,member.body.userId,role);assert.equal(result.status,200);assert.equal((await call(env,'/api/session',member.cookie)).body.role,role);}
+ for(const actor of [admin,delegate])for(const id of ['owner','developer']){
+  assert.equal((await setRole(env,actor,id,'viewer')).status,400);
+  assert.equal((await call(env,'/api/members/'+id,actor.cookie,{method:'DELETE',body:{}})).status,400);
+  assert.equal((await call(env,'/api/members/'+id+'/request',actor.cookie,{method:'DELETE',body:{}})).status,400);
+ }
+ await setRole(env,delegate,member.body.userId,'admin');assert.equal((await call(env,'/api/members/'+member.body.userId,delegate.cookie,{method:'DELETE',body:{}})).status,200);await approve(env,delegate.cookie,member.body.userId);assert.equal((await call(env,'/api/session',member.cookie)).body.role,'viewer','Reapproval must not restore delegated administration');
+ const roster=(await call(env,'/api/members',delegate.cookie)).body;assert(roster.audit.some(event=>event.action==='access_role_changed'&&event.actorId===delegate.body.userId));
+ assert.equal((await setRole(env,delegate,delegate.body.userId,'viewer')).status,200);assert.equal((await call(env,'/api/members',delegate.cookie)).status,403);assert.equal((await setRole(env,delegate,delegate.body.userId,'admin')).status,403);
+});
+
+test('ACL conflict retry revalidates the delegated administrator before any target change',async()=>{
+ const env=environment(),admin=await login(env),delegate=await ask(env,'Delegate QA'),member=await ask(env,'Target QA');
+ for(const user of [delegate,member])await approve(env,admin.cookie,user.body.userId);await setRole(env,admin,delegate.body.userId,'admin');
+ const key='private/access-v3.json',put=env.BUCKET.put.bind(env.BUCKET);let raced=false;
+ env.BUCKET.put=async(path,text,options)=>{if(path===key&&!raced){raced=true;assert.equal((await setRole(env,admin,delegate.body.userId,'viewer')).status,200);}return put(path,text,options);};
+ const result=await setRole(env,delegate,member.body.userId,'admin');assert.equal(result.status,403);assert.equal(result.body.code,'PERMISSION_CHANGED');
+ const acl=JSON.parse(env.BUCKET.objects.get(key).text);assert.equal(acl.members[member.body.userId].role,'viewer');assert.equal(acl.members[delegate.body.userId].role,'viewer');assert(acl.admins.owner&&acl.admins.developer);
 });
 
 test('Owner supplemental activation preserves all primary links and isolates rotation',async()=>{

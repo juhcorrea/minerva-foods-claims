@@ -35,7 +35,7 @@
     // The server determines the authentication provider before a URL fragment
     // can activate the legacy Sites flow. Access never exchanges that token.
     if (!accessProvider && activationToken) { pending = false; show('Activate'); return; }
-    if (session.approved && ['admin', 'editor', 'viewer'].includes(session.role)) { location.replace('/'); return; }
+    if (session.approved && ['admin', 'editor', 'reviewer', 'viewer'].includes(session.role)) { location.replace('/'); return; }
     pending = session.status === 'pending' || session.role === 'pending';
     if (pending) {
       $('pendingName').textContent = session.name || 'Sua solicitação';

@@ -111,14 +111,14 @@ test('anonymous and unapproved sessions cannot retrieve report assets directly, 
  assert.equal(f.network.length,0);
 });
 
-test('approved administrators, editors and viewers can load every report asset',async()=>{
+test('approved administrators, editors, reviewers and viewers can load every report asset',async()=>{
  const f=fixture();
- for(const role of ['admin','editor','viewer'])for(const path of privatePaths){
-  const response=await f.request(path,{session:session(role)});
+ for(const role of ['admin','editor','reviewer','viewer'])for(const path of privatePaths)for(const method of ['GET','HEAD']){
+  const response=await f.request(path,{session:session(role)},method);
   assert.equal(response.status,200,`${role}: ${path}`);
-  assert.equal(await response.text(),privateMarker);
+  assert.equal(await response.text(),method==='HEAD'?'':privateMarker);
  }
- assert.equal(f.calls.length,3*privatePaths.length);
+ assert.equal(f.calls.length,4*privatePaths.length*2);
 });
 
 test('access form, brand assets and its font remain public without session lookups',async()=>{
@@ -146,9 +146,11 @@ test('home and index preserve the login screen until the report session is appro
    assert.equal(response.status,200);
    assert.equal(await response.text(),accessMarker);
   }
-  const response=await f.request(path,{session:session('viewer')});
-  assert.equal(response.status,200);
-  assert.equal(await response.text(),privateMarker);
+  for(const role of ['viewer','reviewer'])for(const method of ['GET','HEAD']){
+   const response=await f.request(path,{session:session(role)},method);
+   assert.equal(response.status,200);
+   assert.equal(await response.text(),method==='HEAD'?'':privateMarker);
+  }
  }
 });
 

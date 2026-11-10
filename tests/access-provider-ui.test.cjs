@@ -67,3 +67,7 @@ test('team logout clears the report before safe Access or legacy navigation',asy
     assert.equal(calls[0].path,'/api/auth/logout');assert.equal(calls[0].options.method,'POST');assert.deepEqual(calls.slice(1),['locked',expected]);
   }
 });
+
+for(const role of ['admin','editor','reviewer','viewer'])test('approved '+role+' reaches the dashboard and a pending role never does',async()=>{
+ const approved=harness({session:accessSession({status:'approved',approved:true,role})});await approved.settle();assert.deepEqual(approved.redirects,[{method:'replace',path:'/'}]);const pending=harness({session:accessSession({status:'pending',approved:false,role})});await pending.settle();assert.deepEqual(pending.redirects,[]);
+});

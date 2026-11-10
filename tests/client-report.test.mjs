@@ -173,6 +173,44 @@ test('admin backup contains originals and source, revision-bound progress never 
  await f.publish(input(),published.revision);
  assert.equal((await f.call('/api/correction-progress',{cookie:f.admin,method:'POST',body:{key,done:false,reportRevision:published.revision}})).body.code,'REPORT_CHANGED');assert.equal(f.analyses(),0);
 });
+
+test('browser reviewer only updates progress; delegated admin can backup and loses rights on the live ACL',async()=>{
+ const f=await fixture(),published=await f.publish(),member=await f.call('/api/auth/request',{method:'POST',body:{name:'QA Roles',email:'qa-roles@corp.example'}}),path='/api/members/'+member.body.userId;
+ await f.call(path+'/approve',{cookie:f.admin,method:'POST',body:{}});await f.call(path+'/role',{cookie:f.admin,method:'POST',body:{role:'reviewer'}});
+ const manifest=(await f.call('/api/client-report',{cookie:member.cookie})).body,key='8'.repeat(64),body={key,done:true,reportRevision:published.revision};
+ for(const done of [true,false]){const saved=await f.call('/api/correction-progress',{cookie:member.cookie,method:'POST',body:{...body,done}});assert.equal(saved.status,200);assert.equal(saved.body.progress.done,done);}
+ assert.equal((await f.call('/api/correction-progress',{cookie:member.cookie,method:'POST',body,csrf:false})).status,403);
+ for(const route of ['/api/client-report/start','/api/client-report/cleanup','/api/client-report/'+published.revision+'/parts','/api/client-report/'+published.revision+'/commit','/api/client-report/upgrade/start','/api/client-report/upgrade/part','/api/client-report/upgrade/commit','/api/report',path+'/role'])assert.equal((await f.call(route,{cookie:member.cookie,method:'POST',body:{}})).status,403,route);
+ for(const route of ['/api/members','/api/client-report/backup','/api/client-report/backup-source?part=0',manifest.parts[0].url+'&original=1'])assert.equal((await f.call(route,{cookie:member.cookie})).status,403,route);
+ await f.call(path+'/role',{cookie:f.admin,method:'POST',body:{role:'admin'}});
+ for(const route of ['/api/members','/api/client-report/backup','/api/client-report/backup-source?part=0',manifest.parts[0].url+'&original=1'])assert.equal((await f.call(route,{cookie:member.cookie})).status,200,route);
+ const get=f.env.BUCKET.get.bind(f.env.BUCKET);let changed=false;
+ f.env.BUCKET.get=async route=>{if(route==='private/client-report-v2.json'&&!changed){changed=true;await f.call(path+'/role',{cookie:f.admin,method:'POST',body:{role:'editor'}});}return get(route);};
+ assert.equal((await f.call('/api/client-report/backup',{cookie:member.cookie})).status,403,'Admin downgraded while collecting a backup must not receive it');
+ assert.equal((await f.start(input(),published.revision,member.cookie)).status,201,'Legacy editor publication remains available');assert.equal(f.analyses(),0);
+});
+
+test('browser progress and publication revalidate roles immediately before commits',async()=>{
+ for(const operation of ['progress','publish']){
+  const f=await fixture(),published=await f.publish(),member=await f.call('/api/auth/request',{method:'POST',body:{name:'QA Race',email:'qa-race@corp.example'}}),path='/api/members/'+member.body.userId;
+  await f.call(path+'/approve',{cookie:f.admin,method:'POST',body:{}});await f.call(path+'/role',{cookie:f.admin,method:'POST',body:{role:operation==='progress'?'reviewer':'admin'}});
+  let upload;if(operation==='publish'){upload=(await f.start(input(),published.revision,member.cookie)).body.uploadId;for(const sheet of ['bd','control'])await f.part(upload,sheet,input()[sheet],0,0,member.cookie);}
+  const get=f.env.BUCKET.get.bind(f.env.BUCKET),before=f.env.BUCKET.objects.get('private/client-report-v2.json').text;let changed=false;
+  const trigger=operation==='progress'?'private/correction-progress-v1.json':'private/client-staging/'+upload+'.json';
+  f.env.BUCKET.get=async route=>{if(route===trigger&&!changed){changed=true;await f.call(path+'/role',{cookie:f.admin,method:'POST',body:{role:'viewer'}});}return get(route);};
+  const result=operation==='progress'?await f.call('/api/correction-progress',{cookie:member.cookie,method:'POST',body:{key:'7'.repeat(64),done:true,reportRevision:published.revision}}):await f.commit(upload,member.cookie);
+  assert.equal(result.status,403);assert.equal(result.body.code,'PERMISSION_CHANGED');assert.equal(f.env.BUCKET.objects.get('private/client-report-v2.json').text,before);assert.equal(f.env.BUCKET.objects.has('private/correction-progress-v1.json'),false);
+ }
+});
+
+test('projection upgrade requires current admin even when a demotion preserves editor publication',async()=>{
+ const f=await fixture(),old=await oldProjection(f),member=await f.call('/api/auth/request',{method:'POST',body:{name:'QA Upgrade',email:'qa-upgrade@corp.example'}}),path='/api/members/'+member.body.userId;
+ await f.call(path+'/approve',{cookie:f.admin,method:'POST',body:{}});await f.call(path+'/role',{cookie:f.admin,method:'POST',body:{role:'admin'}});
+ await upgrade(f,'start',{},member.cookie);for(let part=0;part<old.parts.length;part++)assert.equal((await upgrade(f,'part',{revision:old.revision,part},member.cookie)).status,200);
+ const get=f.env.BUCKET.get.bind(f.env.BUCKET);let changed=false;
+ f.env.BUCKET.get=async route=>{if(route.endsWith('/projection-3-upgrade.json')&&!changed){changed=true;await f.call(path+'/role',{cookie:f.admin,method:'POST',body:{role:'editor'}});}return get(route);};
+ assert.equal((await upgrade(f,'commit',{revision:old.revision},member.cookie)).status,403);assert.equal(JSON.parse(f.env.BUCKET.objects.get('private/client-report-v2.json').text).projectionVersion,2);
+});
 test('projection retains row presence while excluding unused values',()=>{
  for(const [sheet,width,marker] of [['bd',64,2],['control',32,4]]){
   const row=Array(width).fill(null);row[marker]='private content';const projected=projectClientRows(sheet,[row],1)[0];assert.equal(projected[marker],true);assert(!JSON.stringify(projected).includes('private content'));assert.equal(projected.length,width);

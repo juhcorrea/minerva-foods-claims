@@ -3,7 +3,8 @@
 
   const displayName = identity => String(identity?.name || identity?.label || identity?.email || 'Pessoa autorizada');
   const accessStatus = identity => identity?.status || (identity?.approved === true ? 'approved' : 'pending');
-  const isApprovedSession = identity => Boolean(identity?.authenticated && identity?.approved === true && ['admin','editor','viewer'].includes(identity?.role) && !['pending','revoked','rejected','denied'].includes(identity?.status));
+  const isApprovedSession = identity => Boolean(identity?.authenticated && identity?.approved === true && ['admin','editor','reviewer','viewer'].includes(identity?.role) && !['pending','revoked','rejected','denied'].includes(identity?.status));
+  const roleLabel = role => ({admin:'Admin',editor:'Atualizar bases',reviewer:'Conferente',viewer:'Consulta'})[role] || 'Consulta';
   const publicProfile = identity => isApprovedSession(identity) ? {name:displayName(identity), email:String(identity.email || ''), role:identity.role} : null;
   const logoutDestination = result => result?.logoutUrl === '/cdn-cgi/access/logout' ? '/cdn-cgi/access/logout' : '/';
   const escapeHTML = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]));
@@ -46,7 +47,7 @@
   }
   // Pure helpers are available to local Node checks; hosted behavior never starts there.
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {displayName, accessStatus, isApprovedSession, publicProfile, logoutDestination, escapeHTML, reportQuery, createReportCache};
+    module.exports = {displayName, accessStatus, isApprovedSession, publicProfile, roleLabel, logoutDestination, escapeHTML, reportQuery, createReportCache};
     return;
   }
   if (global.MINERVA_HOSTED !== true) return;
@@ -54,6 +55,7 @@
   const app = global.MinervaApp;
   const $ = id => document.getElementById(id);
   let session = null;
+  let sessionVersion = 0;
   let publishing = false;
   let loadingReport = false;
   let reportController = null;
@@ -69,7 +71,7 @@
   function updateProfile() {
     const profile = publicProfile(session);
     if ($('teamEmail')) $('teamEmail').textContent = profile ? profile.name : '';
-    if ($('teamRole')) $('teamRole').textContent = profile ? profile.role === 'admin' ? profile.name === 'Desenvolvimento' ? 'Acesso administrativo' : 'Administradora · publica as atualizações' : profile.role === 'editor' ? 'Atualizar bases · publica as atualizações' : 'Consulta · relatório compartilhado' : '';
+    if ($('teamRole')) $('teamRole').textContent = profile ? roleLabel(profile.role) + ' · ' + ({admin:'bases, correções e acessos',editor:'publica bases e marca correções',reviewer:'marca e desmarca correções',viewer:'relatório compartilhado'})[profile.role] : '';
     document.dispatchEvent(new CustomEvent('minerva:session-updated', {detail:profile}));
   }
   function timestamp(value) {
@@ -120,7 +122,7 @@
     members.id = 'teamMembersDialog';
     members.className = 'team-members-dialog';
     members.setAttribute('aria-labelledby', 'teamMembersTitle');
-    members.innerHTML = '<div class="dialog-heading"><div><span class="section-kicker">COMPARTILHAMENTO DO RELATÓRIO</span><h2 id="teamMembersTitle">Controlar acessos</h2></div><button id="teamCloseMembers" class="icon-button" type="button" aria-label="Fechar controle de acessos">×</button></div><p class="team-member-intro">Compartilhe o link normal do relatório. Cada pessoa informa o nome e solicita acesso; confira o nome e o código do pedido antes de aprovar. O acesso começa como Consulta. Depois da aprovação, você pode liberar Atualizar bases para quem também deve publicar as planilhas.</p><div id="teamAdminsList" class="team-admins-list"></div><div class="team-requests-tip"><span>Backup privado para migração: código, bases publicadas, correções e perfis. Sem credenciais ou sessões antigas.</span><button id="teamDownloadMigration" class="button button-outline" type="button" hidden>Baixar backup privado</button></div><div class="team-requests-tip"><span>Atualizar bases permite importar, publicar e marcar correções. Somente a administração controla os acessos. Confira o nome e o código do pedido antes de aprovar.</span><button id="teamRefreshMembers" class="button button-outline" type="button">Atualizar pedidos</button></div><p id="teamMemberMessage" class="team-message" role="status" aria-live="polite"></p><div id="teamMembersList" class="team-members-list"></div>';
+    members.innerHTML = '<div class="dialog-heading"><div><span class="section-kicker">COMPARTILHAMENTO DO RELATÓRIO</span><h2 id="teamMembersTitle">Controlar acessos</h2></div><button id="teamCloseMembers" class="icon-button" type="button" aria-label="Fechar controle de acessos">×</button></div><p class="team-member-intro">Compartilhe o link normal do relatório. Cada pessoa informa o nome e solicita acesso; confira o nome e o código do pedido antes de aprovar. A aprovação libera Consulta. Depois, escolha o perfil e clique em Aplicar.</p><div id="teamAdminsList" class="team-admins-list"></div><div class="team-requests-tip"><span>Backup privado para migração: código, bases publicadas, correções e perfis. Sem credenciais ou sessões antigas.</span><button id="teamDownloadMigration" class="button button-outline" type="button" hidden>Baixar backup privado</button></div><div class="team-requests-tip"><span>Admin gerencia bases, correções e acessos. Atualizar bases importa, publica e marca correções. Conferente somente marca e desmarca Já ajustei. Consulta visualiza o relatório.</span><button id="teamRefreshMembers" class="button button-outline" type="button">Atualizar pedidos</button></div><p id="teamMemberMessage" class="team-message" role="status" aria-live="polite"></p><div id="teamMembersList" class="team-members-list"></div>';
     body.append(members);
     $('teamCloseMembers').addEventListener('click', () => members.close());
     $('teamMembersList').addEventListener('click', changeMemberAccess);
@@ -149,7 +151,9 @@
     const opts = options || {};
     stopSessionWatch();
     session = null;
+    sessionVersion++;
     reportCache.clear();
+    sessionCheckInFlight = false;
     global.MinervaClientAnalysis?.clear();
     global.MinervaClientBackup?.clear();
     updateProfile();
@@ -158,7 +162,7 @@
     if ($('sidebarUpdatedBy')) $('sidebarUpdatedBy').textContent = '';
     if (reportController) reportController.abort();
     ++loadVersion; reportController = null; loadingReport = false;
-    body.classList.remove('team-session-pending', 'team-authenticated', 'team-admin', 'team-editor', 'team-viewer');
+    body.classList.remove('team-session-pending', 'team-authenticated', 'team-admin', 'team-editor', 'team-reviewer', 'team-viewer');
     body.classList.add('team-denied');
     $('teamGate').hidden = false;
     $('teamGateTitle').textContent = title;
@@ -167,6 +171,8 @@
     $('teamChangeAccount').hidden = !opts.changeAccount;
     $('teamRetrySession').hidden = !opts.retry;
     if ($('teamMembersDialog')?.open) $('teamMembersDialog').close();
+    $('teamMembersList')?.replaceChildren();
+    $('teamAdminsList')?.replaceChildren();
     if ($('importDialog')?.open) $('importDialog').close();
     if ($('detailDialog')?.open) $('detailDialog').close();
     if (app) {
@@ -195,9 +201,10 @@
     lastSessionCheckAt = Date.now();
     const currentUser = session.userId;
     const currentRole = session.role;
+    const version = sessionVersion;
     try {
       const result = await api('/api/session');
-      if (!session?.approved) return;
+      if (version !== sessionVersion || !session?.approved) return;
       if (!isApprovedSession(result)) {
         const pending = accessStatus(result) === 'pending';
         lockGate(pending ? 'Seu pedido está aguardando aprovação.' : 'Seu acesso foi encerrado.', pending ? 'A administração precisa aprovar sua solicitação para continuar.' : 'O acesso expirou ou foi revogado. Volte à entrada para consultar sua situação.', {login:true, changeAccount:Boolean(result.authenticated), retry:pending});
@@ -205,11 +212,12 @@
         lockGate('O acesso deste navegador mudou.', 'Volte à entrada para abrir o painel com o acesso atual.', {login:true, changeAccount:true});
       } else {session = result;updateProfile();}
     } catch (error) {
+      if (version !== sessionVersion) return;
       if (error.status === 401 || error.status === 403) {
         lockGate('Seu acesso foi encerrado.', error.message, {login:true, changeAccount:true});
       }
       // A temporary network failure does not trigger a retry loop or reload data.
-    } finally { sessionCheckInFlight = false; }
+    } finally { if (version === sessionVersion) sessionCheckInFlight = false; }
   }
 
   async function api(path, options) {
@@ -251,6 +259,7 @@
 
   function hasDraft() { return Boolean(app?.state.bd || app?.state.control); }
   function canUpdateBases() { return ['admin','editor'].includes(session?.role); }
+  function canMarkProgress() { return Boolean(session?.approved && ['admin','editor','reviewer'].includes(session.role)); }
   function startClientMaintenance() {
     if (session?.analysisMode !== 'browser' || !canUpdateBases()) return;
     void global.MinervaClientAnalysis?.maintain?.({api, allowed:() => Boolean(session?.approved && session.analysisMode === 'browser' && canUpdateBases())});
@@ -296,7 +305,7 @@
     if ($('emptyState')) $('emptyState').hidden = false;
     if ($('exportReport')) $('exportReport').disabled = true;
     if ($('exportCorrections')) $('exportCorrections').disabled = true;
-    if (session.role === 'viewer') {
+    if (!canUpdateBases()) {
       $('emptyState').innerHTML = '<div class="team-awaiting"><span class="section-kicker">RELATÓRIO COMPARTILHADO</span><h2>Nenhum relatório publicado.</h2><p>Aguarde a publicação das planilhas pela administração. A última versão ficará disponível aqui para toda a equipe autorizada.</p><button id="teamEmptyRefresh" class="button button-outline" type="button">Verificar atualização</button></div>';
       $('teamEmptyRefresh').addEventListener('click', () => loadReport(app.getOptions()));
     }
@@ -413,7 +422,7 @@
 
   async function publishReport() {
     if (!publishable() || publishing) return;
-    const opts = app.getOptions();
+    const opts = app.getOptions(),version=sessionVersion;
     if (!opts.asOf) { setMessage('Informe a data da análise antes de publicar.', true); return; }
     const payload = {
       bd:app.state.bd, control:app.state.control,
@@ -430,6 +439,7 @@
         if (!global.MinervaClientAnalysis) throw new Error('Atualize a página antes de publicar as bases.');
         saved = await global.MinervaClientAnalysis.publish(payload, {api, expectedRevision, onProgress:({sent,total})=>setMessage('Publicando as bases: '+sent+' de '+total+' partes…')});
       } else saved = await api('/api/report', {method:'POST', headers:{'If-Match':'"' + expectedRevision + '"'}, body:JSON.stringify(payload)});
+      if(version!==sessionVersion||!session?.approved||!canUpdateBases())return;
       reportCache.clear();
       publishedMeta = saved;
       session.reportMeta = saved;
@@ -440,9 +450,10 @@
       if ($('controlFileInfo')) $('controlFileInfo').textContent = 'Nenhum arquivo selecionado';
       if ($('runAnalysis')) $('runAnalysis').disabled = true;
       const loaded = await loadReport(opts);
+      if(version!==sessionVersion||!session?.approved||!canUpdateBases())return;
       startClientMaintenance();
       setMessage(loaded ? 'Atualização publicada. Toda a equipe autorizada já pode consultar esta versão.' : 'A atualização foi publicada, mas não foi possível recarregar a visão. Clique em Atualizar visão para tentar novamente.', !loaded);
-    } catch (error) { setMessage(error.message, true); }
+    } catch (error) { if(version===sessionVersion&&session?.approved)setMessage(error.message, true); }
     finally { publishing = false; refreshControls(); }
   }
 
@@ -455,19 +466,19 @@
     if (member.email) detail.push(String(member.email));
     const when = status === 'pending' ? member.requestedAt || member.createdAt : status === 'approved' ? member.approvedAt || member.grantedAt : member.revokedAt || member.rejectedAt || member.updatedAt;
     if (when) detail.push(timestamp(when));
-    if (status === 'approved') detail.push(member.role === 'editor' ? 'Atualizar bases' : 'Consulta');
+    if (status === 'approved') detail.push(roleLabel(member.role));
     const attrs = ' data-member-id="' + escapeHTML(id) + '" data-member-name="' + escapeHTML(name) + '"';
     let actions = '';
     if (id && status === 'pending') {
       actions = '<button class="button button-primary team-approve" type="button" data-member-action="approve"' + attrs + ' aria-label="Aprovar acesso de ' + escapeHTML(name) + '">Aprovar</button><button class="button team-revoke" type="button" data-member-action="reject"' + attrs + ' aria-label="Rejeitar pedido de ' + escapeHTML(name) + '">Rejeitar</button>';
-    } else if (id && status === 'approved' && member.role !== 'admin') {
-      actions = '<label class="team-member-role">Tipo de acesso<select data-member-role aria-label="Tipo de acesso de ' + escapeHTML(name) + '"><option value="viewer"' + (member.role !== 'editor' ? ' selected' : '') + '>Consulta</option><option value="editor"' + (member.role === 'editor' ? ' selected' : '') + '>Atualizar bases</option></select></label><button class="button button-outline" type="button" data-member-action="role"' + attrs + ' aria-label="Aplicar tipo de acesso de ' + escapeHTML(name) + '">Aplicar</button><button class="button team-revoke" type="button" data-member-action="revoke" ' + attrs + ' aria-label="Revogar acesso de ' + escapeHTML(name) + '">Revogar acesso</button>';
-    } else if (id && ['revoked','rejected'].includes(status) && member.role !== 'admin') {
+    } else if (id && status === 'approved') {
+      actions = '<label class="team-member-role">Tipo de acesso<select data-member-role aria-label="Tipo de acesso de ' + escapeHTML(name) + '">' + ['viewer','reviewer','editor','admin'].map(role=>'<option value="'+role+'"'+(member.role===role?' selected':'')+'>'+roleLabel(role)+'</option>').join('') + '</select></label><button class="button button-outline" type="button" data-member-action="role"' + attrs + ' aria-label="Aplicar tipo de acesso de ' + escapeHTML(name) + '">Aplicar</button><button class="button team-revoke" type="button" data-member-action="revoke" ' + attrs + ' aria-label="Revogar acesso de ' + escapeHTML(name) + '">Revogar acesso</button>';
+    } else if (id && ['revoked','rejected'].includes(status)) {
       actions = '<span class="badge neutral">' + escapeHTML(status === 'rejected' || !member.approvedAt ? 'Rejeitado' : 'Revogado') + '</span><button class="button button-outline team-approve" type="button" data-member-action="approve"' + attrs + ' aria-label="Liberar novamente o acesso de ' + escapeHTML(name) + '">Liberar novamente</button>';
     } else {
       actions = '<span class="badge neutral">' + escapeHTML(status === 'rejected' || !member.approvedAt ? 'Rejeitado' : 'Revogado') + '</span>';
     }
-    if (id && ['pending','revoked','rejected'].includes(status) && member.role !== 'admin') {
+    if (id && ['pending','revoked','rejected'].includes(status)) {
       actions += '<button class="button team-delete-request" type="button" data-member-action="delete"' + attrs + ' aria-label="Excluir solicitação de ' + escapeHTML(name) + '">Excluir solicitação</button>';
     }
     return '<div class="team-member-row' + (['revoked','rejected'].includes(status) ? ' is-revoked' : '') + '"><div><strong>' + escapeHTML(name) + '</strong><span>' + escapeHTML(detail.join(' · ')) + '</span></div><div class="team-member-actions">' + actions + '</div></div>';
@@ -479,7 +490,7 @@
     $('teamAdminsList').innerHTML = admins.map(admin => '<div class="team-admin-fixed"><div><strong>' + escapeHTML(displayName(admin)) + '</strong><span>' + (admin.id === 'developer' ? 'Acesso administrativo · apoio técnico' : 'Administradora · responsável pelo setor') + '</span></div><span class="badge">Administração</span></div>').join('');
     const lists = {pending:[], approved:[], closed:[]};
     for (const member of members) {
-      if (member.role === 'admin') continue;
+      if (admins.some(admin=>String(admin.id)===String(member.id))) continue;
       const status = accessStatus(member);
       if (status === 'pending') lists.pending.push(member);
       else if (status === 'approved') lists.approved.push(member);
@@ -489,8 +500,9 @@
     $('teamMembersList').innerHTML = section('Solicitações pendentes', lists.pending, 'pending', 'Nenhuma solicitação aguardando aprovação.') + section('Acessos liberados', lists.approved, 'approved', 'Ainda não há acessos liberados.') + (lists.closed.length ? '<details class="team-closed-accesses"' + (historyOpen ? ' open' : '') + '><summary>Pedidos rejeitados e acessos revogados (' + lists.closed.length + ')</summary>' + section('Histórico de acessos', lists.closed, null, '') + '</details>' : '');
   }
   async function loadMembers() {
+    const version=sessionVersion;
     const payload = await api('/api/members');
-    renderMembers(payload);
+    if(version===sessionVersion&&session?.role==='admin')renderMembers(payload);
     return payload;
   }
   async function refreshMemberList() {
@@ -504,6 +516,7 @@
   }
   async function downloadMigration() {
     if (session?.role !== 'admin') return;
+    const version=sessionVersion,stillAdmin=()=>version===sessionVersion&&session?.approved&&session.role==='admin';
     const button = $('teamDownloadMigration');
     if (button.disabled) return;
     button.disabled = true;
@@ -512,16 +525,19 @@
       if (session.analysisMode === 'browser') {
         if (!global.MinervaClientBackup) throw new Error('Atualize a página para preparar o backup no navegador.');
         await global.MinervaClientBackup.download({onProgress:memberMessage});
+        if(!stillAdmin())return;
         memberMessage('Download iniciado. Guarde o ZIP em local privado: ele contém os dados reais e as instruções de restauração.');
         return;
       }
       const result = await fetch('/api/migration/export', {credentials:'same-origin', cache:'no-store', headers:{Accept:'application/zip'}});
+      if(!stillAdmin())return;
       if (!result.ok) {
         const payload = await result.json().catch(() => null);
         throw new Error(payload?.error || 'Não foi possível preparar o backup privado. Confira seu acesso administrativo e tente novamente.');
       }
       if (!/^application\/zip(?:;|$)/i.test(result.headers.get('content-type') || '')) throw new Error('O download não retornou um ZIP válido. Atualize a página e tente novamente.');
       const blob = await result.blob();
+      if(!stillAdmin())return;
       if (!blob.size) throw new Error('O backup retornou vazio. Tente novamente.');
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -534,7 +550,7 @@
       global.setTimeout(() => URL.revokeObjectURL(url), 60000);
       memberMessage('Download iniciado. Guarde o ZIP em local privado: ele contém os dados reais e as instruções de restauração.');
     } catch (error) {
-      memberMessage(error.message || 'Não foi possível baixar o backup privado. Tente novamente.', true);
+      if(stillAdmin())memberMessage(error.message || 'Não foi possível baixar o backup privado. Tente novamente.', true);
     } finally {
       button.disabled = false;
     }
@@ -551,11 +567,12 @@
     const id = button.dataset.memberId;
     const name = button.dataset.memberName || 'esta pessoa';
     const action = button.dataset.memberAction;
+    const version=sessionVersion;
     if (!id || !['approve','reject','revoke','role','delete'].includes(action)) return;
     if (action === 'delete' && !global.confirm('Excluir permanentemente a solicitação de ' + name + '?\n\nEla será removida da lista e do histórico de solicitações. A pessoa poderá enviar um novo pedido de acesso.')) return;
     const actions = button.closest('.team-member-actions');
     const selectedRole = actions?.querySelector('[data-member-role]')?.value;
-    if (action === 'role' && !['viewer','editor'].includes(selectedRole)) return;
+    if (action === 'role' && !['admin','editor','reviewer','viewer'].includes(selectedRole)) return;
     const buttons = actions?.querySelectorAll('button,select') || [button];
     buttons.forEach(item => { item.disabled = true; });
     memberMessage(action === 'delete' ? 'Excluindo solicitação…' : action === 'role' ? 'Atualizando a permissão…' : action === 'approve' ? 'Liberando acesso…' : action === 'reject' ? 'Rejeitando solicitação…' : 'Revogando acesso…');
@@ -565,9 +582,16 @@
       else if (action === 'role') await api('/api/members/' + encodeURIComponent(id) + '/role', {method:'POST', body:JSON.stringify({role:selectedRole})});
       else if (action === 'approve') await api('/api/members/' + encodeURIComponent(id) + '/approve', {method:'POST', body:'{}'});
       else await api('/api/members/' + encodeURIComponent(id), {method:'DELETE'});
+      if(version!==sessionVersion||session?.role!=='admin')return;
+      if(id===session.userId&&(action==='revoke'||action==='role'&&selectedRole!=='admin')){
+        lockGate('Seu perfil de acesso mudou.', 'Entre novamente para usar o painel com a permissão atual.', {login:true,changeAccount:true});
+        return;
+      }
       await loadMembers();
-      memberMessage(action === 'delete' ? 'Solicitação de ' + name + ' excluída.' : action === 'role' ? 'Permissão de ' + name + ' alterada para ' + (selectedRole === 'editor' ? 'Atualizar bases' : 'Consulta') + '.' : action === 'approve' ? 'Acesso liberado para ' + name + '.' : action === 'reject' ? 'Solicitação de ' + name + ' rejeitada.' : 'Acesso de ' + name + ' revogado.');
+      if(version!==sessionVersion||session?.role!=='admin')return;
+      memberMessage(action === 'delete' ? 'Solicitação de ' + name + ' excluída.' : action === 'role' ? 'Permissão de ' + name + ' alterada para ' + roleLabel(selectedRole) + '.' : action === 'approve' ? 'Acesso liberado para ' + name + '.' : action === 'reject' ? 'Solicitação de ' + name + ' rejeitada.' : 'Acesso de ' + name + ' revogado.');
     } catch (error) {
+      if(version!==sessionVersion||session?.role!=='admin')return;
       memberMessage(deleted ? 'A solicitação foi excluída, mas não foi possível recarregar a lista. Clique em Atualizar pedidos.' : error.message, true);
       if (!deleted) buttons.forEach(item => { item.disabled = false; });
     }
@@ -620,14 +644,15 @@
         return;
       }
       session = result;
+      sessionVersion++;
       lastSessionCheckAt = Date.now();
       startSessionWatch();
       publishedMeta = session.reportMeta || null;
       body.classList.remove('team-session-pending', 'team-denied');
-      body.classList.add('team-authenticated', result.role === 'admin' ? 'team-admin' : result.role === 'editor' ? 'team-editor' : 'team-viewer');
+      body.classList.add('team-authenticated', result.role === 'admin' ? 'team-admin' : result.role === 'editor' ? 'team-editor' : result.role === 'reviewer' ? 'team-reviewer' : 'team-viewer');
       $('teamGate').hidden = true;
       updateProfile();
-      if (result.role === 'viewer') {
+      if (!canUpdateBases()) {
         app.state.bd = app.state.control = null;
         ['openImports','emptyImport','demoButton','runAnalysis','clearFiles','bdFile','controlFile'].forEach(id => { const el = $(id); if (el) { el.hidden = true; el.disabled = true; } });
       }
@@ -645,7 +670,7 @@
   }
 
   async function setCorrectionProgress(payload){
-    if(!canUpdateBases()||hasDraft())throw new Error('As marcações exigem permissão para atualizar bases e uma versão publicada.');
+    if(!canMarkProgress()||hasDraft())throw new Error('As marcações exigem perfil Admin, Atualizar bases ou Conferente e uma versão publicada.');
     reportCache.clear();
     return api('/api/correction-progress',{method:'POST',body:JSON.stringify(payload)});
   }

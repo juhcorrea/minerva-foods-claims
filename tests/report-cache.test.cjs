@@ -123,7 +123,7 @@ for(const kind of ['revoked session','aborted request'])test('a resolved metadat
 test('cache retains only two models, clears old publications and supports explicit refresh/logout clearing',()=>{
  const c=createReportCache();c.put('a',payload());c.put('b',payload());c.put('c',payload());assert.equal(c.get('a'),undefined);
  c.put('d',payload('r2'));assert.equal(c.get('b'),undefined);assert.equal(c.get('c'),undefined);c.clear();assert.equal(c.get('d'),undefined);
- assert.match(source,/session = null;\s*reportCache.clear\(\)/);assert.match(source,/refresh:\(\) => \{reportCache.clear\(\)/);
+ assert.match(source,/session = null;\s*sessionVersion\+\+;\s*reportCache.clear\(\)/);assert.match(source,/refresh:\(\) => \{reportCache.clear\(\)/);
 });
 
 test('projection changes invalidate and replace all models even when report revision and dates stay unchanged',()=>{

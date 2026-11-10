@@ -18,7 +18,7 @@ export function projectClientRows(sheet,rows,firstRow=0){
 }
 
 export function createClientReportHandler(deps){
- const {engine,now,fail,response,readBody,jsonObject,putConditional,hashToken,stamp,uuid,actorLabel,confirmEditorPermission,readCorrectionProgress,correctionProgressRevision,publicCorrectionProgress,migrationSource,readAcl}=deps;
+ const {engine,now,fail,response,readBody,jsonObject,putConditional,hashToken,stamp,uuid,actorLabel,confirmMutationPermission,readCorrectionProgress,correctionProgressRevision,publicCorrectionProgress,migrationSource,readAcl}=deps;
  const REPORT='private/client-report-v2.json',PROGRESS='private/correction-progress-v1.json';
  const MAX_PART=65536,MAX_TOTAL=20*1024*1024,MAX_PARTS=768,MAX_CELLS=1500000;
  const actorOf=access=>access.admin||access.member;
@@ -64,7 +64,7 @@ export function createClientReportHandler(deps){
   const found=await jsonObject(bucket,upgradeKey(saved.revision));
   if(found.value){const state=await upgradeState(bucket,saved.revision);return response(upgradeResult(state.value,state.stage));}
   const stage={schemaVersion:1,revision:saved.revision,targetVersion:CLIENT_REPORT_PROJECTION_VERSION,expectedEtag:current.etag,createdAt:stamp(),hashes:[]};
-  await confirmEditorPermission(bucket,access);
+  await confirmMutationPermission(bucket,access,['admin']);
   if(!await putConditional(bucket,upgradeKey(saved.revision),stage,null)){const state=await upgradeState(bucket,saved.revision);return response(upgradeResult(state.value,state.stage));}
   return response(upgradeResult(saved,stage),201);
  }
@@ -85,9 +85,10 @@ export function createClientReportHandler(deps){
   let rows;try{rows=JSON.parse(original).rows;}catch{fail(503,'REPORT_INVALID','A parte original da base precisa ser conferida.');}
   if(!Array.isArray(rows)||rows.length!==part.rowCount||rows.some(row=>!Array.isArray(row)||row.length>80))fail(503,'REPORT_INVALID','As linhas da parte original não correspondem ao manifesto.');
   const projected=JSON.stringify({rows:projectClientRows(part.sheet,rows,part.firstRow)}),digest=await hashToken(projected),key=derivedKey(saved.revision,part.sheet,part.index);
-  await confirmEditorPermission(bucket,access);
+  await confirmMutationPermission(bucket,access,['admin']);
   const written=await bucket.put(key,projected,{onlyIf:{etagDoesNotMatch:'*'},httpMetadata:{contentType:'application/json; charset=utf-8'},customMetadata:{sha256:digest}});
   if(!written){const previous=typeof bucket.head==='function'?await bucket.head(key):await bucket.get(key);if(previous?.customMetadata?.sha256!==digest)fail(409,'PART_CHANGED','A cópia preparada desta parte possui outro conteúdo. A publicação foi preservada.');}
+  await confirmMutationPermission(bucket,access,['admin']);
   stage.hashes.push(digest);
   if(!await putConditional(bucket,upgradeKey(saved.revision),stage,state.stageEtag)){
    const concurrent=await upgradeState(bucket,saved.revision);
@@ -104,7 +105,7 @@ export function createClientReportHandler(deps){
   // The report identity, original descriptors and all publication timestamps
   // stay intact. Only the derived reader projection changes atomically.
   const next={...saved,projectionVersion:CLIENT_REPORT_PROJECTION_VERSION,parts:saved.parts.map((part,index)=>({...part,sha256:state.stage.hashes[index],projectedVersion:CLIENT_REPORT_PROJECTION_VERSION}))};
-  await confirmEditorPermission(bucket,access);
+  await confirmMutationPermission(bucket,access,['admin']);
   if(!await putConditional(bucket,REPORT,next,state.etag))fail(409,'REPORT_CHANGED','A base publicada mudou. Atualize a visão para continuar.');
   return response(upgradeResult(next));
  }
@@ -118,7 +119,7 @@ export function createClientReportHandler(deps){
   const current=await published(bucket),expected=body.expectedRevision;
   if(typeof expected!=='string'||expected!==(current.value?.revision||'none'))fail(409,'REPORT_CHANGED','Outra atualização foi publicada. Atualize a visão antes de publicar.');
   const id=uuid(),stage={schemaVersion:2,projectionVersion:CLIENT_REPORT_PROJECTION_VERSION,id,ownerId:actorOf(access).id,expectedRevision:expected,expectedEtag:current.etag,expectedRows:body.expectedRows,files,asOf,createdAt:stamp(),expiresAt:new Date(now()+2*3600000).toISOString(),parts:[],rows:{bd:0,control:0},cells:0,bytes:0};
-  await confirmEditorPermission(bucket,access);
+  await confirmMutationPermission(bucket,access);
   if(!await putConditional(bucket,stageKey(id),stage,null))fail(409,'UPLOAD_CHANGED','Tente iniciar a atualização novamente.');
   return response({uploadId:id,maxPartBytes:MAX_PART},201);
  }
@@ -137,12 +138,13 @@ export function createClientReportHandler(deps){
    if(previous){if(previous.originalSha256===originalSha256&&previous.firstRow===firstRow)return response(descriptor);fail(409,'PART_CHANGED','Um trecho desta atualização já foi recebido com outro conteúdo.');}
    if(stage.rows[sheet]!==firstRow||stage.parts.filter(part=>part.sheet===sheet).length!==index)fail(409,'PART_ORDER','Envie os trechos da planilha na ordem original.');
    if(stage.parts.length>=MAX_PARTS||stage.rows[sheet]+rows.length>stage.expectedRows[sheet]||stage.cells+cells>MAX_CELLS||stage.bytes+size>MAX_TOTAL)fail(413,'WORKSHEET_TOO_LARGE','As bases excedem o limite desta publicação.');
-   await confirmEditorPermission(bucket,access);
+   await confirmMutationPermission(bucket,access);
    // Immutable parts plus the conditional stage pointer keep retries and races safe.
    for(const [originalFlag,text,digest] of [[true,original,originalSha256],[false,projected,sha256]]){
     const key=objectKey(id,sheet,index,originalFlag),written=await bucket.put(key,text,{onlyIf:{etagDoesNotMatch:'*'},httpMetadata:{contentType:'application/json; charset=utf-8'},customMetadata:{sha256:digest}});
     if(!written){const existing=typeof bucket.head==='function'?await bucket.head(key):await bucket.get(key);if(existing?.customMetadata?.sha256!==digest)fail(409,'PART_CHANGED','Este trecho já existe com outro conteúdo. Reinicie a publicação.');}
    }
+   await confirmMutationPermission(bucket,access);
    stage.parts.push(descriptor);stage.rows[sheet]+=rows.length;stage.cells+=cells;stage.bytes+=size;
    if(await putConditional(bucket,stageKey(id),stage,etag))return response(descriptor,201);
   }
@@ -156,7 +158,7 @@ export function createClientReportHandler(deps){
   if(current?.revision===id)return response({...meta(current),model:null});
   if((current?.revision||'none')!==stage.expectedRevision||etag!==stage.expectedEtag)fail(409,'REPORT_CHANGED','Outra atualização foi publicada. Recarregue o relatório antes de publicar.');
   const actor=actorOf(access),saved={schemaVersion:2,revision:id,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,files:stage.files,asOf:stage.asOf,parts:stage.parts,rows:stage.rows,projectionVersion:stage.projectionVersion};
-  await confirmEditorPermission(bucket,access);
+  await confirmMutationPermission(bucket,access);
   if(!await putConditional(bucket,REPORT,saved,etag))fail(409,'REPORT_CHANGED','Outra atualização foi publicada ao mesmo tempo. Atualize a visão.');
   stage.committed=true;await putConditional(bucket,stageKey(id),stage,stageEtag);
   return response({...meta(saved),model:null},200,{'etag':`"${id}"`});
@@ -164,7 +166,7 @@ export function createClientReportHandler(deps){
  async function saveProgress(bucket,request,access){
   const body=await readBody(request,16384);fields(body,['key','done','reportRevision','options']);
   if(typeof body.key!=='string'||!/^[a-f0-9]{64}$/.test(body.key)||typeof body.done!=='boolean'||!isId(body.reportRevision))fail(400,'INVALID_CORRECTION_PROGRESS','Informe uma correção e uma marcação válidas.');
-  // This is an administrative acknowledgement only. Financial values and the
+  // This is an authorized reviewer acknowledgement only. Financial values and the
   // reconciliation are still derived from the immutable worksheets in the worker.
   for(let attempt=0;attempt<4;attempt++){
    if((await metadata(bucket))?.revision!==body.reportRevision)fail(409,'REPORT_CHANGED','O relatório mudou. Atualize a visão antes de marcar a correção.');
@@ -173,7 +175,7 @@ export function createClientReportHandler(deps){
    const entry={done:body.done,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,reportRevision:body.reportRevision};entries[body.key]=entry;
    const next={schemaVersion:1,revision:uuid(),entries};
    if(new TextEncoder().encode(JSON.stringify(next)).length>900000)fail(409,'PROGRESS_CAPACITY','O acompanhamento atingiu o limite. Avise a administração.');
-   await confirmEditorPermission(bucket,access);
+   await confirmMutationPermission(bucket,access,['admin','editor','reviewer']);
    if((await metadata(bucket))?.revision!==body.reportRevision)fail(409,'REPORT_CHANGED','O relatório mudou. Atualize a visão antes de marcar a correção.');
    if(await putConditional(bucket,PROGRESS,next,etag))return response({progress:publicCorrectionProgress(body.key,entry),reportRevision:body.reportRevision,correctionProgressRevision:next.revision});
   }
@@ -194,7 +196,7 @@ export function createClientReportHandler(deps){
   }
   if(url.pathname==='/api/client-report/start'&&request.method==='POST')return start(bucket,request,access);
   if(url.pathname==='/api/client-report/cleanup'&&request.method==='POST'){
-   const body=await readBody(request,10000);fields(body,['cursor']);await confirmEditorPermission(bucket,access);
+   const body=await readBody(request,10000);fields(body,['cursor']);await confirmMutationPermission(bucket,access);
    const current=await metadata(bucket);
    try{return response(await cleanup(bucket,current?.revision,{now,cursor:body.cursor??null}));}catch(error){if(error instanceof TypeError&&error.message==='Invalid cleanup cursor')fail(400,'INVALID_CURSOR','Reinicie a manutenção das versões anteriores.');throw error;}
   }
@@ -206,6 +208,7 @@ export function createClientReportHandler(deps){
    if(!migrationSource?.base64)fail(503,'MIGRATION_SOURCE_UNAVAILABLE','O código de restauração não está disponível.');
    const part=Number(url.searchParams.get('part')),partCount=Math.ceil(migrationSource.base64.length/65536);
    if(!url.searchParams.has('part')||!Number.isInteger(part)||part<0||part>=partCount)fail(400,'INVALID_PART','Selecione um trecho válido do backup.');
+   await confirmMutationPermission(bucket,access,['admin']);
    return response({index:part,data:migrationSource.base64.slice(part*65536,(part+1)*65536)});
   }
   if(url.pathname==='/api/client-report'||url.pathname==='/api/client-report/backup'){
@@ -213,7 +216,9 @@ export function createClientReportHandler(deps){
    const original=url.pathname.endsWith('/backup');if(original&&access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode baixar o backup privado.');
    const {value:saved}=await published(bucket),tracking=await progress(bucket);
    if(!original)requireCurrentProjection(saved);
-   return response({...meta(saved),schemaVersion:2,projectionVersion:saved?projectionVersion(saved):CLIENT_REPORT_PROJECTION_VERSION,parts:saved?publicParts(saved,original):[],rows:saved?.rows||{bd:0,control:0},progress:original?(await readCorrectionProgress(bucket)).value:tracking,analysisMode:'browser',...(original?{capturedAt:stamp(),reportMeta:saved?{schemaVersion:1,revision:saved.revision,updatedAt:saved.updatedAt,updatedBy:saved.updatedBy,updatedByUserId:saved.updatedByUserId,asOf:saved.asOf,files:saved.files}:null,acl:(await readAcl(bucket)).value,source:migrationSource?{sha256:migrationSource.sha256,fileCount:migrationSource.fileCount,commitSha:migrationSource.commitSha,restorationInstructions:migrationSource.restorationInstructions,partCount:Math.ceil(migrationSource.base64.length/65536)}:null}:{})});
+   const payload={...meta(saved),schemaVersion:2,projectionVersion:saved?projectionVersion(saved):CLIENT_REPORT_PROJECTION_VERSION,parts:saved?publicParts(saved,original):[],rows:saved?.rows||{bd:0,control:0},progress:original?(await readCorrectionProgress(bucket)).value:tracking,analysisMode:'browser',...(original?{capturedAt:stamp(),reportMeta:saved?{schemaVersion:1,revision:saved.revision,updatedAt:saved.updatedAt,updatedBy:saved.updatedBy,updatedByUserId:saved.updatedByUserId,asOf:saved.asOf,files:saved.files}:null,acl:(await readAcl(bucket)).value,source:migrationSource?{sha256:migrationSource.sha256,fileCount:migrationSource.fileCount,commitSha:migrationSource.commitSha,restorationInstructions:migrationSource.restorationInstructions,partCount:Math.ceil(migrationSource.base64.length/65536)}:null}:{})};
+   if(original)await confirmMutationPermission(bucket,access,['admin']);
+   return response(payload);
   }
   if(url.pathname==='/api/client-report/parts'&&request.method==='GET'){
    const original=url.searchParams.get('original')==='1';if(original&&access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode baixar as bases originais.');
@@ -224,6 +229,7 @@ export function createClientReportHandler(deps){
    const part=saved.parts.find(item=>item.sheet===sheet&&item.index===index);if(!part)fail(404,'PART_NOT_FOUND','Este trecho não pertence à publicação.');
    const key=!original&&part.projectedVersion===CLIENT_REPORT_PROJECTION_VERSION?derivedKey(revision,sheet,index):objectKey(revision,sheet,index,original);
    const object=await bucket.get(key);if(!object)fail(503,'REPORT_INCOMPLETE','A base publicada precisa ser conferida.');
+   if(original)await confirmMutationPermission(bucket,access,['admin']);
    return new Response(object.body,{headers:{'content-type':'application/json; charset=utf-8','cache-control':'private, no-store','x-content-type-options':'nosniff','etag':`"${original?part.originalSha256:part.sha256}"`}});
   }
   if(url.pathname==='/api/migration/export')fail(409,'BROWSER_BACKUP_REQUIRED','Atualize a página para baixar o backup pelo navegador.');

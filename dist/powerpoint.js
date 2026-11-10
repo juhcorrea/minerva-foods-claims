@@ -219,7 +219,7 @@
     if(token!==generation)throw cancelled();
     if(global.MINERVA_HOSTED===true){
       const response=await global.fetch('/api/session',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw cancelled();const session=await response.json();
-      if(token!==generation||session.approved!==true||!['admin','editor','viewer'].includes(session.role))throw cancelled();
+      if(token!==generation||session.approved!==true||!['admin','editor','reviewer','viewer'].includes(session.role))throw cancelled();
     }
   }
   function imageData(img){const canvas=document.createElement('canvas');canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;if(!canvas.width||!canvas.height)throw new Error('Logo indisponível');const context=canvas.getContext('2d');if(!context)throw new Error('Logo indisponível');context.drawImage(img,0,0);return {data:canvas.toDataURL('image/png'),ratio:canvas.width/canvas.height};}

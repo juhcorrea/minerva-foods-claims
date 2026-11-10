@@ -80,7 +80,7 @@ export default {
     if(result.status>=500)return secured(entryPage('unavailable',request.method==='HEAD'));
     const session=await result.json();
     if(!session.authenticated)return secured(entryPage('anonymous',request.method==='HEAD'));
-    if(!session.approved||!['admin','editor','viewer'].includes(session.role))return secured(entryPage('denied',request.method==='HEAD'));
+    if(!session.approved||!['admin','editor','reviewer','viewer'].includes(session.role))return secured(entryPage('denied',request.method==='HEAD'));
     return secured(staticAsset('/index.html',request.method==='HEAD'));
    }
    if(!Object.hasOwn(STATIC_ASSETS,url.pathname)){
@@ -93,7 +93,7 @@ export default {
     if(!result.ok)return secured(new Response('Acesso não autorizado.',{status:result.status===401?401:403}));
     const session=await result.json();
     if(!session.authenticated)return secured(new Response('Entre no painel para acessar este arquivo.',{status:401}));
-    if(!session.approved||!['admin','editor','viewer'].includes(session.role))return secured(new Response('Seu acesso não está liberado.',{status:403}));
+    if(!session.approved||!['admin','editor','reviewer','viewer'].includes(session.role))return secured(new Response('Seu acesso não está liberado.',{status:403}));
    }
    return secured(staticAsset(url.pathname,request.method==='HEAD'));
   }catch(error){return secured(url.pathname.startsWith('/api/')?new Response(JSON.stringify({error:'Não foi possível concluir a solicitação.'}),{status:503,headers:{'Content-Type':'application/json'}}):entryPage('unavailable'));}

@@ -152,6 +152,21 @@ test('Access never links a legacy approved member by its unverified email and id
  assert.equal(JSON.parse(env.BUCKET.objects.get(key).text).members[legacyId].role,'editor','Legacy ACL records remain intact');
 });
 
+test('Access delegation needs an approved verified corporate identity and obeys live role revocation',async()=>{
+ const env=environment(),call=backendFixture(),admin=await adminToken(),token=await signed(),key='private/access-v3.json';
+ const member=await call(env,'/api/auth/request',{method:'POST',token,body:{name:'QA Delegate'}}),path='/api/members/'+member.body.userId;
+ assert.equal((await call(env,path+'/role',{method:'POST',token:admin,body:{role:'admin'}})).status,409);
+ await call(env,path+'/approve',{method:'POST',token:admin,body:{}});
+ assert.equal((await call(env,path+'/role',{method:'POST',token,body:{role:'admin'}})).status,403);
+ const acl=JSON.parse(env.BUCKET.objects.get(key).text),legacyId=crypto.randomUUID();acl.members[legacyId]={id:legacyId,name:'QA Legacy',email:'legacy@'+domain,status:'approved',role:'editor',requestedAt:'2026-01-01'};await env.BUCKET.put(key,JSON.stringify(acl));
+ assert.equal((await call(env,'/api/members/'+legacyId+'/role',{method:'POST',token:admin,body:{role:'admin'}})).body.code,'VERIFIED_IDENTITY_REQUIRED');
+ assert.equal((await call(env,path+'/role',{method:'POST',token:admin,body:{role:'admin'}})).status,200);
+ assert.equal((await call(env,'/api/session',{token})).body.role,'admin');assert.equal((await call(env,'/api/members',{token})).status,200);
+ for(const id of ['owner','developer'])for(const [suffix,method,body]of [['/role','POST',{role:'viewer'}],['','DELETE',{}],['/request','DELETE',{}]])assert.equal((await call(env,'/api/members/'+id+suffix,{token,method,body})).status,400);
+ assert.equal((await call(env,path+'/role',{method:'POST',token:admin,body:{role:'reviewer'}})).status,200);assert.equal((await call(env,'/api/session',{token})).body.role,'reviewer');assert.equal((await call(env,'/api/members',{token})).status,403);
+ await call(env,path,{method:'DELETE',token:admin,body:{}});assert.equal((await call(env,'/api/session',{token})).body.status,'revoked');await call(env,path+'/approve',{method:'POST',token:admin,body:{}});assert.equal((await call(env,'/api/session',{token})).body.role,'viewer');
+});
+
 test('Access preserves CSRF, retries CAS, suppresses secret disclosure and signals gateway logout',async()=>{
  const env=environment(),call=backendFixture(),token=await signed(),admin=await adminToken();
  for(const path of ['/api/auth/request','/api/auth/logout','/api/auth/exchange'])assert.equal((await call(env,path,{method:'POST',token,body:{name:'QA'},csrf:false})).status,403);
