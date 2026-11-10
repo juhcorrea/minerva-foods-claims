@@ -5,6 +5,7 @@
   const accessStatus = identity => identity?.status || (identity?.approved === true ? 'approved' : 'pending');
   const isApprovedSession = identity => Boolean(identity?.authenticated && identity?.approved === true && ['admin','editor','viewer'].includes(identity?.role) && !['pending','revoked','rejected','denied'].includes(identity?.status));
   const publicProfile = identity => isApprovedSession(identity) ? {name:displayName(identity), email:String(identity.email || ''), role:identity.role} : null;
+  const logoutDestination = result => result?.logoutUrl === '/cdn-cgi/access/logout' ? '/cdn-cgi/access/logout' : '/';
   const escapeHTML = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]));
   function reportQuery(options) {
     const params = new URLSearchParams();
@@ -44,7 +45,7 @@
   }
   // Pure helpers are available to local Node checks; hosted behavior never starts there.
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {displayName, accessStatus, isApprovedSession, publicProfile, escapeHTML, reportQuery, createReportCache};
+    module.exports = {displayName, accessStatus, isApprovedSession, publicProfile, logoutDestination, escapeHTML, reportQuery, createReportCache};
     return;
   }
   if (global.MINERVA_HOSTED !== true) return;
@@ -148,6 +149,8 @@
     stopSessionWatch();
     session = null;
     reportCache.clear();
+    global.MinervaClientAnalysis?.clear();
+    global.MinervaClientBackup?.clear();
     updateProfile();
     publishedMeta = null;
     if ($('sidebarUpdatedAt')) { $('sidebarUpdatedAt').textContent = 'Acesso encerrado'; $('sidebarUpdatedAt').removeAttribute('datetime'); }
@@ -247,6 +250,10 @@
 
   function hasDraft() { return Boolean(app?.state.bd || app?.state.control); }
   function canUpdateBases() { return ['admin','editor'].includes(session?.role); }
+  function startClientMaintenance() {
+    if (session?.analysisMode !== 'browser' || !canUpdateBases()) return;
+    void global.MinervaClientAnalysis?.maintain?.({api, allowed:() => Boolean(session?.approved && session.analysisMode === 'browser' && canUpdateBases())});
+  }
   function publishable() { return Boolean(canUpdateBases() && app?.state.bd && app?.state.control && app?.state.model && !app.state.demo); }
   function refreshControls() {
     if (!session || !app) return;
@@ -322,7 +329,12 @@
         if (!reportCache.valid(payload, metadata)) { reportCache.clear(); payload = null; }
       }
       const reused = Boolean(payload);
-      if (!payload) payload = await api('/api/report?' + key, {signal:controller.signal});
+      if (!payload) {
+        if (session.analysisMode === 'browser') {
+          if (!global.MinervaClientAnalysis) throw new Error('Atualize a página para carregar o cálculo no navegador.');
+          payload = await global.MinervaClientAnalysis.load(opts, {api, signal:controller.signal});
+        } else payload = await api('/api/report?' + key, {signal:controller.signal});
+      }
       if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return false;
       const lightweight = payload.model?.meta?.reportView === 'suppliers';
       if (!lightweight) reportCache.delete(supplierKey);
@@ -347,6 +359,10 @@
       if (requestVersion !== loadVersion) return false;
       if (error.name === 'AbortError') {
         if (timedOut) setMessage('A atualização demorou mais de 30 segundos. Tente novamente em Atualizar visão.', true);
+        return false;
+      }
+      if (error.status === 401 || error.status === 403) {
+        lockGate('Seu acesso foi encerrado.', error.message, {login:true, changeAccount:true});
         return false;
       }
       if (error.status === 404) {
@@ -377,7 +393,11 @@
     setMessage('Publicando a análise para a equipe…');
     try {
       const expectedRevision = publishedMeta?.revision || session.reportMeta?.revision || 'none';
-      const saved = await api('/api/report', {method:'POST', headers:{'If-Match':'"' + expectedRevision + '"'}, body:JSON.stringify(payload)});
+      let saved;
+      if (session.analysisMode === 'browser') {
+        if (!global.MinervaClientAnalysis) throw new Error('Atualize a página antes de publicar as bases.');
+        saved = await global.MinervaClientAnalysis.publish(payload, {api, expectedRevision, onProgress:({sent,total})=>setMessage('Publicando as bases: '+sent+' de '+total+' partes…')});
+      } else saved = await api('/api/report', {method:'POST', headers:{'If-Match':'"' + expectedRevision + '"'}, body:JSON.stringify(payload)});
       reportCache.clear();
       publishedMeta = saved;
       session.reportMeta = saved;
@@ -388,6 +408,7 @@
       if ($('controlFileInfo')) $('controlFileInfo').textContent = 'Nenhum arquivo selecionado';
       if ($('runAnalysis')) $('runAnalysis').disabled = true;
       const loaded = await loadReport(opts);
+      startClientMaintenance();
       setMessage(loaded ? 'Atualização publicada. Toda a equipe autorizada já pode consultar esta versão.' : 'A atualização foi publicada, mas não foi possível recarregar a visão. Clique em Atualizar visão para tentar novamente.', !loaded);
     } catch (error) { setMessage(error.message, true); }
     finally { publishing = false; refreshControls(); }
@@ -456,6 +477,12 @@
     button.disabled = true;
     memberMessage('Preparando o ZIP com os dados publicados…');
     try {
+      if (session.analysisMode === 'browser') {
+        if (!global.MinervaClientBackup) throw new Error('Atualize a página para preparar o backup no navegador.');
+        await global.MinervaClientBackup.download({onProgress:memberMessage});
+        memberMessage('Download iniciado. Guarde o ZIP em local privado: ele contém os dados reais e as instruções de restauração.');
+        return;
+      }
       const result = await fetch('/api/migration/export', {credentials:'same-origin', cache:'no-store', headers:{Accept:'application/zip'}});
       if (!result.ok) {
         const payload = await result.json().catch(() => null);
@@ -517,9 +544,9 @@
     const button = event?.currentTarget;
     if (button) button.disabled = true;
     try {
-      await api('/api/auth/logout', {method:'POST', body:'{}'});
+      const result = await api('/api/auth/logout', {method:'POST', body:'{}'});
       lockGate('Acesso encerrado.', 'Voltando à entrada.', {login:true});
-      global.location.assign('/');
+      global.location.assign(logoutDestination(result));
     } catch (error) {
       if (error.status === 401 || error.status === 403) { global.location.assign('/'); return; }
       setMessage('Não foi possível encerrar o acesso. Tente novamente.', true);
@@ -578,6 +605,7 @@
       app.setServerLoader(loadReport);
       refreshControls();
       await loadReport(app.getOptions());
+      startClientMaintenance();
     } catch (error) {
       const isAuth = error.status === 401 || error.status === 403;
       lockGate(error.status === 401 ? 'Entre para continuar.' : error.status === 403 ? 'Acesso não liberado.' : 'Não foi possível confirmar seu acesso.', error.message, {login:isAuth, changeAccount:isAuth, retry:!isAuth || error.status === 403});

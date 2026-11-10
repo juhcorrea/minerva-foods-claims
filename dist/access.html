@@ -19,21 +19,28 @@
   <main class="access-card">
     <header>
       <img class="logo" src="/assets/minerva-logo.png" alt="Minerva Foods" width="184" height="78">
-      <span class="eyebrow">SUPPLY CHAIN · EXPORTAÇÃO</span>
+      <span class="eyebrow">CLAIMS<br>ACESSO AO PAINEL</span>
     </header>
     <div class="accent-line"></div>
-    <section id="accessLoading" aria-live="polite"><h1>Claims e recebimentos.</h1><p>Conferindo seu acesso…</p></section>
+    <section id="accessLoading" aria-live="polite"><h1>Claims e recebimentos.</h1><p>Conferindo seu acesso…</p><button id="retrySession" type="button" hidden>Tentar novamente</button></section>
+    <section id="accessIdentity" hidden>
+      <span class="tag">ENTRADA CORPORATIVA</span>
+      <h1>Confirme sua identidade.</h1>
+      <p>Entre pelo endereço do painel para validar seu e-mail corporativo.</p>
+      <button id="retryIdentity" type="button">Entrar novamente <span aria-hidden="true">→</span></button>
+    </section>
     <section id="accessRequest" hidden>
       <h1>Solicite seu acesso.</h1>
-      <p>Administração libera a visualização do relatório. Você não precisa criar uma conta.</p>
+      <p id="requestIntro">As administradoras liberam a visualização do relatório. Você não precisa criar uma conta.</p>
       <form id="requestForm">
         <label for="requestName">Seu nome</label>
         <input id="requestName" name="name" autocomplete="name" minlength="3" maxlength="100" required placeholder="Nome e sobrenome">
-        <label for="requestEmail">E-mail de contato <span>(opcional)</span></label>
+        <label id="requestEmailLabel" for="requestEmail">E-mail de contato <span>(opcional)</span></label>
         <input id="requestEmail" name="email" autocomplete="email" type="email" maxlength="160" placeholder="Seu e-mail">
+        <p id="verifiedEmailNote" class="small" hidden>E-mail confirmado na entrada corporativa.</p>
         <button type="submit" id="requestSubmit">Solicitar acesso <span aria-hidden="true">→</span></button>
       </form>
-      <p class="small">O relatório ficará disponível neste navegador após a aprovação.</p>
+      <p id="requestScope" class="small">O relatório ficará disponível neste navegador após a aprovação.</p>
     </section>
     <section id="accessActivate" hidden>
       <span class="tag">ADMINISTRAÇÃO</span>
@@ -45,21 +52,22 @@
     <section id="accessPending" hidden>
       <span class="tag">SOLICITAÇÃO ENVIADA</span>
       <h1>Aguardando aprovação.</h1>
-      <p><strong id="pendingName"></strong>, Administração precisa liberar seu acesso.</p>
-      <div class="request-code"><span>SEU CÓDIGO</span><strong id="pendingCode"></strong></div>
-      <p class="small">Informe seu nome e este código à Administração. Assim que ela aprovar, você poderá consultar o painel aqui.</p>
+      <p><strong id="pendingName"></strong>, as administradoras precisam liberar seu acesso.</p>
+      <div id="pendingCodeBlock" class="request-code"><span id="pendingCodeLabel">SEU CÓDIGO</span><strong id="pendingCode"></strong></div>
+      <p id="pendingInstructions" class="small">Informe seu nome e este código às administradoras. Assim que aprovarem, você poderá consultar o painel aqui.</p>
       <button id="checkAccess" type="button">Verificar liberação <span aria-hidden="true">↻</span></button>
-      <p class="small">Em outro aparelho ou navegador, será necessário solicitar um novo acesso.</p>
+      <p id="pendingScope" class="small">Em outro aparelho ou navegador, será necessário solicitar um novo acesso.</p>
     </section>
     <section id="accessRevoked" hidden>
       <span class="tag">ACESSO NÃO LIBERADO</span>
-      <h1>Fale com Administração.</h1>
-      <p>Sua solicitação foi recusada ou seu acesso foi revogado. Administração pode revisar a autorização no painel.</p>
+      <h1>Fale com as administradoras.</h1>
+      <p>Sua solicitação foi recusada ou seu acesso foi revogado. As administradoras podem revisar a autorização no painel.</p>
       <button id="checkRevoked" type="button">Verificar liberação</button>
     </section>
     <p id="accessMessage" role="status" aria-live="polite"></p>
-    <p class="small">Já é administradora? Use seu link privado e clique em <strong>Ativar meu painel</strong>. Sair da conta não cancela esse link; você não precisa solicitar aprovação novamente.</p>
-    <footer>Minerva Foods · Claims e recebimentos<br><span>Acesso liberado por Administração.</span></footer>
+    <p id="legacyAdminHelp" class="small" hidden>Já é administradora? Use seu link privado e clique em <strong>Ativar meu painel</strong>. Sair da conta não cancela esse link; você não precisa solicitar aprovação novamente.</p>
+    <div id="accessAccount" class="verified-account" hidden><span>Conta verificada</span><strong id="accountEmail"></strong><button id="changeAccessAccount" class="account-switch" type="button">Trocar conta</button></div>
+    <footer>Minerva Foods · Claims e recebimentos<br><span>Acesso gerenciado pelas administradoras.</span></footer>
   </main>
 </body>
 </html>

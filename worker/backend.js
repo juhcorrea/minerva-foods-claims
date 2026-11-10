@@ -1,5 +1,7 @@
 import {buildMigrationFiles, MigrationExportError} from './migration.js';
 import {migrationZipResponse} from './zip.js';
+import {createClientReportHandler} from './client-report.js';
+import {CloudflareAccessError, cloudflareAccessConfig, createCloudflareAccessVerifier} from './cloudflare-access.js';
 
 /* Minerva Claims shared API — capability links and per-browser approvals.
  * Admin activation links carry 256-bit secrets, supplied only as hashes in env.
@@ -19,7 +21,7 @@ const MAX_ROWS = 25000;
 const MAX_CELLS = 1500000;
 const MAX_MEMBERS = 5000;
 const MAX_PENDING = 500;
-const SAFE_HEADERS = {'content-type':'application/json; charset=utf-8','cache-control':'private, no-store, max-age=0','pragma':'no-cache','x-content-type-options':'nosniff','referrer-policy':'no-referrer','vary':'Cookie'};
+const SAFE_HEADERS = {'content-type':'application/json; charset=utf-8','cache-control':'private, no-store, max-age=0','pragma':'no-cache','x-content-type-options':'nosniff','referrer-policy':'no-referrer','vary':'Cookie, Cf-Access-Jwt-Assertion'};
 class ApiError extends Error {constructor(status,code,message){super(message);this.status=status;this.code=code;}}
 const fail=(status,code,message)=>{throw new ApiError(status,code,message);};
 const response=(body,status=200,extra={})=>new Response(JSON.stringify(body),{status,headers:{...SAFE_HEADERS,...extra}});
@@ -57,7 +59,7 @@ function appendAudit(acl,event){acl.audit=[...(Array.isArray(acl.audit)?acl.audi
 function cookieValue(request){const matches=(request.headers.get('cookie')||'').split(';').map(x=>x.trim()).filter(x=>x.startsWith(COOKIE+'='));if(matches.length!==1)return null;const token=matches[0].slice(COOKIE.length+1);return tokenPattern.test(token)?token:null;}
 function cookieHeader(token){return `${COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS*86400}`;}
 function clearCookie(){return `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;}
-function publicSession(access){return{authenticated:!!access.authenticated,approved:!!access.approved,role:access.role,status:access.status,userId:access.member?.id||access.admin?.id||null,name:access.member?.name||actorLabel(access.admin?.name,access.admin?.id)||'',email:access.admin?.id==='developer'?'':access.member?.email||access.admin?.email||'',requestCode:access.member?.requestCode||null,expiresAt:access.session?.expiresAt||null};}
+function publicSession(access){return{authenticated:!!access.authenticated,approved:!!access.approved,role:access.role,status:access.status,userId:access.member?.id||access.admin?.id||null,name:access.member?.name||actorLabel(access.admin?.name,access.admin?.id)||'',email:access.admin?.id==='developer'?'':access.member?.email||access.admin?.email||'',requestCode:access.member?.requestCode||null,expiresAt:access.identity?.expiresAt||access.session?.expiresAt||null,...(access.provider?{provider:access.provider,authProvider:access.provider,verifiedEmail:access.identity?.email||null}:{})};}
 const memberRole=member=>member?.role==='editor'?'editor':'viewer';
 async function confirmEditorPermission(bucket,access){
  if(access.role!=='editor')return;
@@ -92,6 +94,37 @@ async function rateLimit(bucket,request,kind,now){
 function requestCode(){const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';const bytes=crypto.getRandomValues(new Uint8Array(8));const chars=[...bytes].map(b=>alphabet[b%alphabet.length]);return chars.slice(0,4).join('')+'-'+chars.slice(4).join('');}
 async function createRequest(bucket,admins,name,email){
  for(let n=0;n<4;n++){const{value:acl,etag}=await ensureAcl(bucket,admins);const members=Object.values(acl.members);if(members.length>=MAX_MEMBERS||members.filter(m=>m.status==='pending').length>=MAX_PENDING)fail(429,'REQUEST_CAPACITY','Não foi possível registrar uma nova solicitação agora. Avise a administração.');const id=uuid();let code;do{code=requestCode();}while(members.some(m=>m.requestCode===code));const member={id,name,email,status:'pending',role:'viewer',requestCode:code,requestedAt:stamp(),approvedAt:null,approvedBy:null,revokedAt:null,updatedAt:stamp()};acl.members[id]=member;appendAudit(acl,{actorId:id,actorName:name,action:'access_requested',target:id});if(await putConditional(bucket,ACL_KEY,acl,etag))return member;}
+ fail(409,'ACCESS_CHANGED','Os acessos foram atualizados simultaneamente. Tente novamente.');
+}
+const matchesAccessIdentity=(member,identity)=>member?.identity?.provider==='cloudflare-access'&&member.identity.issuer===identity.issuer&&member.identity.subject===identity.subject&&member.identity.email===identity.email;
+function accessIdentitySession(identity,member){
+ const approved=member?.status==='approved',revoked=['revoked','rejected'].includes(member?.status);
+ return {provider:'cloudflare-access',identity,authenticated:true,approved,role:approved?memberRole(member):revoked?'denied':'requester',status:approved?'approved':revoked?'revoked':member?'pending':'unregistered',member};
+}
+async function resolveCloudflareAccess(bucket,request,config,verify){
+ const identity=await verify(request,config);
+ if(!identity)return {provider:'cloudflare-access',authenticated:false,approved:false,role:'visitor',status:'anonymous'};
+ const admin=config.admins.find(candidate=>candidate.email===identity.email);
+ if(admin){
+  // Runtime bootstrap is limited to exactly two configured, verified emails.
+  // Legacy member email labels are never considered an authenticated identity.
+  await ensureAcl(bucket,config.admins);
+  return {provider:'cloudflare-access',identity,authenticated:true,approved:true,role:'admin',status:'approved',admin};
+ }
+ const {value:acl}=await readAcl(bucket);
+ const member=Object.values(acl?.members||{}).find(candidate=>matchesAccessIdentity(candidate,identity));
+ return accessIdentitySession(identity,member);
+}
+async function createVerifiedRequest(bucket,admins,identity,name){
+ for(let attempt=0;attempt<4;attempt++){
+  const {value:acl,etag}=await ensureAcl(bucket,admins),members=Object.values(acl.members);
+  const existing=members.find(member=>matchesAccessIdentity(member,identity));if(existing)return {member:existing,created:false};
+  if(members.length>=MAX_MEMBERS||members.filter(member=>member.status==='pending').length>=MAX_PENDING)fail(429,'REQUEST_CAPACITY','Não foi possível registrar uma nova solicitação agora. Avise a administração.');
+  const id=uuid();let code;do{code=requestCode();}while(members.some(member=>member.requestCode===code));
+  const member={id,name,email:identity.email,status:'pending',role:'viewer',requestCode:code,requestedAt:stamp(),approvedAt:null,approvedBy:null,revokedAt:null,updatedAt:stamp(),identity:{provider:'cloudflare-access',issuer:identity.issuer,subject:identity.subject,email:identity.email},emailVerified:true};
+  acl.members[id]=member;appendAudit(acl,{actorId:id,actorName:name,action:'verified_access_requested',target:id,provider:'cloudflare-access'});
+  if(await putConditional(bucket,ACL_KEY,acl,etag))return {member,created:true};
+ }
  fail(409,'ACCESS_CHANGED','Os acessos foram atualizados simultaneamente. Tente novamente.');
 }
 async function activateAdmin(bucket,admins,admin){for(let n=0;n<4;n++){const{value:acl,etag}=await ensureAcl(bucket,admins);acl.admins[admin.id]={id:admin.id,name:admin.name,email:admin.email,activatedAt:stamp()};appendAudit(acl,{actorId:admin.id,actorName:admin.name,action:'admin_activated',target:admin.id});if(await putConditional(bucket,ACL_KEY,acl,etag))return;}fail(409,'ACCESS_CHANGED','Os acessos foram atualizados simultaneamente. Tente novamente.');}
@@ -279,16 +312,23 @@ function redactModel(model) {
 
 
 
-export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null}){
+export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null,accessFetch}){
  if(!engine?.analyze||!engine?.validateHeaders||!engine?.parseDate||!engine?.today)throw new Error('A reconciliation engine is required.');
+ const verifyAccess=createCloudflareAccessVerifier({now,...(accessFetch?{fetcher:accessFetch}:{})});
+ const clientReports=createClientReportHandler({engine,now,fail,response,readBody,jsonObject,putConditional,hashToken,stamp,uuid,actorLabel,confirmEditorPermission,readCorrectionProgress,correctionProgressRevision,publicCorrectionProgress,migrationSource,readAcl});
  return async function handleApi(request,env){
   const url=new URL(request.url);if(!url.pathname.startsWith('/api/'))return null;let shouldClear=false;
   try{
    if(!env?.BUCKET||typeof env.BUCKET.get!=='function'||typeof env.BUCKET.put!=='function')fail(503,'STORAGE_NOT_READY','O armazenamento compartilhado ainda não está disponível.');
-   const admins=adminConfig(env);
+   if(env.AUTH_MODE&&!['legacy','sites','cloudflare-access'].includes(env.AUTH_MODE))fail(503,'AUTH_MODE_INVALID','O modo de identificação precisa ser conferido.');
+   const accessMode=env.AUTH_MODE==='cloudflare-access',accessConfig=accessMode?cloudflareAccessConfig(env):null,admins=accessMode?accessConfig.admins:adminConfig(env);
+   const clientMode=env.CF_CLIENT_ANALYSIS==='1';
+   const getReportMetadata=clientMode?clientReports.metadata:reportMeta;
    if(!['GET','HEAD'].includes(request.method))checkMutation(request,url);
-   const access=await resolveAccess(env.BUCKET,request,admins,now);shouldClear=!!access.clear;
-   if(url.pathname==='/api/session'&&request.method==='GET')return response({...publicSession(access),reportMeta:access.approved?await reportMeta(env.BUCKET):null},200,shouldClear?{'set-cookie':clearCookie()}:{});
+   if(accessMode&&url.pathname==='/api/auth/exchange')fail(403,'LEGACY_AUTH_DISABLED','Entre com seu e-mail corporativo pelo Cloudflare Access.');
+   if(accessMode&&url.pathname==='/api/auth/logout'&&request.method==='POST')return response({authenticated:false,approved:false,role:'visitor',status:'anonymous',provider:'cloudflare-access',authProvider:'cloudflare-access',verifiedEmail:null,logoutUrl:'/cdn-cgi/access/logout'},200,{'set-cookie':clearCookie()});
+   const access=accessMode?await resolveCloudflareAccess(env.BUCKET,request,accessConfig,verifyAccess):await resolveAccess(env.BUCKET,request,admins,now);shouldClear=!!access.clear;
+   if(url.pathname==='/api/session'&&request.method==='GET')return response({...publicSession(access),analysisMode:clientMode?'browser':'server',reportMeta:access.approved?await getReportMetadata(env.BUCKET):null},200,shouldClear?{'set-cookie':clearCookie()}:{});
    if(url.pathname==='/api/auth/logout'&&request.method==='POST'){
     if(access.sessionKey){if(typeof env.BUCKET.delete==='function')await env.BUCKET.delete(access.sessionKey);else await env.BUCKET.put(access.sessionKey,JSON.stringify({schemaVersion:1,expiresAt:'1970-01-01T00:00:00.000Z'}));}
     return response({authenticated:false,approved:false,role:'visitor',status:'anonymous'},200,{'set-cookie':clearCookie()});
@@ -299,13 +339,21 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
     const digest=await hashToken(body.token);let admin=null;for(const candidate of admins)if(adminAcceptsHash(candidate,digest))admin=candidate;
     if(!admin)fail(401,'INVALID_LINK','O link administrativo é inválido ou foi substituído.');
     await activateAdmin(env.BUCKET,admins,admin);const issued=await issueSession(env.BUCKET,{...admin,role:'admin',tokenHash:digest},now);
-    return response({...publicSession({authenticated:true,approved:true,role:'admin',status:'approved',admin,session:issued.session}),reportMeta:await reportMeta(env.BUCKET)},200,{'set-cookie':cookieHeader(issued.token)});
+    return response({...publicSession({authenticated:true,approved:true,role:'admin',status:'approved',admin,session:issued.session}),analysisMode:clientMode?'browser':'server',reportMeta:await getReportMetadata(env.BUCKET)},200,{'set-cookie':cookieHeader(issued.token)});
    }
    if(url.pathname==='/api/auth/request'&&request.method==='POST'){
     const body=await readBody(request,4096);
     if(Object.keys(body).some(k=>!['name','email','website'].includes(k)))fail(400,'INVALID_REQUEST','Informe somente seu nome e contato opcional.');
     if(body.website)fail(400,'INVALID_REQUEST','Não foi possível registrar a solicitação.');
-    if(access.authenticated)return response({...publicSession(access),reportMeta:access.approved?await reportMeta(env.BUCKET):null});
+     if(accessMode){
+      if(!access.identity)fail(401,'ACCESS_IDENTITY_REQUIRED','Entre com seu e-mail corporativo antes de solicitar acesso.');
+      if(access.admin||access.member)return response({...publicSession(access),reportMeta:access.approved?await getReportMetadata(env.BUCKET):null});
+      const name=safeLabel(body.name,'',120);if(name.length<2)fail(400,'NAME_REQUIRED','Informe seu nome para a administração reconhecer a solicitação.');
+      await rateLimit(env.BUCKET,request,'request',now);
+      const result=await createVerifiedRequest(env.BUCKET,admins,access.identity,name);
+      return response({...publicSession(accessIdentitySession(access.identity,result.member)),reportMeta:null},result.created?201:200);
+     }
+    if(access.authenticated)return response({...publicSession(access),reportMeta:access.approved?await getReportMetadata(env.BUCKET):null});
     const name=safeLabel(body.name,'',120);const email=safeLabel(body.email,'',240);
     if(name.length<2)fail(400,'NAME_REQUIRED','Informe seu nome para a administração reconhecer a solicitação.');
     await rateLimit(env.BUCKET,request,'request',now);
@@ -315,8 +363,9 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
    if(!access.authenticated)fail(401,'SESSION_REQUIRED','Solicite acesso ou use seu link administrativo para continuar.');
    if(!access.approved)fail(403,access.status==='revoked'?'ACCESS_REVOKED':'ACCESS_PENDING',access.status==='revoked'?'Seu acesso foi revogado. A administração pode rever essa decisão.':'Sua solicitação aguarda aprovação da administração.');
    const modifying=!['GET','HEAD'].includes(request.method);
-   const editorMutation=access.role==='editor'&&request.method==='POST'&&['/api/report','/api/correction-progress'].includes(url.pathname);
+   const editorMutation=access.role==='editor'&&request.method==='POST'&&(['/api/report','/api/correction-progress'].includes(url.pathname)||(clientMode&&(['/api/client-report/start','/api/client-report/cleanup'].includes(url.pathname)||/^\/api\/client-report\/[a-f0-9-]{36}\/(parts|commit)$/i.test(url.pathname))));
    if(modifying&&access.role!=='admin'&&!editorMutation)fail(403,'ADMIN_REQUIRED','Você não tem permissão para esta alteração. Apenas as administradoras podem gerenciar os acessos.');
+   if(clientMode){const handled=await clientReports.handle({request,url,bucket:env.BUCKET,access});if(handled)return handled;}
    if(url.pathname==='/api/migration/export'){
     if(access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode baixar o backup privado.');
     if(request.method!=='GET')fail(405,'METHOD_NOT_ALLOWED','Use o download do backup privado.');
@@ -373,7 +422,7 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
     const result=await changeApproval(env.BUCKET,access,revokePath[1],false);return response(result);
    }
    fail(404,'NOT_FOUND','Esta operação não existe.');
-  }catch(err){const extra=shouldClear?{'set-cookie':clearCookie()}:{};if(err instanceof ApiError||err instanceof MigrationExportError)return response({error:err.message,code:err.code},err.status,extra);return response({error:'Não foi possível concluir a operação. Tente novamente.',code:'SERVER_ERROR'},500,extra);}
+  }catch(err){const extra=shouldClear?{'set-cookie':clearCookie()}:{};if(err instanceof ApiError||err instanceof MigrationExportError||err instanceof CloudflareAccessError)return response({error:err.message,code:err.code},err.status,extra);return response({error:'Não foi possível concluir a operação. Tente novamente.',code:'SERVER_ERROR'},500,extra);}
  };
 }
 export const apiConstants=Object.freeze({adminIds:ADMIN_IDS,cookieName:COOKIE,sessionDays:SESSION_DAYS,maxBodyBytes:MAX_BODY});

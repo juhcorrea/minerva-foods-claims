@@ -3,11 +3,14 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {buildMigrationSource} from './migration/source-archive.mjs';
+import {workerModules} from './scripts/build-cloudflare-pages.mjs';
+import {buildClientBackup} from './scripts/build-client-backup.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
 const output=path.join(root,'build');
+buildClientBackup(root);
 const assets={};
 const types={'.txt':'text/plain; charset=utf-8','.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.woff2':'font/woff2','.svg':'image/svg+xml','.png':'image/png','.webp':'image/webp','.webmanifest':'application/manifest+json'};
-for(const file of ['index.html','site.webmanifest','access.html','access.css','access.js','styles.css','integration.css','preferences.css','preferences.js','table-filters.css','table-filters.js','column-layout.css','column-layout.js','charts.css','analysts.css','analysts.js','copy-reference.css','copy-reference.js','correction-progress.css','correction-impact.css','correction-impact.js','powerpoint.js','vendor/pptxgen.bundle.js','vendor/pptxgen.LICENSE.txt','portfolio.css','portfolio.js','meetings.css','meetings.js','team.css','executive-shell.css','executive.css','executive.js','claim-control.js','claim-control.css','calculation-rules.js','presentation-mode.js','presentation-mode.css','section-collapse.js','section-collapse.css','multi-select.js','multi-select.css','saved-views.js','saved-views.css','receipts-executive.js','receipts-executive.css','app.js','team.js','engine.js','vendor/xlsx.full.min.js','assets/montserrat-latin.woff2','assets/minerva-logo.png','assets/minerva-monogram.svg','assets/minerva-cover.png','assets/flags/br.svg','assets/flags/py.svg','assets/flags/uy.svg','assets/flags/co.svg','assets/flags/ar.svg','assets/flags/LICENSE.txt','assets/flags/SOURCE.txt']){
+for(const file of ['index.html','site.webmanifest','access.html','access.css','access.js','styles.css','integration.css','preferences.css','preferences.js','table-filters.css','table-filters.js','column-layout.css','column-layout.js','charts.css','analysts.css','analysts.js','copy-reference.css','copy-reference.js','correction-progress.css','correction-impact.css','correction-impact.js','powerpoint.js','vendor/pptxgen.bundle.js','vendor/pptxgen.LICENSE.txt','portfolio.css','portfolio.js','meetings.css','meetings.js','team.css','executive-shell.css','executive.css','executive.js','claim-control.js','claim-control.css','calculation-rules.js','presentation-mode.js','presentation-mode.css','section-collapse.js','section-collapse.css','multi-select.js','multi-select.css','saved-views.js','saved-views.css','receipts-executive.js','receipts-executive.css','app.js','team.js','engine.js','client-analysis.js','analysis-worker.js','client-backup.js','client-backup-worker.js','vendor/xlsx.full.min.js','assets/montserrat-latin.woff2','assets/minerva-logo.png','assets/minerva-monogram.svg','assets/minerva-cover.png','assets/flags/br.svg','assets/flags/py.svg','assets/flags/uy.svg','assets/flags/co.svg','assets/flags/ar.svg','assets/flags/LICENSE.txt','assets/flags/SOURCE.txt']){
  const absolute=path.join(root,'dist',file);if(!fs.existsSync(absolute))throw new Error('Missing required asset: '+file);
  let bytes=fs.readFileSync(absolute);
  if(file==='index.html'){
@@ -29,9 +32,9 @@ for(const file of ['index.html','site.webmanifest','access.html','access.css','a
  assets['/'+file]={type:types[path.extname(file)]||'application/octet-stream',body:bytes.toString('base64')};
 }
 const engine=fs.readFileSync(path.join(root,'dist/engine.js'),'utf8');
-const modules=['zip.js','migration.js','backend.js'].map(file=>fs.readFileSync(path.join(root,'worker',file),'utf8').replace(/^import\s+.*?from\s+['"]\.\/[^'"]+['"];?\s*$/gm,''));
+const bundled=workerModules(root),modules=bundled.filter(module=>module.path!=='worker/entry.js').map(module=>module.source);
 const migrationSource=await buildMigrationSource(root);
-const wrapper=fs.readFileSync(path.join(root,'worker/entry.js'),'utf8');
+const wrapper=bundled.find(module=>module.path==='worker/entry.js').source;
 fs.mkdirSync(path.join(output,'server'),{recursive:true});fs.mkdirSync(path.join(output,'.openai'),{recursive:true});
 fs.writeFileSync(path.join(output,'server/index.js'),engine+'\n'+modules.join('\n')+'\nconst MIGRATION_SOURCE='+JSON.stringify(migrationSource)+';\nconst STATIC_ASSETS='+JSON.stringify(assets)+';\n'+wrapper);
 fs.copyFileSync(path.join(root,'.openai/hosting.json'),path.join(output,'.openai/hosting.json'));

@@ -65,6 +65,11 @@ function migrationAcl(value, admins) {
   acl.members = Object.create(null);
   for (const [key, record] of Object.entries(value.members)) {
     acl.members[key] = migrationPick(record, ['id','name','email','status','role','requestCode','requestedAt','approvedAt','approvedBy','approvedById','revokedAt','revokedBy','updatedAt']);
+    if(record.identity!==undefined){
+      const identity=migrationPick(record.identity,['provider','issuer','subject','email']);
+      if(identity.provider!=='cloudflare-access'||typeof identity.issuer!=='string'||!/^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.cloudflareaccess\.com$/.test(identity.issuer)||typeof identity.subject!=='string'||!identity.subject.trim()||typeof identity.email!=='string'||!identity.email.includes('@')||record.emailVerified!==true)migrationInvalid();
+      acl.members[key].identity=identity;acl.members[key].emailVerified=true;
+    }
   }
   acl.audit = (value.audit || []).map(record => migrationPick(record, ['at','actorId','actorName','action','target','previousStatus','previousRole','role']));
   return acl;

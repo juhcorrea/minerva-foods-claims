@@ -47,7 +47,7 @@ test('supplier API uses the same filters, amounts, source revision and private c
   assert.equal(lean.body.model.meta.reportView,'suppliers');assert.equal(lean.body.model.meta.agingDate,engine.today());
   assert.equal(f.calls.at(-1).reportView,'suppliers');assert.equal(f.calls.at(-2).reportView,undefined);
   assert.deepEqual(lean.body.model.meta.years,[2025,2026]);assert.equal(lean.body.model.meta.correctionScenario,'original');
-  assert.match(lean.headers.get('cache-control'),/private, no-store/);assert.equal(lean.headers.get('vary'),'Cookie');
+  assert.match(lean.headers.get('cache-control'),/private, no-store/);assert.equal(lean.headers.get('vary'),'Cookie, Cf-Access-Jwt-Assertion');
   assert(!JSON.stringify(lean.body).includes('RAW_SOURCE_ONLY'));assert(!('bd'in lean.body));assert(!('claims'in lean.body.model));
   const explicit=await f.call('/api/report?'+filter+'&view=full',f.admin);assert.deepEqual(explicit.body,full.body);
 });

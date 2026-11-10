@@ -2,25 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
+import {createD1Bucket} from '../worker/d1-store.js';
 
 const source=await readFile(new URL('../worker/entry.js',import.meta.url),'utf8');
 const origin='https://claims-assets.example.test';
 const publicPaths=['/access.html','/access.css','/access.js','/site.webmanifest','/assets/minerva-logo.png','/assets/montserrat-latin.woff2'];
-const privatePaths=['/analysts.js','/meetings.js','/engine.js','/app.js','/team.js','/styles.css','/executive.js','/executive.css','/executive-shell.css','/claim-control.js','/claim-control.css','/calculation-rules.js','/presentation-mode.js','/presentation-mode.css','/section-collapse.js','/section-collapse.css','/multi-select.js','/multi-select.css','/assets/flags/br.svg','/vendor/pptxgen.bundle.js','/assets/minerva-cover.png','/future-report.js'];
+const privatePaths=['/analysts.js','/meetings.js','/engine.js','/app.js','/team.js','/styles.css','/executive.js','/executive.css','/executive-shell.css','/claim-control.js','/claim-control.css','/calculation-rules.js','/presentation-mode.js','/presentation-mode.css','/section-collapse.js','/section-collapse.css','/multi-select.js','/multi-select.css','/client-analysis.js','/analysis-worker.js','/client-backup.js','/client-backup-worker.js','/assets/flags/br.svg','/vendor/pptxgen.bundle.js','/assets/minerva-cover.png','/future-report.js'];
 const privateMarker='PRIVATE_REPORT_CONFIGURATION';
 const accessMarker='PUBLIC_ACCESS_FORM';
 const anonymous={authenticated:false,approved:false,role:'visitor'};
 const session=role=>({authenticated:true,approved:true,role});
 
-function fixture(){
- const calls=[],network=[];
+function fixture({native=false}={}){
+ const calls=[],network=[];let decodes=0;
+ class Bytes extends Uint8Array{}
+ Object.defineProperty(Bytes,'fromBase64',{value:native?value=>{decodes++;return new Uint8Array(Buffer.from(value,'base64'));}:undefined});
  const paths=[...publicPaths,...privatePaths,'/index.html'];
  const assets=Object.fromEntries(paths.map(path=>[path,{type:path.endsWith('.html')?'text/html':'application/octet-stream',body:Buffer.from(path==='/access.html'?accessMarker:publicPaths.includes(path)?'PUBLIC_BRAND_ASSET':privateMarker).toString('base64')}]));
  const context={
-  Request,Response,Headers,URL,Uint8Array,atob,
+  Request,Response,Headers,URL,Uint8Array:Bytes,atob:value=>{decodes++;return atob(value);},createD1Bucket,
   ClaimsEngine:{},MIGRATION_SOURCE:{base64:''},STATIC_ASSETS:assets,
   createApiHandler:()=>async(request,env)=>{
-   calls.push({path:new URL(request.url).pathname,method:request.method,cookie:request.headers.get('cookie')});
+   calls.push({path:new URL(request.url).pathname,method:request.method,cookie:request.headers.get('cookie'),bucket:env.BUCKET});
    if(new URL(request.url).pathname==='/api/session'){
     if(env.throwSession)throw new Error('Storage unavailable');
     if(env.invalidSessionJson)return new Response('{',{status:200});
@@ -30,9 +33,33 @@ function fixture(){
   },
   fetch:async url=>{network.push(url);return new Response('PUBLIC_BRAND_ICON',{headers:{'content-type':'image/png'}});},
  };
- vm.runInNewContext(source.replace('export default {','globalThis.worker = {'),context,{filename:'worker/entry.js'});
- return {calls,network,request:(path,env={},method='GET')=>context.worker.fetch(new Request(origin+path,{method,headers:{cookie:'session=test-browser'}}),env,{})};
+ vm.createContext(context);vm.runInContext(source.replace(/^import .*from '\.\/d1-store\.js';\s*$/m,'').replace('export default {','globalThis.worker = {'),context,{filename:'worker/entry.js'});
+ return {calls,network,assets,context,get decodes(){return decodes;},request:(path,env={},method='GET')=>context.worker.fetch(new Request(origin+path,{method,headers:{cookie:'session=test-browser'}}),env,{})};
 }
+
+test('asset decoding is skipped for HEAD and cached only after live approval, including the native decoder',async()=>{
+ for(const native of [false,true]){
+  const f=fixture({native}),env={session:session('viewer')};
+  assert.equal((await f.request('/engine.js',env,'HEAD')).status,200);assert.equal(f.decodes,0);
+  assert.equal(await (await f.request('/engine.js',env)).text(),privateMarker);assert.equal(f.decodes,1);
+  assert.equal(await (await f.request('/engine.js',env)).text(),privateMarker);assert.equal(f.decodes,1);
+  const revoked=await f.request('/engine.js',{session:anonymous});assert.equal(revoked.status,401);assert(!(await revoked.text()).includes(privateMarker));assert.equal(f.calls.length,4);assert.equal(f.decodes,1);
+ }
+});
+
+test('decoded asset memory remains bounded and evicted assets are decoded again',async()=>{
+ const f=fixture({native:true}),env={session:session('admin')};
+ for(const key of ['/app.js','/engine.js','/team.js'])f.assets[key].body=Buffer.alloc(4*1024*1024,7).toString('base64');
+ for(const key of ['/app.js','/engine.js','/team.js'])assert.equal((await f.request(key,env)).status,200);
+ assert.equal(vm.runInContext('decodedAssetBytes',f.context),8*1024*1024);assert.equal(vm.runInContext('decodedAssets.size',f.context),2);assert.equal(f.decodes,3);
+ await f.request('/app.js',env);assert.equal(f.decodes,4);assert.equal(vm.runInContext('decodedAssetBytes',f.context),8*1024*1024);
+});
+
+test('D1 supplies the private object store only when the existing R2 binding is absent',async()=>{
+ const f=fixture(),db={prepare(){throw Error('Unexpected query in the API stub');}},env={DB:db,session:session('admin')};
+ assert.equal((await f.request('/api/example',env)).status,202);assert.equal(typeof f.calls.at(-1).bucket.get,'function');assert.equal(env.BUCKET,undefined,'Request binding must not mutate the deployment environment');
+ const bucket={private:true};await f.request('/api/example',{...env,BUCKET:bucket});assert.equal(f.calls.at(-1).bucket,bucket);
+});
 
 test('anonymous and unapproved sessions cannot retrieve report assets directly, including versioned URLs and HEAD',async()=>{
  const f=fixture();

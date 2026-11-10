@@ -11,7 +11,7 @@ import {migrationZipChunks} from '../worker/zip.js';
 const git=promisify(execFile);
 const roots=['dist','worker','tests','migration','scripts'];
 const topFiles=['.gitignore','.openai/hosting.json','README.md','build.mjs'];
-const extensions=new Set(['.js','.mjs','.cjs','.css','.html','.md','.txt','.json','.webmanifest','.png','.woff2','.svg','.webp','.cs','.csproj']);
+const extensions=new Set(['.js','.mjs','.cjs','.css','.html','.md','.txt','.json','.sql','.webmanifest','.png','.woff2','.svg','.webp','.cs','.csproj']);
 export async function buildMigrationSource(root) {
   let commitSha=null, tracked, priorHashes=null;
   if(fs.existsSync(path.join(root,'.git'))){

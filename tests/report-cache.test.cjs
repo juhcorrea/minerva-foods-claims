@@ -11,6 +11,7 @@ function harness(){
  const requests=[],applied=[],messages=[];let fresh=payload(),meta=metadata(),failMeta=false,pauseMeta=null;
  const context={reportCache:createReportCache(),reportQuery,session:{approved:true},reportController:null,loadVersion:0,loadingReport:false,publishedMeta:null,AbortController,
   global:{setTimeout:()=>1,clearTimeout(){}},refreshControls(){},showEmptyReport(){},canUpdateBases:()=>true,setMessage:(...args)=>messages.push(args),
+  lockGate(_title,message){context.session=null;context.reportCache.clear();messages.push([message,true]);},
   app:{getOptions:()=>opts,setPublishedReport:value=>{applied.push(value);return true;}},
   api:async(url)=>{requests.push(url);if(url==='/api/report/meta'){if(failMeta)throw Object.assign(Error('Sem acesso'),{status:403});if(pauseMeta)return pauseMeta;return meta;}return fresh;}};
  vm.createContext(context);vm.runInContext(code,context);
@@ -62,6 +63,16 @@ test('equivalent filter sets share one query and all-years ignores inactive year
 });
 test('metadata access failure never displays the cached report',async()=>{
  const h=harness();await h.load();h.deny();assert.equal(await h.load(),false);assert.equal(h.applied.length,1);assert.equal(h.context.loadingReport,false);assert.equal(h.messages.at(-1)[1],true);
+});
+test('browser mode delegates calculation and still revalidates cached models with the server',async()=>{
+ const h=harness(),jobs=[];h.context.session.analysisMode='browser';h.context.global.MinervaClientAnalysis={load:async(options,{api,signal})=>{jobs.push({options,api,signal});return payload();}};
+ assert.equal(await h.load(),true);assert.equal(jobs.length,1);assert.equal(jobs[0].api,h.context.api);assert.equal(jobs[0].signal.aborted,false);assert.equal(h.requests.length,0);
+ assert.equal(await h.load(),true);assert.deepEqual(h.requests,['/api/report/meta']);assert.equal(jobs.length,1);assert.equal(h.applied[1],h.applied[0]);
+ h.setMeta(metadata('r2'));await h.load();assert.equal(jobs.length,2);assert(!h.requests.some(url=>url.startsWith('/api/report?')));
+});
+test('browser worker access loss locks the gate and does not apply a model',async()=>{
+ const h=harness();h.context.session.analysisMode='browser';h.context.global.MinervaClientAnalysis={load:async()=>{throw Object.assign(Error('Acesso encerrado'),{status:403});}};
+ assert.equal(await h.load(),false);assert.equal(h.context.session,null);assert.equal(h.applied.length,0);assert.equal(h.context.loadingReport,false);assert.equal(h.messages.at(-1)[1],true);
 });
 test('stale metadata response cannot replace a more recent navigation',async()=>{
  const h=harness();await h.load();let resolve;h.pause(new Promise(done=>resolve=done));const older=h.load();await Promise.resolve();

@@ -43,6 +43,7 @@ for (const file of files) {
       .replaceAll('/site.webmanifest', 'site.webmanifest');
     if (file === 'index.html') {
       text = text.replace('sizes="180x180" ', '')
+        .replace(/\s*<script src="client-(?:analysis|backup)\.js"><\/script>/g, '')
         .replace('Carregue suas planilhas para analisar os valores reais.', 'Explore os filtros, gráficos e exportações com os exemplos ilustrativos.')
         .replace('</head>', '  <link rel="stylesheet" href="demo-only.css">\n</head>')
         .replace('</body>', '  <script src="demo-start.js"></script>\n</body>');
@@ -116,5 +117,5 @@ for (const file of files.filter(file => /\.(css|js)$/.test(file) && !file.starts
     if (!fs.existsSync(path.join(output, match[1]))) throw new Error('Missing dynamic asset in ' + file + ': ' + match[1]);
   }
 }
-if (/team\.js|access\.js|MINERVA_HOSTED\s*=\s*true/.test(index)) throw new Error('Hosted access code must not load in the public demo');
+if (/team\.js|access\.js|client-(?:analysis|backup)\.js|MINERVA_HOSTED\s*=\s*true/.test(index)) throw new Error('Hosted access code must not load in the public demo');
 console.log(JSON.stringify({directory: 'build/demo', files: files.length + 3, datasets: 'synthetic only', backend: false}));

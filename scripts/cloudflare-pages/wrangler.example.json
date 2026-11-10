@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "claims-private-example",
+  "compatibility_date": "2026-11-10",
+  "pages_build_output_dir": "../../build/cloudflare-pages",
+  "vars": {
+    "AUTH_MODE": "cloudflare-access",
+    "CF_CLIENT_ANALYSIS": "1",
+    "CF_ACCESS_TEAM_DOMAIN": "configure-private-tenant.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "",
+    "ALLOWED_EMAIL_DOMAIN": "example.invalid"
+  },
+  "r2_buckets": [
+    {"binding": "BUCKET", "bucket_name": "claims-private-production-example"}
+  ],
+  "env": {
+    "preview": {
+      "r2_buckets": [
+        {"binding": "BUCKET", "bucket_name": "claims-private-preview-example"}
+      ]
+    }
+  }
+}
