@@ -533,7 +533,14 @@
   function allSourceYears(bdRows, controlRows) {
     const years=new Set(),add=year=>{const value=Number(year);if(Number.isInteger(value)&&value>=1900&&value<=2100)years.add(value);};
     for(const row of bdRows.slice(1)){const date=parseDate(row?.[1]);if(date)add(date.slice(0,4));}
-    for(const row of controlRows.slice(1)){const date=parseDate(row?.[17]);if(date)add(date.slice(0,4));add(row?.[1]);}
+    for(const row of controlRows.slice(1)){
+      const date=parseDate(row?.[17]);if(date)add(date.slice(0,4));
+      // Excel YEAR(blank Data Pagamento) caches 1900 in B. An unsupported
+      // derived year must not create a reporting period; retain the raw cell
+      // for source details/corrections and keep real BD/R dates independent.
+      const entryYear=Number(row?.[1]),dueDate=parseDate(row?.[13]);
+      if(entryYear!==1900||dueDate?.startsWith('1900-'))add(entryYear);
+    }
     return years.size?[...years].sort((a,b)=>a-b):[Number(today().slice(0,4))];
   }
   function analyze(bdRows, controlRows, options = {}) {
