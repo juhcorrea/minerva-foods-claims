@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {createDOM}=require('./dom-fixture.cjs');
 const source=fs.readFileSync(path.join(__dirname,'../dist/preferences.js'),'utf8');
-function harness({role='admin',hosted=true,late=false}={}){
+function harness({role='admin',hosted=true,late=false,saved={}}={}){
   const dom=createDOM(),{document,window,element}=dom,proto=Object.getPrototypeOf(document.body);
   proto.prepend=function(node){this.insertBefore(node,this.children[0]||null);};
   Object.defineProperty(proto,'innerHTML',{set(markup){
@@ -34,12 +34,13 @@ function harness({role='admin',hosted=true,late=false}={}){
   };
   if(!late)addToolbar();
   window.MINERVA_HOSTED=hosted;window.MinervaTeam={getProfile:()=>profile,logout(){profile=null;session();}};
-  window.matchMedia=()=>({matches:false,addEventListener(){}});window.localStorage={getItem:()=>null,setItem(){}};window.location={href:'https://example.invalid/',origin:'https://example.invalid'};
+  const storage=new Map([['minerva.claims.preferences.v1',JSON.stringify(saved)]]);
+  window.matchMedia=()=>({matches:false,addEventListener(){}});window.localStorage={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)};window.location={href:'https://example.invalid/',origin:'https://example.invalid'};
   window.setTimeout=()=>1;window.clearTimeout=()=>{};
   function session(){document.dispatchEvent({type:'minerva:session-updated'});}
   retry.addEventListener('click',()=>{profile={id:'example-profile',name:'Pessoa exemplo',role:'admin'};session();});
   vm.runInNewContext(source,{window,document,URL,console},{filename:'preferences.js'});
-  return {...dom,imports,main,actions,retry,addToolbar,get toolbar(){return toolbar;},get callbacks(){return callbacks;},get dialogOpened(){return dialogOpened;},session,setProfile(value){profile=value;session();},notify(){for(const observer of dom.observers.filter(o=>o.active))observer.callback([]);},get:id=>document.getElementById(id)};
+  return {...dom,imports,main,actions,retry,addToolbar,storage,get toolbar(){return toolbar;},get callbacks(){return callbacks;},get dialogOpened(){return dialogOpened;},session,setProfile(value){profile=value;session();},notify(){for(const observer of dom.observers.filter(o=>o.active))observer.callback([]);},get:id=>document.getElementById(id)};
 }
 for(const role of ['admin','editor','reviewer','viewer'])test('profile contains original controls and preserves '+role+' permissions',()=>{
   const h=harness({role}),toolbar=h.toolbar,publish=h.get('teamPublish'),manage=h.get('teamManage');
@@ -74,4 +75,28 @@ test('presentation and unauthenticated modes conceal profile and operational not
   const css=fs.readFileSync(path.join(__dirname,'../dist/preferences.css'),'utf8');
   for(const state of ['dashboard-presentation','team-session-pending','team-denied']){assert(css.includes('body.'+state+' #profilePanel'));assert(css.includes('body.'+state+' .profile-activity-status'));}
   assert(css.includes('.profile-controls [hidden]'));assert(css.includes('overscroll-behavior:contain'));
+});
+
+test('navigation modes persist independently and preserve the existing fullscreen control',async()=>{
+ const h=harness(),root=h.document.documentElement,sidebar=h.get('appSidebar'),toggle=h.get('menuToggle'),menu=h.get('navigationMenu'),fullscreen=h.get('fullscreenToggle'),parent=fullscreen.parentElement;
+ const choose=mode=>{toggle.click();assert.equal(menu.hidden,false);h.document.querySelector('[data-menu-mode="'+mode+'"]').click();assert.equal(menu.hidden,true);assert.equal(toggle.getAttribute('aria-expanded'),'false');assert.equal(h.document.activeElement,toggle);};
+ assert.equal(root.dataset.menuHidden,'false');assert.equal(root.dataset.menuCollapsed,'false');assert.equal(sidebar.inert,false);
+ choose('compact');assert.equal(root.dataset.menuCollapsed,'true');assert.equal(sidebar.inert,false);assert.equal(sidebar.getAttribute('aria-hidden'),null);
+ h.get('profileButton').click();assert.equal(h.get('profilePanel').hidden,false);h.window.MinervaPreferences.setMenuMode('hidden');assert.equal(h.get('profilePanel').hidden,true);assert.equal(sidebar.inert,true);assert.equal(sidebar.getAttribute('aria-hidden'),'true');assert.equal(root.dataset.menuHidden,'true');
+ const persisted=JSON.parse(h.storage.get('minerva.claims.preferences.v1'));assert.equal(persisted.menuHidden,true);assert.equal(harness({saved:persisted}).get('appSidebar').inert,true);
+ choose('expanded');assert.equal(root.dataset.menuHidden,'false');assert.equal(root.dataset.menuCollapsed,'false');assert.equal(sidebar.inert,false);assert.equal(sidebar.getAttribute('aria-hidden'),null);assert.equal(fullscreen.parentElement,parent);assert.equal(h.document.querySelectorAll('#fullscreenToggle').length,1);
+ let entered=0,left=0;root.requestFullscreen=async()=>{entered++;h.document.fullscreenElement=root;};h.document.exitFullscreen=async()=>{left++;h.document.fullscreenElement=null;};fullscreen.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(entered,1);assert.equal(fullscreen.getAttribute('aria-pressed'),'true');fullscreen.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(left,1);assert.equal(fullscreen.getAttribute('aria-pressed'),'false');
+ const legacy=harness({saved:{menuCollapsed:true}});assert.equal(legacy.document.documentElement.dataset.menuCollapsed,'true');assert.equal(legacy.document.documentElement.dataset.menuHidden,'false');assert.equal(legacy.get('appSidebar').inert,false);
+});
+
+test('navigation dropdown supports checked state, keyboard movement and dismissal without changing selection',()=>{
+ const h=harness({saved:{menuCollapsed:true}}),menu=h.get('navigationMenu'),toggle=h.get('menuToggle'),items=menu.querySelectorAll('[data-menu-mode]');
+ const key=(target,value)=>target.dispatchEvent({type:'keydown',key:value,bubbles:true,preventDefault(){}});
+ toggle.click();assert.equal(toggle.getAttribute('aria-haspopup'),'menu');assert.equal(menu.getAttribute('role'),'menu');assert.equal(h.document.activeElement,items[1]);assert.equal(items[1].getAttribute('aria-checked'),'true');assert(items.every(item=>item.getAttribute('role')==='menuitemradio'));
+ key(items[1],'ArrowDown');assert.equal(h.document.activeElement,items[2]);key(items[2],'ArrowDown');assert.equal(h.document.activeElement,items[0]);key(items[0],'End');assert.equal(h.document.activeElement,items[2]);key(items[2],'Home');assert.equal(h.document.activeElement,items[0]);key(items[0],'ArrowUp');assert.equal(h.document.activeElement,items[2]);
+ key(items[2],'Escape');assert.equal(menu.hidden,true);assert.equal(h.document.activeElement,toggle);assert.equal(h.window.MinervaPreferences.get().menuCollapsed,true);
+ key(toggle,'ArrowDown');assert.equal(h.document.activeElement,items[0]);h.document.dispatchEvent({type:'pointerdown',target:h.main});assert.equal(menu.hidden,true);
+ key(toggle,'ArrowUp');assert.equal(h.document.activeElement,items[2]);key(items[2],'Tab');assert.equal(menu.hidden,true);assert.equal(h.window.MinervaPreferences.get().menuHidden,false);
+ toggle.click();items[2].click();assert.equal(items[2].getAttribute('aria-checked'),'true');assert.equal(items[1].getAttribute('aria-checked'),'false');assert(toggle.title.includes('Escondido'));
+ const css=fs.readFileSync(path.join(__dirname,'../dist/preferences.css'),'utf8');assert.match(css,/html\[data-menu-hidden="true"\] \.sidebar\{display:none!important\}/);assert.match(css,/html\[data-menu-hidden="true"\] body:not\(\.dashboard-presentation\) \.app-shell\{margin-left:0!important\}/);
 });
