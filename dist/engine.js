@@ -31,8 +31,9 @@
   };
   const norm = v => {const value=text(v);return memo(analysisMemo?.norm,value,()=>value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' '));};
   const normalizeStatus = v => {const value=norm(v);return memo(analysisMemo?.status,value,()=>value.replace(/\s*[-–—]\s*/g, ' - '));};
-  const requiresControlLink = source => normalizeStatus(source?.[6]) === FORWARDED && norm(source?.[16]) !== 'SEGURO';
-  const controlLinkBasis = 'Exigir vínculo BD → Controle somente para G = RESSARCIMENTO ENCAMINHADO e Q — Área negociação diferente de SEGURO. A área segue Q, nunca AC — Negociação. Demais situações e Seguro não geram pendência por ausência de Controle.';
+  const insuranceClaim = source => norm(source?.[16]) === 'SEGURO';
+  const requiresControlLink = source => normalizeStatus(source?.[6]) === FORWARDED && !insuranceClaim(source);
+  const controlLinkBasis = 'Exigir vínculo BD → Controle somente para G = RESSARCIMENTO ENCAMINHADO e Q — Área negociação diferente de SEGURO. A área segue Q, nunca AC — Negociação. Demais situações não geram pendência por ausência de Controle. Registros com Q = SEGURO ficam fora de toda a Correção de base e dos candidatos a vínculo com o Controle, preservados na BD histórica. AC e Causador não definem essa exclusão.';
   function filterValues(options, plural, singular, normalize) {
     const input=Object.prototype.hasOwnProperty.call(options,plural)?options[plural]:options[singular],values=Array.isArray(input)?input:[input],seen=new Set();
     return values.map(text).filter(value=>{const key=normalize(value);if(!key||seen.has(key))return false;seen.add(key);return true;});
@@ -129,19 +130,20 @@
     const livestock=normalizeMarket(source[3])==='MI'&&/\bGADO\b/.test(norm(source[0])+' '+norm(source[2]));
     const generic=new Set(['TRANSPORTE','TRANSPORTES','TRANSPORTADORA','TRANSPORTADOR','TRANS','LOGISTICA','LOGISTICO','LOGISTICOS','LTDA','LIMITADA','SA','S','A','ME','EPP','E','DE','DA','DO','DAS','DOS','COMERCIO','SERVICOS']);
     const identifiers=value=>norm(value).split(/[^A-Z0-9]+/).filter(token=>token.length>1&&!generic.has(token));
-    const original=identifiers(source[10]),matched=[],rejected=[],unknownKeys=[];
+    const original=identifiers(source[10]),matched=[],rejected=[],unknownKeys=[],insuranceExcluded=[],insuranceOnlyKeys=[];
     for(const key of keys){
-      let found=false;
+      let found=false,insuranceFound=false;
       for(const claim of index.get(key)||[]){
+        if(norm(claim.negotiationArea??claim.source?.[16])==='SEGURO'){insuranceFound=true;insuranceExcluded.push(claim);continue;}
         const order=claim.order??claim.source?.[22],supplier=claim.supplier??claim.source?.[28],operation=claim.operation??claim.source?.[25];
         const orders=tokenizeRefs(order),explicitOrder=keys.some(reference=>orders.includes(reference));
         const target=identifiers(supplier),distinct=original.length>0&&target.length>0&&!original.some(token=>target.includes(token));
         if(livestock&&/^\d+$/.test(key)&&!explicitOrder&&OPS.has(normalizeStatus(operation))&&distinct){rejected.push(claim);continue;}
         found=true;matched.push(claim);
       }
-      if(!found)unknownKeys.push(key);
+      if(!found){if(insuranceFound)insuranceOnlyKeys.push(key);else unknownKeys.push(key);}
     }
-    return {keys,unresolvedParts,unknownKeys,matched:unique(matched),rejected:unique(rejected),complete:keys.length>0&&!unknownKeys.length&&!unresolvedParts.length};
+    return {keys,unresolvedParts,unknownKeys,matched:unique(matched),rejected:unique(rejected),insuranceExcluded:unique(insuranceExcluded),insuranceOnlyKeys,insuranceOnly:!matched.length&&insuranceExcluded.length>0&&!unknownKeys.length&&!unresolvedParts.length,complete:keys.length>0&&!unknownKeys.length&&!unresolvedParts.length&&!insuranceOnlyKeys.length};
   }
 
   function contextCollisionIssue(source,row,rejected) {
@@ -230,10 +232,10 @@
         index.get(k).add(c);
       }
       if (otherFilters && periodEligible && war) { excludedWar++; excludedWarAmount += c.claimed; }
-      if (otherFilters && !war && !rncDate) issue('INVALID_RNC_DATE', { row: c.row, reference: c.order || c.nf, supplier, bdRows: [c.row], detail: 'Data RNC vazia ou inválida; ocorrência fora dos totais por ano.' });
-      if (c.eligible && claimedValue == null) issue('INVALID_CLAIM_AMOUNT', { row: c.row, reference: c.order || c.nf, supplier, bdRows: [c.row], detail: 'Reclamado (USD) vazio ou inválido. Valor não somado; conferir a célula AJ.' });
-      if (c.eligible && !statusKey) issue('MISSING_CLAIM_STATUS', { row: c.row, reference: c.order || c.nf, supplier, bdRows: [c.row], detail: 'Situação da BD vazia. Reclamado incluído pela regra de exclusão; confirmar a classificação antes de conciliar recebimentos.' });
-      if (c.eligible && !keys.length) issue('MISSING_CLAIM_REFERENCE', { row: c.row, supplier, bdRows: [c.row], detail: 'Ocorrência sem Ordem/NF válida para cruzamento.' });
+      if (!insuranceClaim(r) && otherFilters && !war && !rncDate) issue('INVALID_RNC_DATE', { row: c.row, reference: c.order || c.nf, supplier, bdRows: [c.row], detail: 'Data RNC vazia ou inválida; ocorrência fora dos totais por ano.' });
+      if (!insuranceClaim(r) && c.eligible && claimedValue == null) issue('INVALID_CLAIM_AMOUNT', { row: c.row, reference: c.order || c.nf, supplier, bdRows: [c.row], detail: 'Reclamado (USD) vazio ou inválido. Valor não somado; conferir a célula AJ.' });
+      if (!insuranceClaim(r) && c.eligible && !statusKey) issue('MISSING_CLAIM_STATUS', { row: c.row, reference: c.order || c.nf, supplier, bdRows: [c.row], detail: 'Situação da BD vazia. Reclamado incluído pela regra de exclusão; confirmar a classificação antes de conciliar recebimentos.' });
+      if (!insuranceClaim(r) && c.eligible && !keys.length) issue('MISSING_CLAIM_REFERENCE', { row: c.row, supplier, bdRows: [c.row], detail: 'Ocorrência sem Ordem/NF válida para cruzamento.' });
     }
     const claims = all.filter(c => c.eligible);
     const suppliersMap = new Map();
@@ -292,10 +294,10 @@
       if (!r || !r.slice(0, 20).some(v => v != null && v !== '')) continue;
       meta.totalControlRows++;
       const payment = receiptAt(r, a + 1, asOf);
-      const {keys,unresolvedParts,unknownKeys,matched,rejected} = controlMatches(r,index);
-      if (includeReceipts && linkedStatusesMatch(matched,keys.length>0&&!unknownKeys.length&&!unresolvedParts.length,claimStatusFilter)) recordReceipt(r, a + 1, payment);
+      const {keys,unresolvedParts,unknownKeys,matched,rejected,complete} = controlMatches(r,index);
+      if (includeReceipts && linkedStatusesMatch(matched,complete,claimStatusFilter)) recordReceipt(r, a + 1, payment);
       if(rejected.length)issue('NF_CONTEXT_COLLISION',contextCollisionIssue(r,a+1,rejected));
-      const statusScoped=linkedStatusesMatch(matched,keys.length>0&&!unknownKeys.length&&!unresolvedParts.length,claimStatusFilter);
+      const statusScoped=linkedStatusesMatch(matched,complete,claimStatusFilter);
       const selected = statusScoped ? matched.filter(c => c.eligible) : [];
       if (!selected.length) {
         if (matched.length) meta.outsideScopeControlRows++;
@@ -310,7 +312,6 @@
       const matchedMarkets = unique(matched.map(c => c.marketKey));
       const matchedStatuses = unique(matched.map(c => c.statusKey));
       const allSelected = matched.every(c => c.eligible);
-      const complete = keys.length > 0 && unknownKeys.length === 0 && unresolvedParts.length === 0;
       const safe = complete && allSelected && supplierKeys.length === 1 && matchedYears.length === 1 && matchedMarkets.length === 1 && matchedStatuses.length === 1;
       const {received: receivedValue, compDate, compensationYear, compensationMonth, receiptAnalyst, confirmedPaid, markedPaid, validReceived} = payment;
       const expectedValue = number(r[14]), dueDate = parseDate(r[13]);
@@ -346,7 +347,7 @@
         if (matchedYears.length > 1) reasons.push('Mais de um ano de Data RNC');
         if (matchedMarkets.length > 1) reasons.push('Mercados conflitantes');
         if (matchedStatuses.length > 1) reasons.push('Situações BD diferentes, sem regra de rateio');
-        issue('AMBIGUOUS_LINK', {...issueBase, detail: `${reasons.join('. ')}. Recebimento não atribuído automaticamente.`});
+        if(reasons.length)issue('AMBIGUOUS_LINK', {...issueBase, detail: `${reasons.join('. ')}. Recebimento não atribuído automaticamente.`});
       } else {
         meta.linkedControlRows++;
         matched.forEach(c => c.matchedControlRows.push(inst.row));
@@ -571,7 +572,7 @@
       const supplier = text(row[28]) || '(SEM NEGOCIAÇÃO)';
       if (!supplierLabels.has(norm(supplier))) supplierLabels.set(norm(supplier), supplier);
       const date = parseDate(row[1]);
-      const claim = {row:n+1, order:text(row[22]), supplier, analyst:text(row[56]) || 'Não informado', operation:label, year:date ? Number(date.slice(0,4)) : null, market:text(row[3]), status:text(row[6]), claimed:number(row[35])};
+      const claim = {row:n+1, order:text(row[22]), supplier, analyst:text(row[56]) || 'Não informado', operation:label, year:date ? Number(date.slice(0,4)) : null, market:text(row[3]), status:text(row[6]), negotiationArea:text(row[16]), claimed:number(row[35])};
       for (const key of unique([...tokenizeRefs(row[22]), ...tokenizeRefs(row[24])])) {
         if (!index.has(key)) index.set(key, new Set()); index.get(key).add(claim);
       }
@@ -788,7 +789,7 @@
     const sourceOwners=new Map();for(const entry of components.values())for(const key of sourceKeys(entry))sourceOwners.set(key,entry);
     const standalone=new Map();for(const [index,issue] of (model?.issues||[]).entries()){
       const source=correctionIssueSource(issue),key=Number.isInteger(issue.row)&&issue.row>0?source+':'+issue.row:'unlinked:'+index;
-      let entry=sourceOwners.get(key);if(!entry){if(!standalone.has(key))standalone.set(key,{groups:[],audits:[],issues:[],bdRows:source==='BD'?validRows([issue.row]):[],controlRows:source==='Controle'?validRows([issue.row]):[]});entry=standalone.get(key);}entry.issues.push(issue);
+      let entry=sourceOwners.get(key);if(!entry){if(!standalone.has(key))standalone.set(key,{groups:[],audits:[],issues:[],bdRows:source==='BD'?validRows([issue.row]):[],controlRows:source==='Controle'?validRows([issue.row]):[]});entry=standalone.get(key);}entry.issues.push(issue);if(!Object.hasOwn(entry,'identityBdRows'))entry.identityBdRows=[...entry.bdRows];entry.bdRows.push(...validRows(issue.bdRows));
     }
     const warning=audit=>audit.uncertain||audit.hasClaimValueMismatch||audit.hasReceivedMismatch||audit.status!=='Conferido';
     return [...components.values(),...standalone.values()].filter(entry=>entry.groups.length||entry.issues.length||entry.audits.some(warning)).map(entry=>{
@@ -806,8 +807,12 @@
     // Filtered audits are projections of these original cells, not additional
     // identity. Their disappearance under a year/supplier filter must never
     // erase an acknowledgement. Source edits and added installments reopen it.
-    const unlinked=item.bdRows.length||item.controlRows.length?[]:sorted(item.issues.map(issue=>[issue.kind,correctionIssueSource(issue),issue.reference,issue.supplier,issue.amount].map(correctionIdentityValue)));
-    return JSON.stringify({schema:2,bd:source('bd',item.bdRows,bdRows),control:source('control',item.controlRows,controlRows),unlinked});
+    // Restoring omitted BD coordinates is a display/provenance repair. Retain
+    // the previous identity sources so unchanged acknowledgements survive; a
+    // newly diagnosed mixed insurance reference has its own discriminator.
+    const identityBdRows=[...new Set(item.identityBdRows||item.bdRows)].sort((a,b)=>a-b);
+    const unlinked=identityBdRows.length||item.controlRows.length?[]:sorted(item.issues.map(issue=>[issue.kind,correctionIssueSource(issue),issue.reference,issue.supplier,issue.amount].map(correctionIdentityValue)));
+    return JSON.stringify({schema:2,bd:source('bd',identityBdRows,bdRows),control:source('control',item.controlRows,controlRows),unlinked,...(item.issues.some(issue=>issue.kind==='INSURANCE_MIXED_REFERENCE')?{insuranceMixed:true}:{})});
   }
   function correctionReviewTargets(model, bdRows=[], controlRows=[]) {
     const occurrences=new Map();return buildCorrectionReviewItems(model).map(item=>{
@@ -854,7 +859,7 @@
     const rows=[],linked=new Set(),changes=[],correctedCells=new Set(model.corrections.map(change=>change.cell));
     const meta={allYears:true,totalBdRows:0,totalControlRows:0,forwardedBdRows:0,controlRequiredBdRows:0,insuranceExemptBdRows:0,bdWithoutControl:0,controlWithoutBd:0,partialLinks:0,yearDifferences:0,missingOperationRows:0,
       scope:'Base completa, de todos os anos, independente dos filtros financeiros. Operação em branco na BD; ressarcimento fora de Seguro sem vínculo no Controle; referências do Controle sem BD; vínculos parciais e divergências de Ano Entrada.',controlLinkBasis,
-      operationBasis:'BD Z — Operação em branco nas linhas úteis de qualquer ano ou situação. Conferir e preencher na origem, sem inferir pela ordem, fornecedor ou companhia marítima e sem alterar os cálculos.',
+      operationBasis:'BD Z — Operação em branco nas linhas úteis de qualquer ano ou situação, exceto Q = SEGURO. Conferir e preencher na origem, sem inferir pela ordem, fornecedor ou companhia marítima e sem alterar os cálculos.',
       yearBasis:'Controle B comparado ao ano de BD B — Data RNC, somente com referência completa e um único ano válido. Datas de pagamento/compensação e valores M/R/T permanecem intactos.'};
     const analysts=claims=>unique(claims.map(claim=>text(bdRows[claim.row-1]?.[56])||'Não identificado'));
     const add=(kind,type,source,row,reference,supplier,matched,detail,extra={})=>{
@@ -866,6 +871,13 @@
       meta.totalControlRows++;
       const row=n+1,linkage=controlMatches(source,index),matched=linkage.matched,reference=text(source[7]),supplier=text(source[10])||'Não informado';
       for(const claim of matched)linked.add(claim.row);
+      if(linkage.insuranceOnly)continue;
+      const mixedInsurance=matched.length>0&&linkage.insuranceOnlyKeys.length>0;
+      if(mixedInsurance){
+        meta.partialLinks++;
+        const insurance=linkage.insuranceExcluded,related=unique([...matched,...insurance]);
+        add('INSURANCE_MIXED_REFERENCE','Referência reúne claim e seguro','Controle',row,reference,supplier,related,`Esta referência reúne claim e seguro. Confira a qual registro pertence o recebimento. Controle!H${row} contém referência exclusiva de Seguro (${linkage.insuranceOnlyKeys.join('; ')}), conforme Área negociação na BD Q. O valor agregado não foi dividido nem comparado somente com o claim. Pagamentos confirmados M/R/T são preservados.`,{sourceCells:['Controle!H'+row,...related.flatMap(claim=>['BD!Q'+claim.row,'BD!W'+claim.row,'BD!Y'+claim.row])],insuranceReferences:[...linkage.insuranceOnlyKeys],insuranceBdRows:insurance.map(claim=>claim.row),claimBdRows:matched.map(claim=>claim.row)});
+      }
       if(!matched.length){
         meta.controlWithoutBd++;
         const reason=!linkage.keys.length?'Referência vazia ou genérica; informar uma ordem/NF válida.':linkage.rejected.length?'Coincidência de NF rejeitada por contexto incompatível; conferir a ordem e a BD.':'Referência não localizada na BD mestre.';
@@ -873,7 +885,7 @@
         continue;
       }
       if(!linkage.complete){
-        meta.partialLinks++;const missing=[...linkage.unknownKeys,...linkage.unresolvedParts];
+        const missing=[...linkage.unknownKeys,...linkage.unresolvedParts];if(!missing.length&&linkage.insuranceOnlyKeys.length)continue;if(!mixedInsurance)meta.partialLinks++;
         add('CONTROL_PARTIAL_LINK','Vínculo parcial','Controle',row,reference,supplier,matched,`Controle!H${row}: referência parcialmente vinculada. Conferir ${missing.join('; ')||'o contexto das referências'}. Nenhuma correção automática de ano para esta linha.`,{sourceCells:['Controle!H'+row],unknownReferences:missing});
         continue;
       }
@@ -893,7 +905,7 @@
     for(let n=1;n<bdRows.length;n++){
       const source=bdRows[n];if(!source||!source.slice(0,36).some(value=>value!=null&&value!==''))continue;
       const row=n+1;
-      if(!text(source[25])&&source.slice(0,36).some(value=>text(value)!=='')){
+      if(!insuranceClaim(source)&&!text(source[25])&&source.slice(0,36).some(value=>text(value)!=='')){
         meta.missingOperationRows++;
         const sgr=text(source[0]),order=text(source[22]),nf=text(source[24]),supplier=text(source[28])||'Não informado';
         add('BD_MISSING_OPERATION','Operação em branco','BD',row,order||nf||sgr,supplier,[{row}],`BD!Z${row}: Operação em branco. Conferir e preencher na BD de origem. SGR em A${row}: ${sgr||'não informado'}; Ordem em W${row}: ${order||'não informada'}; NF em Y${row}: ${nf||'não informada'}; Negociação em AC${row}: ${supplier}. Nenhuma operação foi inferida; valores e critérios financeiros permanecem preservados.`,{sourceCells:['BD!Z'+row],cell:'Z'+row,field:'Operação',sgr,order,nf,originalOperation:source[25]??null});
@@ -972,7 +984,7 @@
       const source=controlRows[n];if(!source||!source.slice(0,21).some(value=>value!=null&&value!==''))continue;
       const linkage=controlMatches(source,index),matched=linkage.matched.map(claim=>claim.row);if(!matched.length)continue;
       const row=n+1,complete=linkage.complete;
-      controls.set(row,{row,source,complete});for(const claimRow of matched)join('b'+claimRow,'c'+row);
+      controls.set(row,{row,source,complete,insuranceOnlyKeys:linkage.insuranceOnlyKeys,insuranceBdRows:linkage.insuranceExcluded.map(claim=>claim.row)});for(const claimRow of matched)join('b'+claimRow,'c'+row);
     }
     const components=new Map();
     for(const claim of claims.values()){
@@ -985,6 +997,7 @@
     for(const component of components.values()){
       const scoped=component.claims.filter(claim=>selected.has(claim.row));if(!scoped.length)continue;
       const exempt=component.claims.filter(claim=>!requiresControlLink(claim.source));
+      if(component.controls.some(control=>control.insuranceOnlyKeys.length)){const insuranceRows=unique(component.controls.flatMap(control=>control.insuranceBdRows));excludedMixedComponents.push({bdRows:unique([...component.claims.map(claim=>claim.row),...insuranceRows]),requiredBdRows:scoped.map(claim=>claim.row),exemptBdRows:insuranceRows,controlRows:component.controls.map(control=>control.row),reason:'Referência composta também contém ordem exclusiva de Seguro; parcela agregada preservada, sem comparação parcial nem rateio.'});continue;}
       // A shared installment cannot be compared to only its required claims.
       // Insurance and other statuses are outside this audit; never allocate O.
       if(exempt.length){excludedMixedComponents.push({bdRows:component.claims.map(claim=>claim.row).sort((a,b)=>a-b),requiredBdRows:scoped.map(claim=>claim.row).sort((a,b)=>a-b),exemptBdRows:exempt.map(claim=>claim.row).sort((a,b)=>a-b),controlRows:component.controls.map(control=>control.row).sort((a,b)=>a-b),reason:'Componente com claims dentro e fora do escopo de vínculo obrigatório; auditoria monetária não aplicada, sem rateio de parcelas.'});continue;}
@@ -1191,7 +1204,7 @@
     model.meta.ambiguousReceived=money(sum(model.installments.filter(installment=>installment.linkState==='review'&&installment.inPeriod&&!rowMap.has(installment.row)),'received'));
     for(const issue of model.issues){
       if(!rowMap.has(issue.row))continue;
-      if(issue.kind==='AMBIGUOUS_LINK')issue.detail='O vínculo aos claims do recorte exige conferência. O pagamento entra no recebido por M = Pago, R e T válidos; referências incompletas e divergências de classificação não retiram o caixa do Controle.';
+      if(issue.kind==='AMBIGUOUS_LINK')issue.detail=issue.detail+' O pagamento entra no recebido por M = Pago, R e T válidos; referências incompletas e divergências de classificação não retiram o caixa do Controle.';
       if(issue.kind==='PAYMENT_ON_NEGOTIATING_CLAIM')issue.detail='Pagamento incluído no recebido por M = Pago, R e T válidos. A ocorrência ainda está em negociação na BD; conferir sua situação. O valor em negociação segue a classificação da BD.';
       if(issue.kind==='PAYMENT_ON_OTHER_CLAIM_STATUS')issue.detail='Pagamento incluído no recebido por M = Pago, R e T válidos, independentemente da situação do claim na BD.';
     }
