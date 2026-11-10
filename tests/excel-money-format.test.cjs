@@ -1,0 +1,16 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),XLSX=require('../dist/vendor/xlsx.full.min.js');
+const amount=1234.5678;
+function model(){return {receiptReport:{years:[2026],annual:[{year:2026,received:amount,count:1}],analysts:[{year:2026,name:'Analista demonstração',received:amount,count:1}],rows:[{row:12,reference:'DEMO/1',originalSupplier:'Fornecedor demonstração',receiptAnalyst:'Analista demonstração',status:'Pago',originalStatus:'Pago',compensationYear:2026,compensationMonth:'2026-10',compDate:'2026-10-07',received:amount,type:'Boleto'}]}};}
+function exported(file,apiName){const window={XLSX},document={getElementById:()=>null,addEventListener(){}};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../dist',file),'utf8'),{window,document});const m=model(),before=JSON.stringify(m),api=window[apiName];api.render(m);api.setViewState({year:2026,month:0});const book=api.exportWorkbook();assert.equal(JSON.stringify(m),before);return book;}
+const numeric=(sheet,address,value,format)=>{assert.equal(sheet[address].t,'n');assert.equal(sheet[address].v,value);assert.equal(sheet[address].z,format);};
+test('analyst Excel exposes monetary cents without changing exact amounts, counts, years or percentages',()=>{
+ const wb=exported('analysts.js','MinervaAnalysts');numeric(wb.Sheets['Resumo do ano'],'B2',2026,'0');numeric(wb.Sheets['Resumo do ano'],'B3',amount,'#,##0.00');numeric(wb.Sheets['Resumo do ano'],'B4',1,'#,##0');numeric(wb.Sheets['Resumo do ano'],'B5',300000,'#,##0.00');
+ numeric(wb.Sheets['Por analista'],'B2',amount,'#,##0.00');numeric(wb.Sheets['Por analista'],'C2',1,'#,##0');numeric(wb.Sheets['Por analista'],'D2',1,'0%');numeric(wb.Sheets['Parcelas pagas'],'F2',2026,'0');numeric(wb.Sheets['Parcelas pagas'],'H2',amount,'#,##0.00');numeric(wb.Sheets['Parcelas pagas'],'I2',12,'#,##0');
+ const read=XLSX.read(XLSX.write(wb,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true});numeric(read.Sheets['Parcelas pagas'],'H2',amount,'#,##0.00');assert.equal(XLSX.utils.format_cell(read.Sheets['Parcelas pagas'].H2),'1,234.57');
+});
+test('meeting Excel formats money by column or indicator, keeping all parcel counts integral',()=>{
+ const wb=exported('meetings.js','MinervaMeetings');numeric(wb.Sheets['Resumo da reuniao'],'B3',amount,'#,##0.00');numeric(wb.Sheets['Resumo da reuniao'],'B4',1,'#,##0');numeric(wb.Sheets['Resumo da reuniao'],'B5',amount,'#,##0.00');numeric(wb.Sheets['Resumo da reuniao'],'B6',1,'#,##0');
+ for(const name of ['Por analista','Por fornecedor']){numeric(wb.Sheets[name],'B2',amount,'#,##0.00');numeric(wb.Sheets[name],'C2',1,'#,##0');numeric(wb.Sheets[name],'D2',1,'0%');}numeric(wb.Sheets['Evolucao mensal'],'B11',amount,'#,##0.00');numeric(wb.Sheets['Evolucao mensal'],'C11',1,'#,##0');numeric(wb.Sheets['Parcelas do recorte'],'H2',amount,'#,##0.00');numeric(wb.Sheets['Parcelas do recorte'],'I2',12,'#,##0');assert.notEqual(wb.Sheets['Parcelas do recorte'].E2.z,'#,##0.00');
+ const read=XLSX.read(XLSX.write(wb,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true});numeric(read.Sheets['Parcelas do recorte'],'H2',amount,'#,##0.00');
+});

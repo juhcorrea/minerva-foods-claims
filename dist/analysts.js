@@ -66,7 +66,7 @@
     const sheet = global.XLSX.utils.aoa_to_sheet([headers, ...rows]);
     sheet['!cols'] = headers.map((_, index) => ({wch: numeric.includes(index) || ratios.includes(index) ? 22 : 29}));
     sheet['!autofilter'] = {ref: global.XLSX.utils.encode_range({s: {r: 0, c: 0}, e: {r: rows.length, c: headers.length - 1}})};
-    for (let row = 1; row <= rows.length; row++) for (const column of [...numeric, ...ratios]) { const cell = sheet[global.XLSX.utils.encode_cell({r: row, c: column})]; if (cell?.t === 'n') cell.z = ratios.includes(column) ? '0%' : '#,##0'; }
+    for (let row = 1; row <= rows.length; row++) for (const column of [...numeric, ...ratios]) { const cell = sheet[global.XLSX.utils.encode_cell({r: row, c: column})]; const monetary = /\bUSD\b/.test(headers[column]) || (headers[0] === 'Indicador' && column === 1 && /\bUSD\b/.test(rows[row - 1][0])); if (cell?.t === 'n') cell.z = ratios.includes(column) ? '0%' : monetary ? '#,##0.00' : '#,##0'; }
     global.XLSX.utils.book_append_sheet(workbook, sheet, name);
   }
   function exportWorkbook() {

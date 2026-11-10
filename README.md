@@ -47,7 +47,7 @@ A perda do comparativo é `Reclamado − (Recebido comparável + Em negociação
 
 A visão geral e os controles iniciam no ano vigente disponível. Fornecedores consolida todos os anos das bases; FUP considera a carteira aberta de qualquer ano. Os filtros de operação e fornecedor continuam aplicáveis. O FUP usa somente negociações procedentes: pendências contendo **FUP SUPRIMENTOS** ficam fora dos totais e das listas, e o **Jurídico aparece apenas como valor agregado**. Seu total geral é Negociações + Jurídico. Os filtros locais afetam a tabela e sua exportação; os cards mantêm o recorte global identificado.
 
-No detalhe do FUP, os motivos são agrupados e ordenados pelo maior subtotal; os claims de cada motivo começam pelo maior valor. Dias em aberto usam a data atual de São Paulo e a abertura registrada na BD; datas ausentes ou futuras ficam para conferência. O Excel traz os detalhes contíguos e uma aba com subtotais por motivo. SGR é contado uma vez no total, mesmo quando aparece em mais de um fornecedor; as contagens dos grupos não são necessariamente somáveis.
+No detalhe do FUP, os motivos são agrupados e ordenados pelo maior subtotal; os claims de cada motivo começam pelo maior valor. Dias em aberto usam a data atual de São Paulo e a abertura registrada na BD; datas ausentes ou futuras ficam para conferência. O Excel traz uma visão de reunião com grupos recolhíveis por fornecedor e motivo, a base do recorte e os critérios. SGR é contado uma vez no total, mesmo quando aparece em mais de um fornecedor; as contagens dos grupos não são necessariamente somáveis.
 
 ## Build e testes
 
@@ -65,6 +65,8 @@ Para gerar somente a demonstração estática, execute `node scripts/build-demo.
 Os testes de navegador requerem Playwright/Chromium. A pasta `tests/openxml-validator/` permite verificar apresentações geradas usando o Microsoft Open XML SDK. As licenças de terceiros permanecem junto às bibliotecas.
 
 ## Histórico de versões
+
+As [notas de 10/11/2026](docs/RELEASE-2026-11-10.md) explicam o escopo de conferência de Seguro, a fila de correções, os formatos monetários e a republicação necessária para a projeção compartilhada v2.
 
 Cada atualização da cópia pública é registrada no [histórico de commits](https://github.com/juhcorrea/minerva-foods-claims/commits/main/). A branch `gh-pages` conserva o histórico da demonstração publicada. Esses históricos contêm somente código e exemplos sanitizados; o histórico operacional privado não é importado.
 

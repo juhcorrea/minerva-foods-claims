@@ -1,8 +1,9 @@
 import {cleanup} from './client-report-cleanup.js';
 // Small authenticated storage operations for browser-side analysis. Source
 // worksheets stay private; readers receive only the fields used by the engine.
+export const CLIENT_REPORT_PROJECTION_VERSION = 2;
 export const clientReportColumns = Object.freeze({
- bd:Object.freeze([0,1,3,6,7,8,9,10,13,19,22,24,25,28,31,32,35,40,46,49,56,57,61,62,63]),
+ bd:Object.freeze([0,1,3,6,7,8,9,10,13,16,19,22,24,25,28,31,32,35,40,46,49,56,57,61,62,63]),
  control:Object.freeze([0,1,2,3,7,9,10,11,12,13,14,17,19,20,21,23,30,31])
 });
 export function projectClientRows(sheet,rows,firstRow=0){
@@ -24,7 +25,9 @@ export function createClientReportHandler(deps){
  const isId=id=>typeof id==='string'&&/^[a-f0-9-]{36}$/i.test(id);
  const stageKey=id=>'private/client-staging/'+id+'.json';
  const objectKey=(id,sheet,index,original=false)=>`private/client-reports/${id}/${sheet}/${index}.${original?'original':'projected'}.json`;
- const meta=value=>value?{revision:value.revision,updatedAt:value.updatedAt,updatedBy:actorLabel(value.updatedBy,value.updatedByUserId),files:value.files,asOf:value.asOf}:null;
+ const projectionVersion=value=>value?.projectionVersion??1;
+ const requireCurrentProjection=value=>{if(value&&projectionVersion(value)!==CLIENT_REPORT_PROJECTION_VERSION)fail(409,'REPORT_PROJECTION_OUTDATED','A administração precisa importar e publicar novamente as duas bases para atualizar a conferência de Seguro.');};
+ const meta=value=>value?{revision:value.revision,updatedAt:value.updatedAt,updatedBy:actorLabel(value.updatedBy,value.updatedByUserId),files:value.files,asOf:value.asOf,projectionVersion:projectionVersion(value)}:null;
  const fields=(body,allowed)=>{if(Object.keys(body).some(key=>!allowed.includes(key)))fail(400,'INVALID_REQUEST','A solicitação contém campos inesperados.');};
  const label=(value,fallback)=>{if(value==null)return fallback;if(typeof value!=='string'||value.length>240||/[\u0000-\u001f]/.test(value))fail(400,'INVALID_FILENAME','Confira o nome do arquivo.');return value.trim()||fallback;};
  async function published(bucket){const found=await jsonObject(bucket,REPORT);if(found.value&&(found.value.schemaVersion!==2||!Array.isArray(found.value.parts)||!isId(found.value.revision)))fail(503,'REPORT_INVALID','A publicação precisa ser conferida.');return found;}
@@ -34,6 +37,7 @@ export function createClientReportHandler(deps){
   if(!isId(id))fail(400,'INVALID_UPLOAD','A atualização é inválida.');
   const found=await jsonObject(bucket,stageKey(id)),value=found.value;
   if(!value||value.schemaVersion!==2||value.ownerId!==actorOf(access).id)fail(404,'UPLOAD_NOT_FOUND','A atualização não foi encontrada para este perfil.');
+  if(projectionVersion(value)!==CLIENT_REPORT_PROJECTION_VERSION)fail(409,'UPLOAD_PROJECTION_OUTDATED','A forma de preparar as bases foi atualizada. Inicie a publicação novamente para enviar todas as colunas necessárias.');
   if(Date.parse(value.expiresAt)<=now())fail(409,'UPLOAD_EXPIRED','A atualização expirou. Publique as bases novamente.');
   return found;
  }
@@ -47,7 +51,7 @@ export function createClientReportHandler(deps){
   const asOf=body.asOf||engine.today();if(typeof asOf!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(asOf)||!engine.parseDate(asOf))fail(400,'INVALID_DATE','Informe uma data de análise válida.');
   const current=await published(bucket),expected=body.expectedRevision;
   if(typeof expected!=='string'||expected!==(current.value?.revision||'none'))fail(409,'REPORT_CHANGED','Outra atualização foi publicada. Atualize a visão antes de publicar.');
-  const id=uuid(),stage={schemaVersion:2,id,ownerId:actorOf(access).id,expectedRevision:expected,expectedEtag:current.etag,expectedRows:body.expectedRows,files,asOf,createdAt:stamp(),expiresAt:new Date(now()+2*3600000).toISOString(),parts:[],rows:{bd:0,control:0},cells:0,bytes:0};
+  const id=uuid(),stage={schemaVersion:2,projectionVersion:CLIENT_REPORT_PROJECTION_VERSION,id,ownerId:actorOf(access).id,expectedRevision:expected,expectedEtag:current.etag,expectedRows:body.expectedRows,files,asOf,createdAt:stamp(),expiresAt:new Date(now()+2*3600000).toISOString(),parts:[],rows:{bd:0,control:0},cells:0,bytes:0};
   await confirmEditorPermission(bucket,access);
   if(!await putConditional(bucket,stageKey(id),stage,null))fail(409,'UPLOAD_CHANGED','Tente iniciar a atualização novamente.');
   return response({uploadId:id,maxPartBytes:MAX_PART},201);
@@ -85,7 +89,7 @@ export function createClientReportHandler(deps){
   const {value:current,etag}=await published(bucket);
   if(current?.revision===id)return response({...meta(current),model:null});
   if((current?.revision||'none')!==stage.expectedRevision||etag!==stage.expectedEtag)fail(409,'REPORT_CHANGED','Outra atualização foi publicada. Recarregue o relatório antes de publicar.');
-  const actor=actorOf(access),saved={schemaVersion:2,revision:id,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,files:stage.files,asOf:stage.asOf,parts:stage.parts,rows:stage.rows,projectionVersion:1};
+  const actor=actorOf(access),saved={schemaVersion:2,revision:id,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,files:stage.files,asOf:stage.asOf,parts:stage.parts,rows:stage.rows,projectionVersion:stage.projectionVersion};
   await confirmEditorPermission(bucket,access);
   if(!await putConditional(bucket,REPORT,saved,etag))fail(409,'REPORT_CHANGED','Outra atualização foi publicada ao mesmo tempo. Atualize a visão.');
   stage.committed=true;await putConditional(bucket,stageKey(id),stage,stageEtag);
@@ -110,7 +114,10 @@ export function createClientReportHandler(deps){
   fail(409,'CORRECTION_PROGRESS_CHANGED','Outra marcação foi salva ao mesmo tempo. Tente novamente.');
  }
  async function handle({request,url,bucket,access}){
-  if(url.pathname==='/api/report/meta'&&request.method==='GET')return response({reportMeta:await metadata(bucket),correctionProgressRevision:(await progress(bucket)).revision,agingDate:engine.today(),analysisMode:'browser'});
+  if(url.pathname==='/api/report/meta'&&request.method==='GET'){
+   const {value:saved}=await published(bucket);requireCurrentProjection(saved);
+   return response({reportMeta:meta(saved),correctionProgressRevision:(await progress(bucket)).revision,agingDate:engine.today(),analysisMode:'browser'});
+  }
   if(url.pathname==='/api/correction-progress'&&request.method==='POST')return saveProgress(bucket,request,access);
   if(url.pathname==='/api/report')fail(409,'BROWSER_ANALYSIS_REQUIRED','Atualize a página para usar o processamento no navegador.');
   if(url.pathname==='/api/client-report/start'&&request.method==='POST')return start(bucket,request,access);
@@ -133,13 +140,15 @@ export function createClientReportHandler(deps){
    if(request.method!=='GET')fail(405,'METHOD_NOT_ALLOWED','Use a consulta do relatório.');
    const original=url.pathname.endsWith('/backup');if(original&&access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode baixar o backup privado.');
    const {value:saved}=await published(bucket),tracking=await progress(bucket);
-   return response({...meta(saved),schemaVersion:2,projectionVersion:1,parts:saved?publicParts(saved,original):[],rows:saved?.rows||{bd:0,control:0},progress:original?(await readCorrectionProgress(bucket)).value:tracking,analysisMode:'browser',...(original?{capturedAt:stamp(),reportMeta:saved?{schemaVersion:1,revision:saved.revision,updatedAt:saved.updatedAt,updatedBy:saved.updatedBy,updatedByUserId:saved.updatedByUserId,asOf:saved.asOf,files:saved.files}:null,acl:(await readAcl(bucket)).value,source:migrationSource?{sha256:migrationSource.sha256,fileCount:migrationSource.fileCount,commitSha:migrationSource.commitSha,restorationInstructions:migrationSource.restorationInstructions,partCount:Math.ceil(migrationSource.base64.length/65536)}:null}:{})});
+   if(!original)requireCurrentProjection(saved);
+   return response({...meta(saved),schemaVersion:2,projectionVersion:saved?projectionVersion(saved):CLIENT_REPORT_PROJECTION_VERSION,parts:saved?publicParts(saved,original):[],rows:saved?.rows||{bd:0,control:0},progress:original?(await readCorrectionProgress(bucket)).value:tracking,analysisMode:'browser',...(original?{capturedAt:stamp(),reportMeta:saved?{schemaVersion:1,revision:saved.revision,updatedAt:saved.updatedAt,updatedBy:saved.updatedBy,updatedByUserId:saved.updatedByUserId,asOf:saved.asOf,files:saved.files}:null,acl:(await readAcl(bucket)).value,source:migrationSource?{sha256:migrationSource.sha256,fileCount:migrationSource.fileCount,commitSha:migrationSource.commitSha,restorationInstructions:migrationSource.restorationInstructions,partCount:Math.ceil(migrationSource.base64.length/65536)}:null}:{})});
   }
   if(url.pathname==='/api/client-report/parts'&&request.method==='GET'){
    const original=url.searchParams.get('original')==='1';if(original&&access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode baixar as bases originais.');
    const revision=url.searchParams.get('revision'),sheet=url.searchParams.get('sheet'),index=Number(url.searchParams.get('index'));
    if(!isId(revision)||!Object.hasOwn(clientReportColumns,sheet)||!url.searchParams.has('index')||!Number.isInteger(index)||index<0)fail(400,'INVALID_PART','Selecione um trecho válido da base.');
    const {value:saved}=await published(bucket);if(saved?.revision!==revision)fail(409,'REPORT_CHANGED','O relatório mudou. Atualize a visão.');
+   if(!original)requireCurrentProjection(saved);
    const part=saved.parts.find(item=>item.sheet===sheet&&item.index===index);if(!part)fail(404,'PART_NOT_FOUND','Este trecho não pertence à publicação.');
    const object=await bucket.get(objectKey(revision,sheet,index,original));if(!object)fail(503,'REPORT_INCOMPLETE','A base publicada precisa ser conferida.');
    return new Response(object.body,{headers:{'content-type':'application/json; charset=utf-8','cache-control':'private, no-store','x-content-type-options':'nosniff','etag':`"${original?part.originalSha256:part.sha256}"`}});

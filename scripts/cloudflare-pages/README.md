@@ -34,6 +34,12 @@ O modo foi preparado para evitar o cálculo financeiro dentro do limite de CPU d
 
 ## Verificação
 
+### Atualização da projeção das bases
+
+A projeção v2 inclui a coluna Q da BD (`Área negociação`, índice 16), necessária para distinguir os claims fora de Seguro. Depois de atualizar o código de uma instalação existente, importe e publique novamente **BD e Controle** pelo fluxo administrativo. O código exige uma nova publicação completa: não reutilize partes nem conclua uploads iniciados na versão anterior.
+
+Enquanto a publicação armazenada estiver na projeção anterior, as consultas de análise retornam `REPORT_PROJECTION_OUTDATED`, com orientação para republicar as duas bases. Isso também impede reutilizar um resultado antigo do cache. O backup administrativo das bases originais permanece disponível. A nova publicação recebe `projectionVersion: 2`; confirme esse estado e a leitura do painel antes de considerar a atualização operacional concluída. A demonstração pública não usa essas APIs nem contém bases a migrar.
+
 Execute `node --test tests/cloudflare-pages-artifact.test.mjs tests/client-analysis.test.mjs tests/entry-asset-access.test.mjs tests/d1-store.test.mjs`. Os testes conferem inventário, roteamento, proteção de arquivos privados e da API, paridade financeira, integridade, cancelamento, armazenamento e preservação dos arquivos Sites. O script informa SHA-256 do Worker, quantidade de assets, tamanho bruto e gzip. O backup exige `sourceCommit` válido: faça o build final a partir do commit limpo, depois de versionar os arquivos novos; `sourceCommit: null` identifica um pacote de desenvolvimento cujo download de restauração será recusado.
 
 A documentação oficial consultada em 10/11/2026 indica limite de 64 MiB descomprimidos e nenhum limite gzip; o valor comprimido é informado para diagnóstico. O tempo de inicialização e o uso de CPU dependem do runtime e precisam ser verificados no destino.

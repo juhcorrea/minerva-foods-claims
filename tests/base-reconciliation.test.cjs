@@ -17,7 +17,7 @@ test('historical grouped claims produce one year correction per Control row in e
 test('BD missing-Control alerts require forwarded status and keep exact rows with no inferred analyst',()=>{
   const model=run([claim('FWD/1',{56:null}),claim('NEG/1',{6:'EM NEGOCIAÇÃO - PROCEDENTE'}),claim('NO/1',{6:'RESPONDIDO - NÃO PROCEDE'}),claim('FWD/2',{1:'2027-01-01'})],[]);
   const missing=model.baseReconciliation.rows.filter(issue=>issue.kind==='CLAIM_FORWARDED_WITHOUT_CONTROL');
-  assert.deepEqual(missing.map(issue=>issue.bdRows),[[2],[5]]);assert.equal(missing[0].amount,null);assert.deepEqual(missing[0].analysts,['Não identificado']);assert.equal(ui.window.MinervaCorrectionImpact.issueSource(missing[0]),'BD');assert.deepEqual(missing[0].sourceCells,['BD!G2','BD!W2','BD!Y2']);
+  assert.deepEqual(missing.map(issue=>issue.bdRows),[[2],[5]]);assert.equal(missing[0].amount,null);assert.deepEqual(missing[0].analysts,['Não identificado']);assert.equal(ui.window.MinervaCorrectionImpact.issueSource(missing[0]),'BD');assert.deepEqual(missing[0].sourceCells,['BD!G2','BD!Q2','BD!W2','BD!Y2']);
   assert.equal(missing[0].type,'Ressarcimento sem vínculo no Controle');assert.match(missing[0].detail,/sem ordem\/NF correspondente identificada no Controle/);assert.match(missing[0].detail,/referência divergente/);
 });
 test('Control missing or partial references remain explicit and confirmed payments stay counted once',()=>{
@@ -25,7 +25,7 @@ test('Control missing or partial references remain explicit and confirmed paymen
   assert.equal(model.summary.received,40);assert.equal(model.baseReconciliation.meta.controlWithoutBd,3);assert.equal(model.baseReconciliation.meta.partialLinks,1);
   const partial=model.baseReconciliation.rows.find(issue=>issue.kind==='CONTROL_PARTIAL_LINK');assert.deepEqual(partial.unknownReferences,['MISSING/2']);assert.deepEqual(partial.bdRows,[2]);assert.deepEqual(partial.controlRows,[3]);assert.equal(model.baseReconciliation.meta.bdWithoutControl,0);
   assert.equal(model.corrections.filter(change=>change.field==='Ano Entrada').length,0);
-  const queue=ui.window.MinervaCorrectionImpact.buildQueue(model);for(const issue of model.baseReconciliation.rows)assert.equal(queue.flatMap(entry=>entry.issues).filter(value=>value===issue).length,1);assert(queue.some(entry=>entry.types.includes('Controle sem BD')));
+  const queue=ui.window.MinervaCorrectionImpact.buildQueue(model);for(const issue of model.baseReconciliation.rows)assert.equal(queue.flatMap(entry=>entry.issues).filter(value=>value===issue).length,1);assert(queue.some(entry=>entry.issues.some(issue=>issue.kind==='CONTROL_WITHOUT_BD')));
   for(const entry of queue.filter(entry=>!entry.audits.length))assert.equal(entry.referenceAmount,null,'Never substitute payment T/O for a claim reference amount');
 });
 test('same numeric NF with rejected livestock context does not become a false master match',()=>{
@@ -41,7 +41,7 @@ test('mixed or invalid RNC years never produce an unsafe year correction',()=>{
 });
 test('master alerts join the existing correction group and lean count equals the complete review queue',()=>{
   const bd=[claim('A/1',{1:'2025-01-01'})],cr=[control('A/1',{1:2026})],full=run(bd,cr),lean=run(bd,cr,{reportView:'suppliers'}),queue=ui.window.MinervaCorrectionImpact.buildQueue(full);
-  assert.equal(queue.length,1);assert.equal(queue[0].groups.length,1);assert(queue[0].issues.some(issue=>issue.reconciliation));assert(queue[0].types.includes('Ano divergente'));assert.deepEqual(Array.from(queue[0].rncDates),['2025-01-01']);
+  assert.equal(queue.length,1);assert.equal(queue[0].groups.length,1);assert(queue[0].issues.some(issue=>issue.reconciliation));assert(queue[0].issues.some(issue=>issue.kind==='CONTROL_RNC_YEAR_MISMATCH'));assert.deepEqual(Array.from(queue[0].rncDates),['2025-01-01']);
   assert.equal(lean.meta.correctionQueueCount,queue.length);assert.deepEqual(lean.baseReconciliation.meta,full.baseReconciliation.meta);assert(!Object.hasOwn(lean.baseReconciliation,'rows'));assert.deepEqual(lean.summary,full.summary);
   full.correctionGroups[0].progress={done:true};assert(ui.window.MinervaCorrectionImpact.buildQueue(full)[0].issues.some(issue=>issue.reconciliation),'Manual completion cannot remove source alerts');
 });
@@ -61,7 +61,7 @@ test('missing BD operation is a global source-cell alert for every useful status
 
 test('missing operation joins related corrections once and has the same full/lean warning count',()=>{
  const bd=[claim('QA/1',{0:'QA-SGR',25:null})],cr=[control('QA/1')],full=run(bd,cr),lean=run(bd,cr,{reportView:'suppliers'}),queue=ui.window.MinervaCorrectionImpact.buildQueue(full);
- const alerts=queue.flatMap(entry=>entry.issues).filter(issue=>issue.kind==='BD_MISSING_OPERATION');assert.equal(alerts.length,1);assert.equal(queue.length,1);assert(queue[0].types.includes('Operação em branco'));assert(queue[0].types.includes('Ano divergente'));assert.deepEqual(Array.from(queue[0].bdRows),[2]);
+ const alerts=queue.flatMap(entry=>entry.issues).filter(issue=>issue.kind==='BD_MISSING_OPERATION');assert.equal(alerts.length,1);assert.equal(queue.length,1);assert(queue[0].issues.some(issue=>issue.kind==='BD_MISSING_OPERATION'));assert(queue[0].issues.some(issue=>issue.kind==='CONTROL_RNC_YEAR_MISMATCH'));assert.deepEqual(Array.from(queue[0].bdRows),[2]);
  assert.equal(lean.meta.correctionQueueCount,queue.length);assert.deepEqual(lean.baseReconciliation.meta,full.baseReconciliation.meta);assert.deepEqual(lean.summary,full.summary);
  assert.equal(full.corrections.some(change=>change.field==='Operação'),false);assert.equal(full.baseReconciliation.rows.filter(issue=>issue.kind==='BD_MISSING_OPERATION').length,1);
 });

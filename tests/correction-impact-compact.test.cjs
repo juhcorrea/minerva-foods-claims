@@ -36,3 +36,8 @@ test('Excel retains both financial scenarios, source rows and audit reasons',()=
  assert.deepEqual(original.slice(2,6),[500,300,200,-100]);assert.deepEqual(corrected.slice(2,6),[600,400,200,-100]);assert.deepEqual(corrected.slice(7),['2','3, 4','Analista exemplo','500','Diferença demonstrativa']);
  assert.equal(JSON.stringify(m),before);
 });
+test('correction Excel shows cents for cash, balances, claim comparisons and U changes, without formatting years or counts as money',()=>{
+ const h=setup(),m=model();m.correctionImpact.original[0].received=120.125;m.correctionImpact.corrected[0].openBalance=80.456;m.claimValueAudit.rows[0].bdReceived=400.789;m.claimValueAudit.uCorrections=[{row:3,cell:'U3',reference:'DEMO/1',original:500.125,corrected:600.345,bdRows:[2]}];const before=JSON.stringify(m);h.api.render(m);const wb=XLSX.utils.book_new();h.api.addWorksheets(wb);
+ for(const name of ['Cenario original','Cenario corrigido'])for(const col of ['D','F'])assert.equal(wb.Sheets[name][col+'2'].z,'#,##0.00');for(const name of ['Claim original','Claim corrigido'])for(const col of ['C','D','E','F'])assert.equal(wb.Sheets[name][col+'2'].z,'#,##0.00');for(const col of ['G','H'])assert.equal(wb.Sheets['Ajustes valor integral U'][col+'2'].z,'#,##0.00');
+ assert.equal(wb.Sheets['Cenario original'].D2.v,120.125);assert.equal(wb.Sheets['Cenario corrigido'].F2.v,80.456);assert.equal(wb.Sheets['Claim corrigido'].D2.v,400.789);assert.equal(wb.Sheets['Ajustes valor integral U'].H2.v,600.345);assert.notEqual(wb.Sheets['Cenario original'].B2.z,'#,##0.00');assert.notEqual(wb.Sheets['Cenario original'].E2.z,'#,##0.00');assert.equal(JSON.stringify(m),before);
+});

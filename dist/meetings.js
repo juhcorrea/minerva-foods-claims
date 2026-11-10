@@ -153,7 +153,7 @@
   function addSheet(wb,name,headers,rows,numeric=[]) {
     const sheet=global.XLSX.utils.aoa_to_sheet([headers,...rows]);sheet['!cols']=headers.map((_,index)=>({wch:numeric.includes(index)?22:34}));
     sheet['!autofilter']={ref:global.XLSX.utils.encode_range({s:{r:0,c:0},e:{r:rows.length,c:headers.length-1}})};
-    for(let r=1;r<=rows.length;r++)for(const c of numeric){const cell=sheet[global.XLSX.utils.encode_cell({r,c})];if(cell?.t==='n')cell.z='#,##0';}
+    for(let r=1;r<=rows.length;r++)for(const c of numeric){const cell=sheet[global.XLSX.utils.encode_cell({r,c})],monetary=/\bUSD\b/.test(headers[c])||(headers[0]==='Indicador'&&c===1&&/\bUSD\b/.test(rows[r-1][0]));if(cell?.t==='n')cell.z=monetary?'#,##0.00':'#,##0';}
     global.XLSX.utils.book_append_sheet(wb,sheet,name);
   }
   function exportWorkbook() {
