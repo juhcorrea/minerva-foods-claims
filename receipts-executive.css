@@ -91,3 +91,7 @@
 .rx-info:hover:after,.rx-info:focus:after{display:block}
 .rx-info:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
 @media print{.rx-info{display:none}}
+
+.rx-detail-search{display:grid;gap:6px;margin:0 0 13px;font-size:calc(11px * var(--minerva-text-scale,1));color:var(--ink)}
+.rx-detail-search input{width:min(430px,100%);min-height:36px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);font:inherit}
+.rx-detail-table th .column-heading{min-width:100px}.rx-detail-table .num{text-align:center;font-variant-numeric:tabular-nums}
