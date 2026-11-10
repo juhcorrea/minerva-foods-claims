@@ -112,9 +112,27 @@ body.dashboard-presentation #profilePanel,body.dashboard-presentation .profile-a
 .window-control:hover,.window-control[aria-pressed="true"]{background:var(--pale);color:var(--blue);border-color:var(--blue)}
 .window-control:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
 .window-control svg{width:15px;height:15px;stroke-width:1.6}
+.navigation-menu-wrap{position:relative;display:flex;flex:0 0 auto}
+.navigation-menu{position:absolute;top:calc(100% + 8px);left:0;z-index:140;min-width:230px;max-width:calc(100vw - 32px);padding:6px;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px #122b3d26}
+.navigation-menu[hidden]{display:none!important}
+.navigation-menu [role="menuitemradio"]{display:flex;align-items:center;justify-content:space-between;gap:14px;width:100%;min-height:42px;padding:10px 12px;border:0;border-radius:6px;background:transparent;color:var(--ink);text-align:left;font-size:12px;font-weight:550;line-height:1.4;white-space:nowrap}
+.navigation-menu [role="menuitemradio"]:hover,.navigation-menu [role="menuitemradio"]:focus-visible{background:var(--pale);outline:2px solid var(--blue);outline-offset:-2px}
+.navigation-menu [aria-checked="true"]{color:var(--blue);font-weight:750;background:var(--pale)}
+.navigation-menu [aria-checked="true"]:after{content:'✓';font-size:15px;line-height:1}
+@media screen{html[data-menu-hidden="true"] .sidebar{display:none!important}html[data-menu-hidden="true"] body:not(.dashboard-presentation) .app-shell{margin-left:0!important}}
 @media screen and (max-width:760px){.topbar-leading{gap:12px}.window-control{width:40px;height:40px;flex-basis:40px}.window-controls{gap:8px}}
 
 /* Compact controls keep their accessible names and native keyboard behavior. */
 #sidebarRefresh{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;padding:8px;border-radius:9px;flex:none}#sidebarRefresh[hidden]{display:none!important}#sidebarRefresh svg{display:block;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-@media screen and (min-width:761px){html[data-menu-collapsed="true"] #sidebarRefresh{border:1px solid #ffffff25;background:#ffffff09}html[data-menu-collapsed="true"] #sidebarRefresh:hover:not(:disabled){background:#ffffff20;color:#fff}}
+.profile-compact-icon{display:none}
+@media screen and (min-width:761px){
+  html[data-menu-collapsed="true"] .sidebar .sidebar-status{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;padding:10px 8px}
+  html[data-menu-collapsed="true"] .sidebar-status :is(.sidebar-status-heading,.sidebar-account){display:contents;border:0;padding:0;margin:0}
+  html[data-menu-collapsed="true"] .sidebar-status :is(#sidebarRefresh,#profileButton,#sidebarSignout){display:flex;align-items:center;justify-content:center;flex:none;width:100%;max-width:none;min-width:0;height:44px;min-height:44px;margin:0;padding:12px;border:0;border-radius:8px;background:transparent;color:#e5eef5;gap:0}
+  html[data-menu-collapsed="true"] .sidebar-status :is(#sidebarRefresh,#profileButton,#sidebarSignout):hover:not(:disabled){background:#ffffff14;color:#fff}
+  html[data-menu-collapsed="true"] .sidebar-status :is(#sidebarRefresh,#profileButton,#sidebarSignout):focus-visible{outline:2px solid var(--beige);outline-offset:1px;background:#ffffff14}
+  html[data-menu-collapsed="true"] .sidebar-status :is(#sidebarRefresh,#profileButton,#sidebarSignout) svg{display:block;width:20px;height:20px;flex:none;margin:0;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  html[data-menu-collapsed="true"] .sidebar-status #profileButton>:is(.profile-avatar,.profile-label,svg){display:none}
+  html[data-menu-collapsed="true"] .sidebar-status .profile-compact-icon{display:flex;width:20px;height:20px;align-items:center;justify-content:center}
+}
 #preferencesToolbar{gap:8px}#preferencesToolbar .preferences-caption{display:none}#preferencesToolbar #themeToggle,#preferencesToolbar .preferences-text-control{position:relative;flex:0 0 38px;width:38px;min-width:38px;height:36px;min-height:36px;padding:0;gap:0}#themeToggle>span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}#preferencesToolbar .preferences-text-control>span:not(.sr-only){font-size:15px;font-weight:650;pointer-events:none}#preferencesToolbar #textSizeSelect{position:absolute;inset:0;width:100%;height:100%;max-width:none;min-height:0;opacity:0;cursor:pointer;padding:0}#preferencesToolbar .preferences-text-control:hover{background:var(--pale)}#preferencesToolbar .preferences-text-control:focus-within{outline:2px solid var(--blue);outline-offset:2px}

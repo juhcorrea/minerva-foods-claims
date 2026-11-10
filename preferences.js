@@ -4,7 +4,7 @@
   const SIZES = [100, 115, 130];
   function normalizePreferences(value) {
     const v = value && typeof value === 'object' ? value : {};
-    return {theme:['light','dark','system'].includes(v.theme) ? v.theme : 'system', textSize:SIZES.includes(Number(v.textSize)) ? Number(v.textSize) : 100, menuCollapsed:v.menuCollapsed === true};
+    return {theme:['light','dark','system'].includes(v.theme) ? v.theme : 'system', textSize:SIZES.includes(Number(v.textSize)) ? Number(v.textSize) : 100, menuCollapsed:v.menuCollapsed === true, menuHidden:v.menuHidden === true};
   }
   function initials(name) {return String(name || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join('').toLocaleUpperCase('pt-BR');}
   if (typeof module !== 'undefined' && module.exports) {module.exports = {normalizePreferences, initials}; return;}
@@ -26,24 +26,33 @@
     root.dataset.theme = dark ? 'dark' : 'light';
     root.dataset.textSize = String(preferences.textSize);
     root.dataset.menuCollapsed = String(preferences.menuCollapsed);
+    root.dataset.menuHidden = String(preferences.menuHidden);
     if (!mounted) return;
     $('themeToggle').setAttribute('aria-pressed', String(dark));
     $('themeToggle').title = dark ? 'Desativar modo noturno' : 'Ativar modo noturno';
     $('textSizeSelect').value = String(preferences.textSize);
     $('textSizeSelect').title = 'Tamanho do texto: '+preferences.textSize+'%';
-    const collapsed = preferences.menuCollapsed;
-    $('menuToggle').setAttribute('aria-expanded', String(!collapsed));
-    $('menuToggle').setAttribute('aria-label', collapsed ? 'Expandir menu lateral' : 'Recolher menu para ícones');
-    $('menuToggle').title = collapsed ? 'Expandir menu lateral' : 'Recolher menu para ícones';
-    $('menuToggleLabel').textContent = collapsed ? 'Expandir menu' : 'Recolher menu';
+    const mode = menuMode(),label = {expanded:'Expandido',compact:'Minimizado para ícones',hidden:'Escondido'}[mode];
+    $('menuToggle').setAttribute('aria-label', 'Navegação: '+label);
+    $('menuToggle').title = 'Navegação · '+label;
+    $('menuToggleLabel').textContent = 'Navegação';
+    for(const item of $('navigationMenu').querySelectorAll('[data-menu-mode]'))item.setAttribute('aria-checked',String(item.dataset.menuMode===mode));
     const sidebar = document.querySelector('.sidebar');
-    if (sidebar) {sidebar.inert = false;sidebar.removeAttribute('aria-hidden');}
+    if (sidebar) {sidebar.inert = preferences.menuHidden;if(preferences.menuHidden)sidebar.setAttribute('aria-hidden','true');else sidebar.removeAttribute('aria-hidden');}
   }
   applyPreferences();
 
   function setTheme(value) {if (!['light','dark','system'].includes(value)) return;preferences.theme=value;applyPreferences();save();announce(activeTheme()==='dark'?'Modo noturno ativado.':'Modo claro ativado.');}
   function setTextSize(value) {if (!SIZES.includes(Number(value))) return;preferences.textSize=Number(value);applyPreferences();save();announce('Tamanho do texto: '+preferences.textSize+'%.');}
-  function setMenuCollapsed(value) {preferences.menuCollapsed=Boolean(value);applyPreferences();save();}
+  function menuMode(){return preferences.menuHidden?'hidden':preferences.menuCollapsed?'compact':'expanded';}
+  function closeNavigation(restoreFocus){const menu=$('navigationMenu');if(!menu)return;menu.hidden=true;$('menuToggle').setAttribute('aria-expanded','false');if(restoreFocus)$('menuToggle').focus();}
+  function openNavigation(edge){const menu=$('navigationMenu');if(!menu)return;closeProfile(false);menu.hidden=false;$('menuToggle').setAttribute('aria-expanded','true');const items=Array.from(menu.querySelectorAll('[data-menu-mode]'));(edge==='last'?items.at(-1):edge==='first'?items[0]:items.find(item=>item.dataset.menuMode===menuMode())||items[0])?.focus();}
+  function setMenuMode(mode){
+    if(!['expanded','compact','hidden'].includes(mode))return;
+    if(mode==='hidden'){const sidebar=document.querySelector('.sidebar');if(sidebar?.contains(document.activeElement))$('menuToggle')?.focus();closeProfile(false);}
+    preferences.menuCollapsed=mode==='compact';preferences.menuHidden=mode==='hidden';applyPreferences();save();
+  }
+  function setMenuCollapsed(value) {setMenuMode(value?'compact':'expanded');}
 
   // Reuse only font-size declarations from the app's trusted local stylesheets.
   // Their responsive conditions and specificity remain intact; no document data is read.
@@ -178,14 +187,14 @@
     toolbar.innerHTML='<span class="preferences-caption">VISUALIZAÇÃO</span><button id="themeToggle" class="preferences-button" type="button" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14Z"/></svg><span>Modo noturno</span></button><label class="preferences-text-control" for="textSizeSelect"><span aria-hidden="true">Aa</span><span class="sr-only">Tamanho do texto</span><select id="textSizeSelect" title="Aumentar o tamanho do texto"><option value="100">Texto 100%</option><option value="115">Texto 115%</option><option value="130">Texto 130%</option></select></label>';
     topbar.append(toolbar);
     const controls=document.createElement('div');controls.className='window-controls';controls.setAttribute('role','group');controls.setAttribute('aria-label','Menu e tela cheia');
-    controls.innerHTML='<button id="menuToggle" class="window-control" type="button" aria-expanded="true" aria-controls="appSidebar" aria-label="Recolher menu lateral" title="Recolher menu lateral"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"/></svg><span id="menuToggleLabel" class="sr-only">Recolher menu</span></button><button id="fullscreenToggle" class="window-control" type="button" aria-pressed="false" aria-label="Abrir painel em tela cheia" title="Abrir painel em tela cheia"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></svg><span id="fullscreenLabel" class="sr-only">Tela cheia</span></button>';
+    controls.innerHTML='<div class="navigation-menu-wrap"><button id="menuToggle" class="window-control" type="button" aria-expanded="false" aria-controls="navigationMenu" aria-haspopup="menu" aria-label="Navegação" title="Navegação"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"/></svg><span id="menuToggleLabel" class="sr-only">Navegação</span></button><div id="navigationMenu" class="navigation-menu" role="menu" aria-label="Navegação" hidden><button type="button" role="menuitemradio" aria-checked="true" tabindex="-1" data-menu-mode="expanded">Expandir</button><button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-menu-mode="compact">Minimizar para ícones</button><button type="button" role="menuitemradio" aria-checked="false" tabindex="-1" data-menu-mode="hidden">Esconder</button></div></div><button id="fullscreenToggle" class="window-control" type="button" aria-pressed="false" aria-label="Abrir painel em tela cheia" title="Abrir painel em tela cheia"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></svg><span id="fullscreenLabel" class="sr-only">Tela cheia</span></button>';
     const leading=document.createElement('div');leading.className='topbar-leading';leading.append(controls);const breadcrumb=topbar.querySelector('.breadcrumb');if(breadcrumb)leading.append(breadcrumb);topbar.prepend(leading);
     const sidebar=document.querySelector('.sidebar');if (sidebar) sidebar.id='appSidebar';
     if(sidebar){
       for(const item of sidebar.querySelectorAll('.nav-item')){const label=item.querySelector('span')?.textContent?.trim();if(label){item.setAttribute('aria-label',label);item.title=label;}}
     }
     const profile=document.createElement('button');profile.id='profileButton';profile.type='button';profile.className='profile-button';profile.hidden=global.MINERVA_HOSTED===true;profile.setAttribute('aria-haspopup','dialog');profile.setAttribute('aria-expanded','false');profile.setAttribute('aria-controls','profilePanel');
-    profile.innerHTML='<span id="profileAvatar" class="profile-avatar" aria-hidden="true"></span><span class="profile-label"><small>PERFIL EM USO</small><strong id="profileName"></strong><span id="profileRole"></span></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>';
+    profile.innerHTML='<span class="profile-compact-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></span><span id="profileAvatar" class="profile-avatar" aria-hidden="true"></span><span class="profile-label"><small>PERFIL EM USO</small><strong id="profileName"></strong><span id="profileRole"></span></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>';
     const account=$('sidebarAccount');
     if(account){account.append(profile);const signout=document.createElement('button');signout.id='sidebarSignout';signout.type='button';signout.className='sidebar-icon-button';signout.hidden=true;signout.title='Sair deste perfil';signout.setAttribute('aria-label','Sair deste perfil');signout.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v16h5m5-13 5 5-5 5M9 12h10"/></svg>';signout.addEventListener('click',event=>global.MinervaTeam?.logout(event));account.append(signout);}
     else topbar.querySelector('.topbar-actions')?.prepend(profile);
@@ -203,7 +212,14 @@
     mounted=true;
     $('themeToggle').addEventListener('click',()=>setTheme(activeTheme()==='dark'?'light':'dark'));
     $('textSizeSelect').addEventListener('change',event=>setTextSize(event.target.value));
-    $('menuToggle').addEventListener('click',()=>setMenuCollapsed(!preferences.menuCollapsed));
+    $('menuToggle').addEventListener('click',()=>{$('navigationMenu').hidden?openNavigation():closeNavigation(true);});
+    $('menuToggle').addEventListener('keydown',event=>{if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();openNavigation(event.key==='ArrowUp'?'last':'first');}});
+    $('navigationMenu').addEventListener('click',event=>{const item=event.target.closest?.('[data-menu-mode]');if(!item)return;setMenuMode(item.dataset.menuMode);closeNavigation(true);});
+    $('navigationMenu').addEventListener('keydown',event=>{
+      const items=Array.from($('navigationMenu').querySelectorAll('[data-menu-mode]')),index=items.indexOf(document.activeElement);
+      if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;items[next]?.focus();}
+      else if(event.key==='Tab')closeNavigation(false);
+    });
     $('fullscreenToggle').addEventListener('click',toggleFullscreen);
     $('profileButton').addEventListener('click',openProfile);
     $('closeProfile').addEventListener('click',()=>closeProfile(true));
@@ -213,18 +229,18 @@
     document.addEventListener('minerva:session-updated',updateProfile);
     document.addEventListener('minerva:model-updated',syncProfileControls);
     if(global.MINERVA_HOSTED===true&&global.MutationObserver){toolbarFinder=new global.MutationObserver(()=>{if($('teamToolbar'))syncProfileControls();});toolbarFinder.observe(document.querySelector('main')||document.body,{childList:true,subtree:true});}
-    document.addEventListener('pointerdown',event=>{if (!panel.hidden&&!panel.contains(event.target)&&!profile.contains(event.target)) closeProfile(false);});
-    document.addEventListener('keydown',event=>{if (event.key==='Escape'&&!panel.hidden) {event.preventDefault();closeProfile(true);}});
+    document.addEventListener('pointerdown',event=>{if (!$('navigationMenu').hidden&&!$('navigationMenu').contains(event.target)&&!$('menuToggle').contains(event.target))closeNavigation(false);if (!panel.hidden&&!panel.contains(event.target)&&!profile.contains(event.target)) closeProfile(false);});
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('navigationMenu').hidden){event.preventDefault();closeNavigation(true);return;}if (event.key==='Escape'&&!panel.hidden) {event.preventDefault();closeProfile(true);}});
     panel.addEventListener('focusout',event=>{if (event.relatedTarget&&!panel.contains(event.relatedTarget)&&event.relatedTarget!==profile) closeProfile(false);});
-    document.addEventListener('fullscreenchange',()=>{closeProfile(false);updateFullscreen(true);});
+    document.addEventListener('fullscreenchange',()=>{closeNavigation(false);closeProfile(false);updateFullscreen(true);});
     document.addEventListener('webkitfullscreenchange',()=>updateFullscreen(true));
-    global.addEventListener('resize',()=>closeProfile(false));
-    global.addEventListener('beforeprint',()=>closeProfile(false));
+    global.addEventListener('resize',()=>{closeNavigation(false);closeProfile(false);});
+    global.addEventListener('beforeprint',()=>{closeNavigation(false);closeProfile(false);});
     const onMedia=(media,fn)=>media.addEventListener?media.addEventListener('change',fn):media.addListener(fn);
     onMedia(darkMedia,()=>{if (preferences.theme==='system') applyPreferences();});
     document.addEventListener('load',event=>{if (event.target?.tagName==='LINK') scheduleTextScale();},true);
     applyPreferences();updateProfile();updateFullscreen(false);buildTextScale();
-    global.MinervaPreferences={get:()=>({...preferences,effectiveTheme:activeTheme()}),setTheme,setTextSize,setMenuCollapsed,toggleFullscreen};
+    global.MinervaPreferences={get:()=>({...preferences,effectiveTheme:activeTheme()}),setTheme,setTextSize,setMenuCollapsed,setMenuMode,toggleFullscreen};
   }
   if (document.readyState==='loading') document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();
 })(typeof window!=='undefined'?window:globalThis);
