@@ -13,7 +13,7 @@ test('FUP totals separate legal and negotiations, omit FUP text from both totals
  assert.equal(p.counts.negotiation,1);assert.equal(p.counts.legal,1);assert.equal(p.counts.total,2);assert.equal(p.meta.excludedFupCount,2);assert.equal(p.meta.excludedFupAmount,3000);
  assert.deepEqual(p.rows.map(r=>r.row),[2,3]);assert(p.rows.every(r=>r.category==='negotiation'&&r.included));assert.deepEqual(p.excludedFup,[]);assert.equal(p.bySupplier.length,1);assert.deepEqual(p.bySupplier[0].rows,[2,3]);assert.equal(p.bySupplier[0].total,100);assert.equal(p.bySupplier[0].claimCount,1);
  assert.equal(p.meta.legalDetailAvailable,false);assert.equal(JSON.stringify(b),before);
- assert.equal(m.summary.negotiating,3180,'Existing financial negotiation retains its prior period rule until separately authorized');
+ assert.equal(m.summary.negotiating,180,'Supplier negotiation also excludes FUP SUPRIMENTOS, as explicitly requested');
  assert(!JSON.stringify(p.rows).includes('Departamento Jurídico'));assert(!JSON.stringify(p.bySupplier).includes('JURIDICO'));
 });
 

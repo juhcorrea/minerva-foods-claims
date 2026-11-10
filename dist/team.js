@@ -12,11 +12,12 @@
     if (opts.allYears !== true && Array.isArray(opts.years) && opts.years.length) params.set('years', [...new Set(opts.years.map(Number).filter(Number.isInteger))].sort((a,b)=>a-b).join(','));
     if (opts.allYears === true) params.set('allYears', '1');
     if (opts.asOf) params.set('asOf', String(opts.asOf));
-    for(const [key,plural] of [['supplier','suppliers'],['operation','operations'],['controlOperation','controlOperations']]){
+    for(const [key,plural] of [['supplier','suppliers'],['operation','operations'],['controlOperation','controlOperations'],['claimStatus','claimStatuses']]){
       const value=opts[plural]??opts[key],values=Array.isArray(value)?value:value?[value]:[];
       for(const selected of [...new Set(values.filter(Boolean).map(String))].sort())params.append(key,selected);
     }
     params.set('correctionScenario', String(opts.correctionScenario ?? 'corrected'));
+    if (opts.reportView === 'suppliers') params.set('view', 'suppliers');
     return params.toString();
   }
   // Session-memory only. Revalidate access and both data revisions before reuse;
@@ -25,11 +26,12 @@
     const entries = new Map();
     return {
       get(key) { return entries.get(key); },
+      delete(key) { entries.delete(key); },
       valid(payload, meta) {
         return Boolean(payload?.revision && payload.revision === meta?.reportMeta?.revision &&
           payload.model?.meta?.correctionProgressRevision === meta?.correctionProgressRevision &&
           typeof meta?.correctionProgressRevision === 'string' &&
-          payload.model?.procurementReport?.meta?.agingDate === meta?.agingDate && typeof meta?.agingDate === 'string');
+          (payload.model?.meta?.agingDate ?? payload.model?.procurementReport?.meta?.agingDate) === meta?.agingDate && typeof meta?.agingDate === 'string');
       },
       put(key, payload) {
         if (!payload?.model || !payload.revision) return;
@@ -310,7 +312,10 @@
     refreshControls();
     try {
       const key = reportQuery(opts);
-      let payload = reportCache.get(key);
+      const fullKey = reportQuery({...opts, reportView:'full'});
+      const supplierKey = reportQuery({...opts, reportView:'suppliers'});
+      // A complete model can serve the comparison, but a comparison cannot serve other tabs.
+      let payload = reportCache.get(fullKey) || (opts.reportView === 'suppliers' ? reportCache.get(key) : null);
       if (payload) {
         const metadata = await api('/api/report/meta', {signal:controller.signal});
         if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return false;
@@ -319,7 +324,9 @@
       const reused = Boolean(payload);
       if (!payload) payload = await api('/api/report?' + key, {signal:controller.signal});
       if (requestVersion !== loadVersion || controller.signal.aborted || !session?.approved) return false;
-      reportCache.put(key, payload);
+      const lightweight = payload.model?.meta?.reportView === 'suppliers';
+      if (!lightweight) reportCache.delete(supplierKey);
+      reportCache.put(lightweight ? supplierKey : fullKey, payload);
       publishedMeta = payload.revision ? payload : null;
       if (!payload.model) {
         showEmptyReport();

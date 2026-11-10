@@ -199,6 +199,9 @@ function analysisOptions(url, saved, engine) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || !engine.parseDate(asOf)) fail(400, 'INVALID_DATE', 'Informe uma data da análise válida.');
   const readSelections=(key,maxLength,normalize)=>{const raw=url.searchParams.getAll(key),seen=new Set();if(raw.length>200||raw.some(value=>value.length>maxLength||/[\u0000-\u001f]/.test(value)))fail(400,'INVALID_FILTER','O filtro informado é inválido. Selecione até 200 valores por filtro.');return raw.map(value=>value.trim()).filter(value=>{const key=normalize(value);if(!key||seen.has(key))return false;seen.add(key);return true;});};
   const suppliers=readSelections('supplier',240,engine.normalizeSupplier),operations=readSelections('operation',200,engine.normalizeStatus),controlOperations=readSelections('controlOperation',200,engine.normalizeStatus);
+  const claimStatuses=readSelections('claimStatus',200,engine.normalizeStatus);
+  const claimStatusOptions=new Set(saved.bd.slice(1).filter(row=>row?.slice(0,36).some(value=>value!=null&&value!=='')).map(row=>engine.normalizeStatus(row?.[6])||'NAO INFORMADO'));
+  if(claimStatuses.some(value=>!claimStatusOptions.has(engine.normalizeStatus(value))))fail(400,'INVALID_CLAIM_STATUS','Selecione situações presentes na BD.');
   const supplier=suppliers.join(' · '),operation=operations.join(' · '),controlOperation=controlOperations.join(' · ');
   const correctionScenario = url.searchParams.get('correctionScenario') ?? 'corrected';
   const operationOptions=new Set(saved.bd.slice(1).map(row=>engine.normalizeStatus(row?.[25])).filter(Boolean));
@@ -208,7 +211,7 @@ function analysisOptions(url, saved, engine) {
   if (controlOperations.some(value=>!controlOperationOptions.has(engine.normalizeStatus(value)))) fail(400, 'INVALID_OPERATION', 'Selecione operações disponíveis no Controle.');
   if (suppliers.some(value=>!supplierOptions.has(engine.normalizeSupplier(value)))) fail(400,'INVALID_SUPPLIER','Selecione fornecedores presentes nas bases.');
   if (!['original', 'corrected'].includes(correctionScenario)) fail(400, 'INVALID_CORRECTION_SCENARIO', 'Selecione Base original ou Com correções.');
-  return {years: [...new Set(years)], allYears, asOf, supplier, suppliers, operation, operations, controlOperation, controlOperations, correctionScenario, lossFormula: 'subtract-negotiating'};
+  return {years: [...new Set(years)], allYears, asOf, supplier, suppliers, operation, operations, controlOperation, controlOperations, claimStatuses, correctionScenario, lossFormula: 'subtract-negotiating'};
 }
 
 // Manual follow-up is stored separately from the uploaded financial snapshot.
@@ -327,9 +330,12 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
    }
    if(url.pathname==='/api/correction-progress'&&request.method==='POST')return response(await saveCorrectionProgress(env.BUCKET,access,await readBody(request,16384),url,engine));
    if(url.pathname==='/api/report'&&request.method==='GET'){
+    const reportView=url.searchParams.get('view')??'full';
+    if(!['full','suppliers'].includes(reportView)||url.searchParams.getAll('view').length>1)fail(400,'INVALID_REPORT_VIEW','Selecione uma visão válida do relatório.');
     const{value:saved}=await jsonObject(env.BUCKET,REPORT_KEY);if(!saved)return response({model:null,files:null,updatedAt:null,updatedBy:null,revision:null});
     if(saved.schemaVersion!==1||!Array.isArray(saved.bd)||!Array.isArray(saved.control))fail(503,'REPORT_INVALID','O relatório publicado precisa ser conferido pelas administradoras.');
-    const opts=analysisOptions(url,saved,engine);let model;try{model=engine.analyze(saved.bd,saved.control,opts);}catch{fail(503,'REPORT_ANALYSIS_FAILED','Não foi possível processar o relatório publicado.');}
+    const opts=analysisOptions(url,saved,engine);if(reportView==='suppliers')opts.reportView='suppliers';
+    let model;try{model=engine.analyze(saved.bd,saved.control,opts);}catch{fail(503,'REPORT_ANALYSIS_FAILED','Não foi possível processar o relatório publicado.');}
     return response({...snapshotMetadata(saved),model:redactModel(await hydrateCorrectionProgress(env.BUCKET,model))},200,{'etag':`"${saved.revision}"`});
    }
    if(url.pathname==='/api/report'&&request.method==='POST'){

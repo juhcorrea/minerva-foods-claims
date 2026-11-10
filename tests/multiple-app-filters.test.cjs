@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync(require.resolve('../dist/app.js'),'utf8'),{reportQuery}=require('../dist/team.js');
 const between=(start,end)=>{const at=source.indexOf(start),until=source.indexOf(end,at+start.length);assert(at>=0&&until>at,`Source boundary ${start}`);return source.slice(at,until);};
-const code=[between('  const applied=','  const money ='),between('  const normalize =','  const state ='),between('  const amountRank =','  const loss ='),between('  const controlModel =','  function renderScenarioStatus'),between('  function options()','  async function readFile'),between('  function populateSuppliers()','  function supplierButton'),between('  async function selectChartSupplier','  function supplierAnnual'),between('  function installmentRows()','  const safeInstallment'),between('  function analystNames','  function populateAnalysts'),between('  function correctionRows()','  function issueRows'),between('  async function toggleCorrectionProgress','  const CORR_HEADERS'),between('  function applySection','  function addApply')].join('\n')+'\nthis.helpers={selectValues,setSelected,appliedGlobalValues,filterValues,filterLabel,progressLabel};';
+const code=[between('  const applied=','  const money ='),between('  const normalize =','  const state ='),between('  const amountRank =','  const loss ='),between('  const controlModel =','  function renderScenarioStatus'),between('  function options(','  async function readFile'),between('  function populateSuppliers()','  function supplierButton'),between('  async function selectChartSupplier','  function supplierAnnual'),between('  function installmentRows()','  const safeInstallment'),between('  function analystNames','  function populateAnalysts'),between('  function correctionRows()','  function issueRows'),between('  async function toggleCorrectionProgress','  const CORR_HEADERS'),between('  function applySection','  function addApply')].join('\n')+'\nthis.helpers={selectValues,setSelected,appliedGlobalValues,filterValues,filterLabel,progressLabel};';
 const clone=value=>JSON.parse(JSON.stringify(value)),EX='EXPORTAÇÃO - CTNR',MI='COMERCIAL',IM='IMPORTAÇÃO - CTNR',UNKNOWN='SEM OPERAÇÃO IDENTIFICADA',A='Fornecedor A',B='Fornecedor B, Logística';
 const decode=value=>value.replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
 function fixture(){
@@ -15,19 +15,19 @@ function fixture(){
  const state={view:'overview',operation:'',controlOperation:'',chartMonth:'',bd:null,control:null,model:{meta:{allYears:false,years:[2026],asOf:'2026-11-06',correctionScenario:'corrected',operations:[],suppliers:[],controlOperations:[]},operationOptions:[EX,MI,IM],suppliers:[{name:A},{name:B}],claims:[],controlReport:{meta:{operations:[]},operationOptions:[EX,MI,IM,UNKNOWN],supplierOptions:[A,B],installments:[]},correctionGroups:[]},publishedMeta:{revision:'synthetic'}};
  const context={state,console,document:{getElementById:node,body:{dataset:{},classList:{toggle(){}}},querySelector:node,querySelectorAll(selector){if(selector==='input[name="year"]:checked')return years.filter(y=>y.checked);if(selector==='input[name="year"]')return years;if(selector==='[id^="view-"]')return views;if(selector==='[data-view]')return nav;return [];}},window:{MinervaTeam:{async setCorrectionProgress(value){marks.push(clone(value));return {progress:{key:value.key,done:value.done}};}}},Option:function(label,value){this.text=label;this.value=value;this.selected=false;},
   F:{prepare(_id,_headers,rows){return rows;}},setText(id,value){node(id).textContent=value;},say(){},notice(message){throw Error(message);},renderViewBody(){},renderRanking(){},renderCorrections(){renders.push('corrections');},
-  async analyze(){const options=clone(context.options());calls.push(options);Object.assign(state.model.meta,options,{operation:options.operations.join(' · '),supplier:options.suppliers.join(' · '),controlOperation:options.controlOperations.join(' · ')});state.model.controlReport.meta.operations=options.controlOperations;state.appliedGlobal=options;return true;},
+  async analyze(intent={}){const options=clone(context.options({useDesired:intent.fromNavigation===true}));calls.push(options);Object.assign(state.model.meta,options,{operation:options.operations.join(' · '),supplier:options.suppliers.join(' · '),controlOperation:options.controlOperations.join(' · ')});state.model.controlReport.meta.operations=options.controlOperations;state.appliedGlobal=options;return true;},
   INST_HEADERS:[],INST_SORT:{},installmentCells:()=>[],CORR_HEADERS:[],correctionCells:()=>[],correctionGroups:()=>state.model.correctionGroups,groupChanges:()=>[],originalValues:()=>'',earliestDate:()=>null,canMarkCorrections:()=>true};
  vm.createContext(context);vm.runInContext(code,context,{filename:'app-filters-from-production.js'});
  return {context,state,years,calls,marks,renders,node,set:(id,values)=>context.helpers.setSelected(id,values),values:id=>clone(context.helpers.selectValues(id)),apply:ids=>context.applySection(ids,()=>{})};
 }
 
-test('global options retain multiple selections across global and Control views and all-years supplier scope',()=>{
+test('global options retain multiple selections within their own tab and isolate Control and suppliers scopes',()=>{
  const f=fixture();f.set('operationFilter',[EX,MI]);f.set('supplierFilter',[A,B]);
  let options=clone(f.context.options());assert.deepEqual(options.operations,[EX,MI]);assert.deepEqual(options.suppliers,[A,B]);assert.deepEqual(options.controlOperations,[]);assert.equal(Object.hasOwn(options,'operation'),false);
- f.context.view('installments');assert.deepEqual(f.values('operationFilter'),[]);f.set('operationFilter',[IM,UNKNOWN]);options=clone(f.context.options());assert.deepEqual(options.operations,[EX,MI]);assert.deepEqual(options.controlOperations,[IM,UNKNOWN]);
+ f.context.view('installments');assert.deepEqual(f.values('operationFilter'),[]);f.set('operationFilter',[IM,UNKNOWN]);options=clone(f.context.options());assert.deepEqual(options.operations,[]);assert.deepEqual(options.controlOperations,[IM,UNKNOWN]);
  f.context.view('overview');assert.deepEqual(f.values('operationFilter'),[EX,MI]);assert.deepEqual(f.values('supplierFilter'),[A,B]);
- f.context.view('suppliers');assert.equal(f.calls.at(-1).allYears,true);assert.deepEqual(f.calls.at(-1).operations,[EX,MI]);assert.deepEqual(f.calls.at(-1).controlOperations,[IM,UNKNOWN]);
- f.context.view('procurement');assert.equal(f.calls.at(-1).allYears,false);assert.deepEqual(f.calls.at(-1).suppliers,[A,B]);assert.deepEqual(f.years.map(y=>y.checked),[false,true]);
+ f.context.view('suppliers');assert.equal(f.calls.at(-1).allYears,true);assert.deepEqual(f.calls.at(-1).operations,[]);assert.deepEqual(f.calls.at(-1).controlOperations,[]);
+ f.context.view('procurement');assert.equal(f.calls.at(-1).allYears,false);assert.deepEqual(f.calls.at(-1).suppliers,[]);assert.deepEqual(f.years.map(y=>y.checked),[false,true]);
  f.context.view('installments');assert.deepEqual(f.values('operationFilter'),[IM,UNKNOWN]);
 });
 
@@ -46,6 +46,11 @@ test('chart supplier refinement restores applied operation sets and does not app
 test('supplier chart refinement preserves its applied years without changing the other tabs year selection',async()=>{
  const f=fixture();f.state.view='suppliers';f.state.model.meta.years=[2025];f.state.supplierYears=[2026];
  await f.context.selectChartSupplier(A);assert.deepEqual(f.calls.at(-1).years,[2025]);assert.equal(f.calls.at(-1).allYears,false);assert.deepEqual(f.years.map(y=>y.checked),[false,true]);assert.deepEqual(clone(f.state.supplierYears),[2025]);
+});
+
+test('late chart and scenario callbacks cannot overwrite another tabs unfinished filter edits',async()=>{
+ const f=fixture();let done;f.context.analyze=()=>new Promise(resolve=>done=resolve);const chart=f.context.selectChartSupplier(A);f.state.view='claims';f.state.viewVersion=1;f.set('supplierFilter',[B]);done(false);await chart;assert.deepEqual(f.values('supplierFilter'),[B]);assert.equal(f.state.chartSupplierBusy,false);
+ vm.runInContext(between('  async function setCorrectionScenario','  function openImports'),f.context);f.context.renderScenarioStatus=()=>{};const scenario=f.context.setCorrectionScenario('original');f.state.view='suppliers';f.state.viewVersion=2;f.node('correctionScenario').value='Unsubmitted';done(false);await scenario;assert.equal(f.node('correctionScenario').value,'Unsubmitted');
 });
 
 test('reportQuery repeats each selected value and explicit empty plurals override every legacy filter',()=>{

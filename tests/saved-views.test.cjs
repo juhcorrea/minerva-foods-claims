@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),{webcrypto}=require('node:crypto');
 const {repository,identityKey}=require('../dist/saved-views.js');
-const source=fs.readFileSync(require.resolve('../dist/app.js'),'utf8'),start=source.indexOf('  function sanitizeView('),end=source.indexOf('  window.MinervaApp=',start),yearHelpers=source.slice(source.indexOf('  function cleanYears'),source.indexOf('  function requestedYearScope')),code=yearHelpers+source.slice(start,end)+'\nthis.api={sanitizeView,captureView,restoreView};';
+const source=fs.readFileSync(require.resolve('../dist/app.js'),'utf8'),start=source.indexOf('  function sanitizeView('),end=source.indexOf('  window.MinervaApp=',start),yearHelpers=source.slice(source.indexOf('  function cleanYears'),source.indexOf('  function requestedYearScope')),scopeHelpers=source.slice(source.indexOf('  function tableOwner'),source.indexOf('  function setupSupplierStatuses')),code=yearHelpers+scopeHelpers+source.slice(start,end)+'\nthis.api={sanitizeView,captureView,restoreView};';
 const plain=value=>JSON.parse(JSON.stringify(value));
 function fixture(){
  const years=[{value:'2025',checked:false},{value:'2026',checked:true}],nodes=new Map(),calls=[],renders=[],storedTables=[];
@@ -26,7 +26,7 @@ test('save/update/delete persist only whitelisted configuration and keep account
 });
 test('restoring a saved view reanalyzes current data then reapplies global/local and table settings',async()=>{
  const f=fixture();f.applied.statusFilter=['Pago','Vencido'];f.applied.analystFilter=['Analista A'];const saved=plain(f.api.captureView());saved.view='suppliers';f.setLive(970);f.applied.statusFilter=[];f.state.view='overview';
- await f.api.restoreView(saved);assert.equal(f.calls.length,1);assert.deepEqual(f.calls[0],{view:'suppliers',suppliers:['Fornecedor A'],scenario:'original'});assert.equal(f.renders.at(-1).rows[0].amount,970);assert.deepEqual(plain(f.applied.statusFilter),['Pago','Vencido']);assert.deepEqual(f.claimState.claims.country,['País A','País B']);assert.equal(f.storedTables[0].tables[0].sort.direction,'desc');assert.deepEqual(f.years.map(y=>y.checked),[false,true]);assert.equal(f.state.restoringSavedView,false);
+ await f.api.restoreView(saved);assert.equal(f.calls.length,1);assert.deepEqual(f.calls[0],{view:'suppliers',suppliers:['Fornecedor A'],scenario:'original'});assert.equal(f.renders.at(-1).rows[0].amount,970);assert.deepEqual(plain(f.applied.statusFilter),[],'A supplier saved view never changes receipt filters');assert.deepEqual(f.claimState.claims.country,['País A','País B']);assert.equal(f.storedTables[0].tables[0].sort.direction,'desc');assert.deepEqual(f.years.map(y=>y.checked),[false,true]);assert.equal(f.state.restoringSavedView,false);
 });
 test('invalid periods and concurrent analyses fail without applying a partial saved view',async()=>{
  const f=fixture(),saved=plain(f.api.captureView());saved.global.years=[2001];await assert.rejects(f.api.restoreView(saved),/período/);assert.equal(f.calls.length,0);f.state.analysisBusy=true;await assert.rejects(f.api.restoreView(f.api.captureView()),/Aguarde/);assert.equal(f.calls.length,0);
@@ -36,17 +36,17 @@ test('storage failure is reported and a changed profile cannot save or apply ano
  let n=0;const changed=repository({storage:memory(),key:()=>++n===1?'a':'b',capture:f.api.captureView,restore:f.api.restoreView,sanitize:f.api.sanitizeView,uuid:()=> 'id'});await assert.rejects(changed.save('Exemplo'),/conta mudou/);assert.equal(f.calls.length,0);
 });
 test('saved views enable after initial analysis finishes without polling',async()=>{
- const savedSource=fs.readFileSync(require.resolve('../dist/saved-views.js'),'utf8'),analyzeSource=source.slice(source.indexOf('  async function analyze(){'),source.indexOf('  async function performAnalysis(){')),refreshSource=savedSource.match(/  function refresh\(\)\{[^\n]+/)[0];
- const state={model:null},button={disabled:true},history=[],context={state,button,app:{state},global:{MINERVA_HOSTED:false},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},refreshScopeWhenReady(){},refreshViewScope(){},$:()=>null};
+ const savedSource=fs.readFileSync(require.resolve('../dist/saved-views.js'),'utf8'),analyzeSource=source.slice(source.indexOf('  async function analyze('),source.indexOf('  async function performAnalysis(')),refreshSource=savedSource.match(/  function refresh\(\)\{[^\n]+/)[0];
+ const state={model:null},button={disabled:true},history=[],context={state,button,app:{state},global:{MINERVA_HOSTED:false},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}},options:()=>({}),refreshScopeWhenReady(){},refreshViewScope(){},$:()=>null};
  context.document={querySelectorAll:()=>[],dispatchEvent:event=>{if(['minerva:model-updated','minerva:analysis-state'].includes(event.type)){context.refresh();history.push({busy:Boolean(state.analysisBusy),disabled:button.disabled});}}};context.performAnalysis=async()=>{state.model={meta:{}};context.document.dispatchEvent({type:'minerva:model-updated'});};
  vm.createContext(context);vm.runInContext(refreshSource+'\n'+analyzeSource,context);await context.analyze();assert.equal(button.disabled,false);assert.deepEqual(history.map(row=>row.disabled),[true,true,false]);assert.equal(state.analysisBusy,false);
 });
 
-test('removed saved suppliers and analysts remain explicit selections after current options are rebuilt',async()=>{const f=fixture();f.applied.analystFilter=['Analista ausente'];const saved=plain(f.api.captureView());f.context.render=()=>{f.node('supplierFilter').options=[{value:'',selected:true}];f.node('analystFilter').options=[{value:'',selected:true}];};await f.api.restoreView(saved);assert.deepEqual(f.node('supplierFilter').selectedOptions.map(o=>o.value),['Fornecedor A']);assert.deepEqual(f.node('analystFilter').selectedOptions.map(o=>o.value),['Analista ausente']);});
+test('removed saved suppliers and analysts remain explicit selections after current options are rebuilt',async()=>{const f=fixture();f.state.view='corrections';f.applied.analystFilter=['Analista ausente'];const saved=plain(f.api.captureView());f.context.render=()=>{f.node('supplierFilter').options=[{value:'',selected:true}];f.node('analystFilter').options=[{value:'',selected:true}];};await f.api.restoreView(saved);assert.deepEqual(f.node('supplierFilter').selectedOptions.map(o=>o.value),['Fornecedor A']);assert.deepEqual(f.node('analystFilter').selectedOptions.map(o=>o.value),['Analista ausente']);});
 
 test('saved views accept a revalidated cached model and invalidate hidden pane stamps for restored filters',async()=>{
- const f=fixture(),previous=f.state.model,saved=plain(f.api.captureView());f.context.analyze=async()=>true;f.state.renderedViews=new Map([['claims',1],['suppliers',1]]);saved.local.supplierSearch='Synthetic filter';await f.api.restoreView(saved);
- assert.equal(f.state.model,previous);assert.equal(f.applied.supplierSearch,'Synthetic filter');assert.equal(f.state.renderedViews.size,0);assert.equal(f.renders.length,1);
+ const f=fixture();f.state.view='suppliers';const previous=f.state.model,saved=plain(f.api.captureView());f.context.analyze=async()=>true;f.state.renderedViews=new Map([['claims',1],['suppliers',1]]);saved.local.supplierSearch='Synthetic filter';await f.api.restoreView(saved);
+ assert.equal(f.state.model,previous);assert.equal(f.applied.supplierSearch,'Synthetic filter');assert.deepEqual([...f.state.renderedViews.keys()],['claims']);assert.equal(f.renders.length,1);
  f.context.analyze=async()=>false;await assert.rejects(f.api.restoreView(saved),/Não foi possível atualizar/);
 });
 
@@ -56,4 +56,15 @@ test('supplier saved views retain their applied years independently of the other
  delete saved.supplierYears;await f.api.restoreView(saved);assert.deepEqual(plain(f.state.supplierYears),[]);assert.deepEqual(f.context.supplierYearOptions,[]);
  assert.deepEqual(plain(f.api.sanitizeView({supplierYears:['2026',2025,2026,'bad',1999,2201]}).supplierYears),[2025,2026]);
  f.state.model.meta={allYears:true,years:[2021,2025,2026]};assert.deepEqual(plain(f.api.captureView().supplierYears),[]);
+});
+
+test('supplier situation selections are saved from the applied scope, sanitized and restored only in suppliers',async()=>{
+ const f=fixture();f.state.view='suppliers';f.state.model.meta={allYears:true,years:[2025,2026]};f.state.appliedGlobal.claimStatuses=['EM ANÁLISE','RESSARCIMENTO ENCAMINHADO'];f.state.claimStatuses=['Rascunho'];const saved=plain(f.api.captureView());assert.deepEqual(saved.global.claimStatuses,['EM ANÁLISE','RESSARCIMENTO ENCAMINHADO']);
+ await f.api.restoreView(saved);assert.deepEqual(plain(f.state.claimStatuses),saved.global.claimStatuses);delete saved.global.claimStatuses;await f.api.restoreView(saved);assert.deepEqual(plain(f.state.claimStatuses),[],'Legacy views default to every situation');
+ assert.deepEqual(plain(f.api.sanitizeView({global:{claimStatuses:['EM ANÁLISE','EM ANÁLISE']}}).global.claimStatuses),['EM ANÁLISE']);f.context.viewScopeMatches=()=>false;assert.throws(()=>f.api.captureView(),/atualização desta aba/);
+});
+
+test('restoring a claim view preserves procurement choices and does not finish on a different tab',async()=>{
+ const f=fixture(),saved=plain(f.api.captureView());saved.claims.claims.country=['Novo país'];saved.claims.procurement.pending=['Não aplicar'];saved.claims.supplier='Não aplicar';await f.api.restoreView(saved);assert.deepEqual(f.claimState.claims.country,['Novo país']);assert.deepEqual(f.claimState.procurement.pending,['Aguardando']);assert.equal(f.claimState.supplier,'Fornecedor A');
+ f.context.analyze=async()=>{f.state.view='overview';f.state.viewVersion=1;return true;};await assert.rejects(f.api.restoreView(saved),/Não foi possível atualizar/);assert.equal(f.state.restoringSavedView,false);
 });

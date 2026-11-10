@@ -52,7 +52,7 @@ test('war expurgo removes claimed value but does not remove a safely attributed 
   assert.equal(x.summary.claimed,1000); assert.equal(x.summary.excludedWar,1);
   assert.equal(x.summary.excludedWarAmount,200); assert.equal(x.summary.received,100);
   assert.equal(x.receiptCohorts.rows.length,1); assert.deepEqual(x.receiptCohorts.rows[0].bdRows,[2,3]);
-  assert.equal(x.summary.loss,900); assert.equal(x.corrections.length,0);
+  assert.equal(x.summary.loss,900); assert.deepEqual(x.corrections.map(change=>change.cell),['B2'],'A safe master-year correction is independent of the financial reason exclusion');
 });
 test('same NF across claim years preserves the receipt using original B without inventing a BD year correction', () => {
   const x = run([bd({order:'A/1',nf:10}),bd({order:'A/2',nf:10,date:'2024-01-01'})],[cr({ref:10})]);
@@ -150,10 +150,28 @@ test('zero denominator yields null not Infinity', () => {
   const x = run([bd({value:0})],[cr()]);
   assert.equal(x.summary.recoveryRate,null); assert.equal(x.suppliers[0].lossRate,null);
 });
-test('distinct SGR counts cases without removing financial rows', () => {
+test('supplier occurrences count each filled SGR row even when orders share its number', () => {
   const x = run([bd({order:'A/1',nf:1,value:100}),bd({order:'A/2',nf:2,value:200})],[]);
-  assert.equal(x.summary.occurrences,1); assert.equal(x.summary.recordCount,2);
-  assert.equal(x.summary.claimed,300); assert.equal(x.suppliers[0].occurrences,1);
+  assert.equal(x.summary.occurrences,2); assert.equal(x.summary.recordCount,2);
+  assert.equal(x.summary.claimed,300); assert.equal(x.suppliers[0].occurrences,2);
+});
+test('supplier occurrence rows omit blank SGR and preserve financial scope, amounts and executive distinct counts', () => {
+  const claims=[bd({order:'A/1',nf:1,value:100}),bd({order:'A/2',nf:2,value:200}),bd({sgr:'  ',order:'A/3',nf:3,value:50}),bd({sgr:'WAR',order:'A/4',nf:4,value:400,reason:'INTERFERÊNCIA EXTERNA'}),bd({sgr:'ANALYSIS',order:'A/5',nf:5,value:500,status:'EM ANÁLISE'}),bd({sgr:'COSTS',order:'A/6',nf:6,value:600,status:'AGUARDANDO CUSTOS'}),bd({sgr:'REJECTED',order:'A/7',nf:7,value:700,status:'RESPONDIDO - NÃO PROCEDE'}),bd({sgr:'OLD',order:'A/8',nf:8,value:800,date:'2024-01-01'})];
+  const controls=[cr({ref:'A/1',value:10}),cr({ref:'A/2',value:20})];
+  for(const reportView of ['full','suppliers']){
+    const x=run(claims,controls,{reportView});
+    assert.equal(x.summary.occurrences,2);assert.equal(x.suppliers[0].occurrences,2);
+    assert.equal(x.summary.recordCount,3);assert.equal(x.suppliers[0].recordCount,3);
+    assert.equal(x.summary.claimed,350);assert.equal(x.summary.received,30);
+    assert.match(x.meta.occurrenceDefinition,/cada linha elegível/);assert.match(x.meta.occurrenceDefinition,/SGR vazio não entra/);
+    if(reportView==='full'){
+      assert.equal(x.processes.length,3,'Distinct claim orders still form separate processes, including the claim without installments');
+      assert.equal(x.controlReport.processes.length,2,'The two linked orders retain separate Control agreements');
+      const reason=x.executiveReport.reasonRanking.find(row=>row.name==='AVARIA');
+      assert.equal(reason.count,2,'Executive report retains one unique SGR plus its blank-row fallback');
+      assert.equal(reason.recordCount,3);
+    }
+  }
 });
 test('paid without a positive received amount is review', () => {
   const x = run([bd()],[cr({comp:null,value:0}),cr({value:0})]);
@@ -233,7 +251,7 @@ test('excluded claim status does not exclude cash resolved to one supplier and o
   assert.equal(x.summary.claimed,1000); assert.equal(x.summary.received,100);
   assert.equal(x.receiptCohorts.rows.length,1); assert.deepEqual(x.receiptCohorts.rows[0].bdRows,[2,3]);
   assert.equal(x.installments[0].linkState,'review'); assert.equal(x.installments[0].includedInRealized,true);
-  assert.equal(x.corrections.length,0);
+  assert.deepEqual(x.corrections.map(change=>change.cell),['B2'],'A complete link with one RNC year remains auditable across financial statuses');
 });
 test('correction groups merge order and NF references while preserving every changed cell', () => {
   const x = run([bd({order:'SO/DEMO-4',nf:99101})],[cr({ref:'SO/DEMO-4',year:2026,market:'MI'}),cr({ref:99101,year:2027,market:'NACIONAL'})]);

@@ -118,7 +118,7 @@ test('all-years correction follow-up keeps the effective scope and shared audit 
  assert.equal(saved.status,200);assert.equal(saved.body.progress.done,true);
  const selected=(await call(env,'/api/report?years=2025,2026',admin.cookie)).body;
  assert.equal(selected.model.correctionGroups.find(g=>g.progress.key===group.progress.key).progress.done,true);
- assert.equal((await mark(env,admin,snapshot,group,false,{options:{...queryOptions,years:[2026],allYears:false}})).status,409,'Scope cannot mark a correction absent from its selected-year model');
+ assert.equal((await mark(env,admin,snapshot,group,false,{options:{...queryOptions,years:[2026],allYears:false}})).status,200,'Master-year corrections remain reviewable regardless of the financial year filter');
 });
 
 test('correction progress accepts plural and legacy array filters with plural precedence',async()=>{

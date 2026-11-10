@@ -6,6 +6,7 @@ const code=source.slice(source.indexOf('  async function loadReport(options)'),s
 const opts={years:[2026],asOf:'2026-11-09'};
 const payload=(revision='r1',progress='p1',day='2026-11-09')=>({revision,model:{meta:{correctionProgressRevision:progress},procurementReport:{meta:{agingDate:day}}}});
 const metadata=(revision='r1',progress='p1',day='2026-11-09')=>({reportMeta:{revision},correctionProgressRevision:progress,agingDate:day});
+const lightPayload=()=>({revision:'r1',model:{meta:{reportView:'suppliers',correctionProgressRevision:'p1',agingDate:'2026-11-09'}}});
 function harness(){
  const requests=[],applied=[],messages=[];let fresh=payload(),meta=metadata(),failMeta=false,pauseMeta=null;
  const context={reportCache:createReportCache(),reportQuery,session:{approved:true},reportController:null,loadVersion:0,loadingReport:false,publishedMeta:null,AbortController,
@@ -18,6 +19,31 @@ function harness(){
 test('returning to a visited scope checks only metadata and reuses the matching model',async()=>{
  const h=harness();await h.load();await h.load({...opts,allYears:true});await h.load();
  assert.equal(h.requests.length,3);assert.equal(h.requests[2],'/api/report/meta');assert.equal(h.applied[2],h.applied[0]);
+});
+
+test('supplier request has a distinct cache key and validates lightweight aging',async()=>{
+ const h=harness(),lean=lightPayload();h.setFresh(lean);
+ assert.notEqual(reportQuery(opts),reportQuery({...opts,reportView:'suppliers'}));
+ assert.equal(reportQuery(opts),reportQuery({...opts,reportView:'full'}));
+ await h.load({...opts,reportView:'suppliers'});await h.load({...opts,reportView:'suppliers'});
+ assert(h.requests[0].endsWith('view=suppliers'));assert.equal(h.requests[1],'/api/report/meta');assert.equal(h.applied[1],lean);
+ h.setMeta(metadata('r1','p1','2026-11-10'));await h.load({...opts,reportView:'suppliers'});assert.equal(h.requests.length,4);
+});
+
+test('complete model serves supplier comparison after access and revision validation',async()=>{
+ const h=harness();await h.load();await h.load({...opts,reportView:'suppliers'});
+ assert.equal(h.requests[1],'/api/report/meta');assert.equal(h.applied[1],h.applied[0]);
+ assert.equal(h.context.reportCache.get(reportQuery({...opts,reportView:'suppliers'})),undefined);
+});
+
+test('upgrading supplier data fetches full report and retains the other cached scope',async()=>{
+ const h=harness();await h.load();const initial=h.applied[0],scope={...opts,allYears:true};
+ h.setFresh(lightPayload());await h.load({...scope,reportView:'suppliers'});
+ const full=payload();h.setFresh(full);await h.load(scope);
+ assert.equal(h.requests.length,3);assert(!h.requests[2].includes('view=suppliers'));assert.equal(h.applied[2],full);
+ assert.equal(h.context.reportCache.get(reportQuery({...scope,reportView:'suppliers'})),undefined);
+ assert.equal(h.context.reportCache.get(reportQuery(scope)),full);
+ await h.load();assert.equal(h.requests[3],'/api/report/meta');assert.equal(h.applied[3],initial);
 });
 for(const [label,changed] of [['published bases',metadata('r2')],['manual correction progress',metadata('r1','p2')],['daily claim aging',metadata('r1','p1','2026-11-10')]])test('cache invalidates after '+label,async()=>{
  const h=harness();await h.load();h.setMeta(changed);const next=payload(changed.reportMeta.revision,changed.correctionProgressRevision,changed.agingDate);h.setFresh(next);await h.load();

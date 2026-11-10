@@ -39,3 +39,9 @@ test('one queue honors multi filters, exports only selected sources and keeps bo
  h.applied.analystFilter=[];h.applied.correctionProgressFilter=[];h.F.importState({tables:[{id:'correctionTable',filters:[{column:3,values:['0']}],sort:null}]});assert.equal(h.context.reviewRows().length,1);h.context.correctionWorksheets({});assert.equal(h.sheets.Correcoes.rows.length,0);assert.equal(h.sheets.Conferencias.rows.length,1);
  h.applied.correctionSearch='absent';assert.equal(h.context.reviewRows().length,0);h.context.correctionWorksheets({});assert.equal(h.sheets['Fila de conferencia'].rows.length,0);
 });
+
+test('source reconciliation remains pending even when every linked manual adjustment is marked done',()=>{
+ const h=appFixture();h.model.correctionGroups.forEach(group=>group.progress.done=true);h.model.issues[0].reconciliation=true;const row=vm.runInContext('reviewQueue()',h.context).find(item=>item.controlRows.includes(3));h.context.testRow=row;
+ assert.equal(vm.runInContext('reviewProgress(testRow)',h.context),'Conferir na origem');assert(h.context.reviewCells(row).at(-1).includes('Conferir na origem'));assert(!h.context.reviewCells(row).at(-1).includes('MARK'));
+ h.applied.correctionProgressFilter=['pending'];assert(h.context.reviewRows().some(item=>item.id===row.id));h.applied.correctionProgressFilter=['done'];assert(!h.context.reviewRows().some(item=>item.id===row.id));h.applied.correctionProgressFilter=['pending'];h.context.correctionWorksheets({});assert(h.sheets['Fila de conferencia'].rows.some(cells=>cells.includes('Conferir na origem')));
+});

@@ -8,7 +8,7 @@ function fixture(){
  const record=name=>()=>{calls.push(name);models[name]=state.model;};
  const context={state,window:{MinervaExecutive:{renderClaims:record('executive-claims')},MinervaClaimControl:{render:record('claim-control')},MinervaCorrectionImpact:{render:record('impact')},MinervaAnalysts:{render:record('analysts')},MinervaMeetings:{render:record('meeting')},MinervaPortfolio:{render:record('portfolio')}},renderOverview:record('overview'),renderSuppliers:record('suppliers'),renderInstallments:record('installments'),renderCorrections:record('corrections'),renderMethodExtra:record('method'),renderScenarioStatus(){},populateOperations(){},setText(){},receiptScopeNote:()=>'',date:String,integer:String,correctionGroups:()=>[],refreshViewScope:()=>!state.scopeRenderPending,activeDetail:null};
  for(const name of ['MinervaClaimControl','MinervaCorrectionImpact','MinervaAnalysts','MinervaMeetings'])context.window[name].handlesTable=()=>false;
- context.$=id=>id==='correctionBadge'?badge:null;context.reviewQueue=()=>[{},{}];context.populateSupplierYears=()=>{};
+ context.$=id=>id==='correctionBadge'?badge:null;context.reviewQueue=()=>[{},{}];context.populateSupplierYears=()=>{};context.populateSupplierStatuses=()=>{};
  vm.createContext(context);vm.runInContext(renderCode,context);return{context,state,calls,models,badge};
 }
 test('supplier loading builds only its pane and the same model is reused until forced or replaced',()=>{
@@ -28,7 +28,7 @@ test('complete export prepares every dependent module with the current model whi
  const f=fixture();f.context.render();f.context.prepareExportViews(false);assert.deepEqual(f.calls,['suppliers','overview','executive-claims','claim-control','impact','corrections','installments','analysts','meeting']);
  for(const name of ['overview','claim-control','impact','analysts','meeting'])assert.equal(f.models[name],f.state.model);
  const g=fixture();g.context.prepareExportViews('control');assert.deepEqual(g.calls,['installments']);g.context.prepareExportViews('control');assert.equal(g.calls.length,1);
- const workbookCode=between('  function makeWorkbook','  function exportBook');vm.runInContext(workbookCode,g.context);let readyAtExport=false;g.context.viewScopeMatches=()=>true;g.context.window.MinervaMeetings.exportWorkbook=()=>{readyAtExport=g.models.meeting===g.state.model;return 'synthetic-workbook';};assert.equal(g.context.makeWorkbook('meeting'),'synthetic-workbook');assert(readyAtExport);
+ const workbookCode=between('  function makeWorkbook','  async function exportBook');vm.runInContext(workbookCode,g.context);let readyAtExport=false;g.context.viewScopeMatches=()=>true;g.context.window.MinervaMeetings.exportWorkbook=()=>{readyAtExport=g.models.meeting===g.state.model;return 'synthetic-workbook';};assert.equal(g.context.makeWorkbook('meeting'),'synthetic-workbook');assert(readyAtExport);
 });
 test('render failure leaves the scope guarded and does not stamp incomplete HTML as ready',()=>{
  const f=fixture();f.context.renderSuppliers=()=>{throw Error('Synthetic rendering failure');};assert.throws(()=>f.context.render(),/Synthetic/);assert.equal(f.state.scopeRenderPending,true);assert.equal(f.state.renderedViews.has('suppliers'),false);
