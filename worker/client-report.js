@@ -1,9 +1,9 @@
 import {cleanup} from './client-report-cleanup.js';
 // Small authenticated storage operations for browser-side analysis. Source
 // worksheets stay private; readers receive only the fields used by the engine.
-export const CLIENT_REPORT_PROJECTION_VERSION = 2;
+export const CLIENT_REPORT_PROJECTION_VERSION = 3;
 export const clientReportColumns = Object.freeze({
- bd:Object.freeze([0,1,3,6,7,8,9,10,13,16,19,22,24,25,28,31,32,35,40,46,49,56,57,61,62,63]),
+ bd:Object.freeze([0,1,3,5,6,7,8,9,10,13,16,19,22,24,25,28,31,32,35,40,46,49,56,57,61,62,63]),
  control:Object.freeze([0,1,2,3,7,9,10,11,12,13,14,17,19,20,21,23,30,31])
 });
 export function projectClientRows(sheet,rows,firstRow=0){
@@ -26,7 +26,7 @@ export function createClientReportHandler(deps){
  const stageKey=id=>'private/client-staging/'+id+'.json';
  const objectKey=(id,sheet,index,original=false)=>`private/client-reports/${id}/${sheet}/${index}.${original?'original':'projected'}.json`;
  const projectionVersion=value=>value?.projectionVersion??1;
- const requireCurrentProjection=value=>{if(value&&projectionVersion(value)!==CLIENT_REPORT_PROJECTION_VERSION)fail(409,'REPORT_PROJECTION_OUTDATED','A administração precisa importar e publicar novamente as duas bases para atualizar a conferência de Seguro.');};
+ const requireCurrentProjection=value=>{if(value&&projectionVersion(value)!==CLIENT_REPORT_PROJECTION_VERSION)fail(409,'REPORT_PROJECTION_OUTDATED','A administração precisa importar e publicar novamente as duas bases para disponibilizar o Status da coluna F no Controle de claim.');};
  const meta=value=>value?{revision:value.revision,updatedAt:value.updatedAt,updatedBy:actorLabel(value.updatedBy,value.updatedByUserId),files:value.files,asOf:value.asOf,projectionVersion:projectionVersion(value)}:null;
  const fields=(body,allowed)=>{if(Object.keys(body).some(key=>!allowed.includes(key)))fail(400,'INVALID_REQUEST','A solicitação contém campos inesperados.');};
  const label=(value,fallback)=>{if(value==null)return fallback;if(typeof value!=='string'||value.length>240||/[\u0000-\u001f]/.test(value))fail(400,'INVALID_FILENAME','Confira o nome do arquivo.');return value.trim()||fallback;};

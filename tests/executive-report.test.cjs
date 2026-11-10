@@ -112,9 +112,10 @@ test('operational Claim control retains excluded financial rows and literal sour
   bd({ref:'FUTURE',rnc:'2026-12-01'}),bd({ref:'OLD',rnc:'2025-01-01'}),bd({ref:'INVALID',rnc:'bad'})
  ];
  const before=JSON.stringify(source),m=run(source),rows=m.executiveReport.controlClaims;
- assert.deepEqual(rows.map(r=>r.row),[2,3,4]);assert.equal(m.claims.length,1);assert.equal(m.summary.claimed,30);
+ assert.deepEqual(rows.map(r=>r.row),[2,3,4,5,6,7]);assert.equal(m.claims.length,1);assert.equal(m.summary.claimed,30);
  assert.equal(rows[0].financialEligible,false);assert.match(rows[0].reasonExcluded,/Situação/);assert.equal(rows[0].pending,'FUP SUPRIMENTOS — EXEMPLO');assert.equal(rows[0].claimed,null);assert.equal(rows[0].daysWithoutUpdate,0);assert.equal(rows[0].lastUpdateDate,'2026-10-01');assert.equal(rows[0].openingDate,'2026-09-10');assert.equal(rows[0].order,'ANALYSIS');assert.equal(rows[0].analyst,'Analista fictício');
  assert.equal(rows[1].financialEligible,false);assert.match(rows[1].reasonExcluded,/INTERFERÊNCIA/);assert.equal(rows[1].country,'Não informado');assert.equal(rows[1].lastUpdateDate,null);assert.equal(rows[1].daysWithoutUpdate,15);
  assert.equal(rows[2].financialEligible,true);assert.equal(rows[2].reasonExcluded,'');assert.equal(rows[2].daysWithoutUpdate,null,'Negative source duration is not interpreted as valid');
+ assert.match(rows[3].reasonExcluded,/posterior/);assert.match(rows[4].reasonExcluded,/fora do recorte financeiro/);assert.match(rows[5].reasonExcluded,/ausente ou inválida/);
  assert.equal(run(source,[],{operation:'COMERCIAL'}).executiveReport.controlClaims.length,1);assert.equal(JSON.stringify(source),before);
 });

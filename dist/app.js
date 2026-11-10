@@ -88,9 +88,10 @@
     if(receiptView)document.querySelector('.main-nav [data-view="installments"]').setAttribute('aria-current','page');
     const independent=['analysts','meeting','portfolio'].includes(name);
     document.querySelector('.filters-panel').hidden=independent;$('periodLabel').hidden=independent||name==='procurement';
-    document.querySelector('.year-selector').hidden=['suppliers','procurement'].includes(name);$('asOf').closest('label').hidden=name==='procurement';
+    document.querySelector('.year-selector').hidden=['suppliers','procurement','claims'].includes(name);$('asOf').closest('label').hidden=name==='procurement';
     if($('supplierYearField'))$('supplierYearField').hidden=name!=='suppliers';
     if($('supplierStatusField'))$('supplierStatusField').hidden=name!=='suppliers';
+    if($('claimYearField'))$('claimYearField').hidden=name!=='claims';
     document.body.classList.toggle('presentation-workspace',['meeting','portfolio'].includes(name));
     const scopeReady=refreshViewScope();
     if(scopeReady||!state.model){
@@ -102,7 +103,7 @@
   }
   function cleanYears(values){return [...new Set(asList(values).map(Number).filter(year=>Number.isInteger(year)&&year>=2000&&year<=2200))].sort((a,b)=>a-b);}
   function globalYears(){return cleanYears([...document.querySelectorAll('input[name="year"]:checked')].map(el=>el.value));}
-  function requestedYearScope(name=state.view){const years=name==='suppliers'?cleanYears(state.supplierYears):globalYears();return {years:years.length?years:globalYears(),allYears:name==='suppliers'&&!years.length};}
+  function requestedYearScope(name=state.view){const dropdown=['suppliers','claims'].includes(name),years=dropdown?cleanYears(name==='claims'?state.claimYears:state.supplierYears):globalYears();return {years:years.length?years:globalYears(),allYears:dropdown&&!years.length};}
   function sameYearScope(actual,expected){return Boolean(actual)&&Boolean(actual.allYears)===expected.allYears&&(expected.allYears||cleanYears(actual.years).join(',')===cleanYears(expected.years).join(','));}
   function reportSupportsView(meta,name=state.view){return name==='suppliers'||meta?.reportView!=='suppliers';}
   // Each pane owns its applied scope and its unfinished form edits. Navigation
@@ -115,24 +116,26 @@
     const scopes=state.viewFilters||(state.viewFilters={});
     if(!state.filterDefaults)state.filterDefaults=normalizedFilters({years:globalYears(),asOf:state.model?.meta?.asOf||$('asOf')?.value});
     if(!scopes[name]){
-      const defaults=normalizedFilters({...state.filterDefaults,allYears:name==='suppliers'&&!state.supplierYears?.length,...(name==='suppliers'&&state.supplierYears?.length?{years:state.supplierYears}:{})});
+      const selectedYears=name==='claims'?state.claimYears:state.supplierYears,dropdown=['suppliers','claims'].includes(name);
+      const defaults=normalizedFilters({...state.filterDefaults,allYears:dropdown&&!selectedYears?.length,...(dropdown&&selectedYears?.length?{years:selectedYears}:{})});
       const initial=!Object.keys(scopes).length&&name===state.view&&state.model&&sameYearScope(state.model.meta,defaults)?normalizedFilters({...defaults,...state.model.meta}):defaults;
       scopes[name]={draft:normalizedFilters(initial),desired:normalizedFilters(initial),applied:!Object.keys(scopes).length&&state.model?normalizedFilters(initial):null};
     }
     return scopes[name];
   }
   function readFilterDraft(){
-    captureOperation();captureSupplierYears();
+    captureOperation();captureSupplierYears();captureClaimYears();
     return normalizedFilters({...requestedYearScope(),asOf:$('asOf')?.value,suppliers:selectValues('supplierFilter'),operations:state.operations,controlOperations:state.controlOperations,claimStatuses:state.view==='suppliers'?selectValues('supplierStatusFilter'):[],correctionScenario:$('correctionScenario')?.value});
   }
   function restoreFilterDraft(value){
     const draft=normalizedFilters(value);
     if(state.view==='suppliers')state.supplierYears=draft.allYears?[]:draft.years;
+    else if(state.view==='claims')state.claimYears=draft.allYears?[]:draft.years;
     else document.querySelectorAll('input[name="year"]').forEach(el=>el.checked=draft.years.includes(Number(el.value)));
     $('asOf').value=draft.asOf;$('correctionScenario').value=draft.correctionScenario;
     state.operations=draft.operations;state.controlOperations=draft.controlOperations;state.operation=draft.operations.join(' · ');state.controlOperation=draft.controlOperations.join(' · ');state.claimStatuses=draft.claimStatuses;
     for(const value of draft.suppliers)if(!Array.from($('supplierFilter').options||[]).some(option=>option.value===value))$('supplierFilter').add(new Option(value,value));
-    setSelected('supplierFilter',draft.suppliers);populateOperations();populateSupplierYears();populateSupplierStatuses();window.MinervaMultiSelect?.refresh?.();
+    setSelected('supplierFilter',draft.suppliers);populateOperations();populateSupplierYears();populateSupplierStatuses();populateClaimYears();window.MinervaMultiSelect?.refresh?.();
   }
   function sameReportScope(actual,expected){
     if(!sameYearScope(actual,expected))return false;
@@ -164,6 +167,18 @@
   function setupSupplierYears(){
     const anchor=document.querySelector('.year-selector');if(!anchor||$('supplierYearFilter'))return;
     const field=document.createElement('label'),label=document.createElement('span'),select=document.createElement('select');field.id='supplierYearField';field.className='filter-field supplier-year-field';field.hidden=state.view!=='suppliers';label.textContent='Ano dos fornecedores';select.id='supplierYearFilter';select.multiple=true;select.setAttribute('data-multi-select','');select.setAttribute('aria-label','Ano dos fornecedores');select.dataset.placeholder='Todos os anos';select.dataset.filterTitle='Ano dos fornecedores';select.dataset.applyTarget='#applyFilters';select.addEventListener('change',()=>{state.supplierYears=cleanYears(selectValues(select));});field.append(label,select);anchor.parentElement.insertBefore(field,anchor.nextSibling);populateSupplierYears();
+  }
+  function captureClaimYears(){const select=$('claimYearFilter');if(state.view==='claims'&&select?.multiple)state.claimYears=cleanYears(selectValues(select));}
+  function populateClaimYears(model=state.model){
+    const select=$('claimYearFilter');if(!select?.multiple)return;
+    const available=model?.meta?.caseYears||model?.executiveReport?.caseYears;
+    if(Array.isArray(available))state.claimYearOptions=cleanYears(available);
+    const years=cleanYears([...(state.claimYearOptions||[]),...(state.claimYears||[])]).reverse();
+    select.innerHTML='<option value="">Todos os anos</option>'+years.map(year=>'<option value="'+year+'">'+year+'</option>').join('');setSelected(select,cleanYears(state.claimYears));
+  }
+  function setupClaimYears(){
+    const anchor=document.querySelector('.year-selector');if(!anchor||$('claimYearFilter'))return;
+    const field=document.createElement('label'),label=document.createElement('span'),select=document.createElement('select');field.id='claimYearField';field.className='filter-field';field.hidden=state.view!=='claims';label.textContent='Ano dos casos · Data RNC';select.id='claimYearFilter';select.multiple=true;select.setAttribute('data-multi-select','');select.setAttribute('aria-label','Ano dos casos');select.dataset.placeholder='Todos os anos';select.dataset.filterTitle='Ano dos casos';select.dataset.applyTarget='#applyFilters';select.addEventListener('change',()=>{state.claimYears=cleanYears(selectValues(select));});field.append(label,select);anchor.parentElement.insertBefore(field,anchor.nextSibling);populateClaimYears();
   }
   function renderView(name=state.view,force=false){
     if(!state.model){state.renderedViews?.clear();if(!['overview','method'].includes(name))renderViewBody(name);return false;}
@@ -334,7 +349,7 @@
   function supplierFooter(){const s=state.model.summary,o=supplierOpenTotals();return ['Total do recorte',money(s.claimed),...claimYearValues(s).map(money),money(comparativeReceived(s)),pct(comparativeRate(s)),money(loss(s)),pct(s.claimed?loss(s)/s.claimed:null),money(s.negotiating),integer(s.occurrences),s.claimed?'100%':'—',s.claimed?'100%':'—',moneyExact(o.openBalance),moneyExact(o.overdueBalance),integer(s.reviewCount)];}
   function render(force=false){
     const draftOperations=state.fullReportLoad&&!state.analysisBusy?selectValues('operationFilter'):null;
-    const m=state.model,s=m.summary;renderScenarioStatus();populateOperations();populateSupplierYears(m);populateSupplierStatuses(m);
+    const m=state.model,s=m.summary;renderScenarioStatus();populateOperations();populateSupplierYears(m);populateSupplierStatuses(m);populateClaimYears(m);
     if(state.view==='installments'&&state.chartMonth&&!m.meta.years.includes(Number(state.chartMonth.slice(0,4))))state.chartMonth='';
     setText('periodLabel',`${m.meta.allYears?'Todos os anos':m.meta.years.join(' + ')} · posição em ${date(m.meta.asOf)}`);const reviewCount=m.meta.reportView==='suppliers'?m.meta.correctionQueueCount:reviewQueue().length;setText('correctionBadge',integer(reviewCount));setText('correctionCount',integer(reviewCount));setText('issueCount',integer(s.reviewCount));
     const badge=$('correctionBadge');if(badge){badge.hidden=!reviewCount;badge.title=`${integer(reviewCount)} referências para conferir`;badge.setAttribute('aria-label',badge.title);}
@@ -392,6 +407,7 @@
     const meta=state.model.meta;
     // A chart click refines the applied report, without applying unfinished form edits.
     if(state.view==='suppliers'){state.supplierYears=meta.allYears?[]:cleanYears(meta.years);populateSupplierYears();}
+    else if(state.view==='claims'){state.claimYears=meta.allYears?[]:cleanYears(meta.years);populateClaimYears();}
     else if(!meta.allYears)document.querySelectorAll('input[name="year"]').forEach(el=>el.checked=meta.years.includes(Number(el.value)));
     $('asOf').value=meta.asOf;$('correctionScenario').value=currentScenario();state.operations=appliedGlobalValues('operation');state.controlOperations=asList(controlModel()?.meta?.operations??controlModel()?.meta?.operation);state.operation=state.operations.join(' · ');state.controlOperation=state.controlOperations.join(' · ');populateOperations();
     if(name&&!Array.from($('supplierFilter').options).some(option=>option.value===name))$('supplierFilter').add(new Option(name,name));
@@ -596,7 +612,7 @@
     const bd=Array.from({length:64},(_,i)=>'Coluna '+(i+1));Object.assign(bd,{0:'Nº SGR',1:'Data RNC',2:'Data Inclusão',3:'Mercado',5:'Status',6:'Situação',7:'Pendência',8:'Data ultima posição',9:'Data Fim Análise',10:'Motivo',11:'Data Log',12:'Tempo resposta',13:'Abertura claim',19:'País',22:'Ordem',24:'NF',25:'Operação',28:'Negociação',31:'Cia Maritima',32:'Nº container',35:'Reclamado (USD)',46:'Data NF',49:'Causador',56:'Analista',57:'SLA 25 Dias',61:'Prazo Neg. Claims',62:'Media Abertura Claim',63:'Dias Sem Atualização'});
     const cr=Array.from({length:32},(_,i)=>'Coluna '+(i+1));Object.assign(cr,{0:'Setor',1:'Ano Entrada',3:'Mercado',4:'País Origem',5:'País destíno',7:'Referência (Ordem/NF)',9:'N° Confissão',10:'Fornecedor',11:'Tipo de Negociação',12:'Status Pagamento',13:'Data Pagamento',14:'Valor USD',17:'Data compensação',19:'Valor Recebido USD',23:'Pagamento',30:'ANO COMPENSAÇÃO',31:'ANALISTA'});
     const claims=[],controls=[];
-    for(let i=0;i<6;i++){const r=Array(64).fill(null);Object.assign(r,{56:'ANALISTA DEMONSTRAÇÃO',0:'DEMO-'+(i+1),1:i%2?'2026-02-10':'2025-06-12',2:'2026-03-01',3:'ME',5:i===5?'EM ABERTO':'CONCLUÍDO',6:i===5?'EM NEGOCIAÇÃO - PROCEDENTE':'RESSARCIMENTO ENCAMINHADO',7:i===5?'NEGOCIAÇÃO COM FORNECEDOR':'RECEBIMENTO EM ACOMPANHAMENTO',8:'2026-03-20',9:'2026-03-10',10:['AVARIA','OSCILAÇÃO DE TEMPERATURA','ATRASO NA ENTREGA','AVARIA','DOCUMENTAÇÃO INCORRETA','OSCILAÇÃO DE TEMPERATURA'][i],11:'2026-03-01',12:i%2?30:20,13:'2026-03-0'+(i+3),19:['BRA','ARG','COL','PRY','URY','BRA'][i],22:'DEMO/ORD-'+(i+1),24:900001+i,25:i<3?'EXPORTAÇÃO - CTNR':'EXPORTAÇÃO - CARRETA',28:['ARMADOR ALFA','ARMADOR BETA','ARMADOR GAMA','TRANSPORTADORA DELTA','TRANSPORTADORA ÉPSILON','ARMADOR ALFA'][i],31:i<3?['ARMADOR ALFA','ARMADOR BETA','ARMADOR GAMA'][i]:'',32:i<3?'DEMO-CONT-00'+(i+1):'',35:[120000,85000,65000,40000,24000,30000][i],46:i%2?'2026-02-01':'2025-06-01',49:['OPERADOR EXEMPLO A','OPERADOR EXEMPLO B','OPERADOR EXEMPLO A','TRANSPORTADORA EXEMPLO C','TRANSPORTADORA EXEMPLO D','OPERADOR EXEMPLO B'][i],57:i%2?0:1,61:[20,30,40,50,60,25][i],62:[5,10,15,20,25,30][i],63:11});claims.push(r);if(i===5)continue;for(let j=0;j<4;j++){const c=Array(32).fill(null);const paid=j<2;Object.assign(c,{0:i===3?'SGR MI':'SGR ME',1:2026,3:i===3?'MERCADO INTERNO':'MERCADO EXTERNO',4:r[19],5:'DESTINO DEMONSTRAÇÃO',7:r[22],9:'CONF. DEMO '+(i+1),10:r[28]+' LTDA',11:['Boleto','Depósito','Desconto','Rebate'][i%4],12:paid?'Pago':j===2?'Vencido':'Dentro do Prazo',13:j===3?null:'2026-03-10',14:r[35]/4,17:paid?`2026-0${j+2}-15`:null,19:paid?r[35]/4:0,23:paid?'Reembolsado':'Aguardando Pagamento',30:paid?2026:null,31:'ANALISTA DEMONSTRAÇÃO'});controls.push(c);}}
+    for(let i=0;i<6;i++){const r=Array(64).fill(null);Object.assign(r,{56:'ANALISTA DEMONSTRAÇÃO',0:'DEMO-'+(i+1),1:i%2?'2026-02-10':'2025-06-12',2:'2026-03-01',3:'ME',5:i===0?null:i===5?'ABERTO':'FECHADO',6:i===5?'EM NEGOCIAÇÃO - PROCEDENTE':'RESSARCIMENTO ENCAMINHADO',7:i===5?'NEGOCIAÇÃO COM FORNECEDOR':'RECEBIMENTO EM ACOMPANHAMENTO',8:'2026-03-20',9:'2026-03-10',10:['AVARIA','OSCILAÇÃO DE TEMPERATURA','ATRASO NA ENTREGA','AVARIA','DOCUMENTAÇÃO INCORRETA','OSCILAÇÃO DE TEMPERATURA'][i],11:'2026-03-01',12:i%2?30:20,13:'2026-03-0'+(i+3),19:['BRA','ARG','COL','PRY','URY','BRA'][i],22:'DEMO/ORD-'+(i+1),24:900001+i,25:i<3?'EXPORTAÇÃO - CTNR':'EXPORTAÇÃO - CARRETA',28:['ARMADOR ALFA','ARMADOR BETA','ARMADOR GAMA','TRANSPORTADORA DELTA','TRANSPORTADORA ÉPSILON','ARMADOR ALFA'][i],31:i<3?['ARMADOR ALFA','ARMADOR BETA','ARMADOR GAMA'][i]:'',32:i<3?'DEMO-CONT-00'+(i+1):'',35:[120000,85000,65000,40000,24000,30000][i],46:i%2?'2026-02-01':'2025-06-01',49:['OPERADOR EXEMPLO A','OPERADOR EXEMPLO B','OPERADOR EXEMPLO A','TRANSPORTADORA EXEMPLO C','TRANSPORTADORA EXEMPLO D','OPERADOR EXEMPLO B'][i],57:i%2?0:1,61:[20,30,40,50,60,25][i],62:[5,10,15,20,25,30][i],63:11});claims.push(r);if(i===5)continue;for(let j=0;j<4;j++){const c=Array(32).fill(null);const paid=j<2;Object.assign(c,{0:i===3?'SGR MI':'SGR ME',1:2026,3:i===3?'MERCADO INTERNO':'MERCADO EXTERNO',4:r[19],5:'DESTINO DEMONSTRAÇÃO',7:r[22],9:'CONF. DEMO '+(i+1),10:r[28]+' LTDA',11:['Boleto','Depósito','Desconto','Rebate'][i%4],12:paid?'Pago':j===2?'Vencido':'Dentro do Prazo',13:j===3?null:'2026-03-10',14:r[35]/4,17:paid?`2026-0${j+2}-15`:null,19:paid?r[35]/4:0,23:paid?'Reembolsado':'Aguardando Pagamento',30:paid?2026:null,31:'ANALISTA DEMONSTRAÇÃO'});controls.push(c);}}
     const pipeline=[
       {supplier:'TRANSPORTADORA ETA',country:'BRA',status:'EM ANÁLISE',pending:'ANÁLISE DE DOCUMENTOS',amount:18000,reason:'AVARIA',operation:'IMPORTAÇÃO - CTNR'},
       {supplier:'ARMADOR DELTA',country:'ARG',status:'AGUARDANDO CUSTOS',pending:'INFORME DE CUSTOS',amount:12000,reason:'ATRASO NA ENTREGA',operation:'EXPORTAÇÃO - CTNR'},
@@ -605,7 +621,7 @@
       {supplier:'TRANSPORTADORA ZETA',country:'URY',status:'EM NEGOCIAÇÃO - PROCEDENTE',pending:'FUP SUPRIMENTOS — DEMONSTRAÇÃO',amount:25000,reason:'DOCUMENTAÇÃO INCORRETA',operation:'EXPORTAÇÃO - CARRETA'},
       {supplier:'ARMADOR DELTA',country:'COL',status:'EM NEGOCIAÇÃO - PROCEDENTE',pending:'NEGOCIAÇÃO EM ANDAMENTO',amount:15000,reason:'ATRASO NA ENTREGA',operation:'EXPORTAÇÃO - CTNR',rncDate:'2024-10-01',openingDate:'2024-10-15',invoiceDate:'2024-09-20'}
     ];
-    pipeline.forEach((item,i)=>{const r=Array(64).fill(null);Object.assign(r,{0:'DEMO-'+(i+7),1:item.rncDate||'2026-02-15',2:item.rncDate||'2026-02-16',3:'ME',5:'EM ABERTO',6:item.status,7:item.pending,8:'2026-03-25',9:null,10:item.reason,11:'2026-03-01',13:item.openingDate||'2026-03-05',19:item.country,22:'DEMO/ORD-'+(i+7),24:900007+i,25:item.operation,28:item.supplier,31:item.supplier.startsWith('ARMADOR')?item.supplier:'',32:i===1?'DEMO-CONT-008':'',35:item.amount,46:item.invoiceDate||'2026-02-01',49:'CAUSADOR DEMONSTRAÇÃO '+(i+1),56:'ANALISTA DEMONSTRAÇÃO',57:null,61:null,62:item.openingDate?null:20,63:6});claims.push(r);});
+    pipeline.forEach((item,i)=>{const r=Array(64).fill(null);Object.assign(r,{0:'DEMO-'+(i+7),1:item.rncDate||'2026-02-15',2:item.rncDate||'2026-02-16',3:'ME',5:'ABERTO',6:item.status,7:item.pending,8:'2026-03-25',9:null,10:item.reason,11:'2026-03-01',13:item.openingDate||'2026-03-05',19:item.country,22:'DEMO/ORD-'+(i+7),24:900007+i,25:item.operation,28:item.supplier,31:item.supplier.startsWith('ARMADOR')?item.supplier:'',32:i===1?'DEMO-CONT-008':'',35:item.amount,46:item.invoiceDate||'2026-02-01',49:'CAUSADOR DEMONSTRAÇÃO '+(i+1),56:'ANALISTA DEMONSTRAÇÃO',57:null,61:null,62:item.openingDate?null:20,63:6});claims.push(r);});
     state.bd=[bd,...claims];state.control=[cr,...controls];state.bdName='BD — demonstração fictícia';state.controlName='Controle — demonstração fictícia';state.demo=true;setSelected('supplierFilter',[]);$('asOf').value=demoAsOf;document.querySelectorAll('input[name="year"]').forEach(el=>el.checked=Number(el.value)===2026);analyze();
   }
   function exportPdf(){
@@ -657,28 +673,28 @@
   for(const id of ['supplierFilter','operationFilter','typeFilter','statusFilter','analystFilter','correctionProgressFilter']){const el=$(id);if(el){el.multiple=true;el.setAttribute('data-multi-select','');el.dataset.placeholder=el.options[0]?.textContent||'Todos';el.dataset.applyTarget=['supplierFilter','operationFilter'].includes(id)?'#applyFilters':['typeFilter','statusFilter'].includes(id)?'#applyControlFilters':'#applyCorrectionFilters';}}
   const currentYear=Number(E.today().slice(0,4));
   document.querySelector('.year-options').innerHTML=[currentYear-1,currentYear].map(year=>'<label><input type="checkbox" name="year" value="'+year+'"'+(year===currentYear?' checked':'')+'><span>'+year+'</span></label>').join('');
-  $('asOf').value=E.today();$('runAnalysis').disabled=true;$('exportReport').disabled=$('exportCorrections').disabled=$('exportPdf').disabled=$('exportControl').disabled=$('exportControlPdf').disabled=true;extraControls();setupSupplierYears();setupSupplierStatuses();state.filterDefaults=normalizedFilters({years:globalYears(),asOf:E.today()});
+  $('asOf').value=E.today();$('runAnalysis').disabled=true;$('exportReport').disabled=$('exportCorrections').disabled=$('exportPdf').disabled=$('exportControl').disabled=$('exportControlPdf').disabled=true;extraControls();setupSupplierYears();setupSupplierStatuses();setupClaimYears();state.filterDefaults=normalizedFilters({years:globalYears(),asOf:E.today()});
   document.querySelectorAll('[data-loss-formula],#lossFormula,#lossFormulaShort').forEach(el=>el.textContent=lossFormula());
   function setPublishedReport(payload){if(!acceptScenarioModel(payload.model)){refreshScopeWhenReady();return false;}state.appliedGlobal={...(state.requestedOptions||options())};state.bdName=payload.files.bd;state.controlName=payload.files.control;state.demo=false;state.publishedMeta={revision:payload.revision,updatedAt:payload.updatedAt,updatedBy:payload.updatedBy};if(payload.model.controlReport?.supplierOptions)state.supplierOptions=payload.model.controlReport.supplierOptions;else if(!$('supplierFilter').value)state.supplierOptions=payload.model.suppliers.map(s=>s.name);state.correctionsPage=state.installmentsPage=state.processesPage=state.issuesPage=1;$('emptyState').hidden=true;$('loadedContent').hidden=false;$('demoBanner').hidden=true;populateSuppliers();render();state.scopeRenderPending=false;state.scopeLoadFailed=false;refreshViewScope();document.dispatchEvent(new CustomEvent('minerva:model-updated'));say('Relatório compartilhado carregado.');}
   // Saved views contain configuration only; current bases are always reanalyzed.
   function sanitizeView(value={}){
     const raw=value&&typeof value==='object'?value:{},global=raw.global||{},list=input=>[...new Set(asList(input).slice(0,100).map(v=>v.slice(0,200)))],string=input=>String(input||'').slice(0,200);
     const locals={};for(const id of Object.keys(applied))locals[id]=['supplierSearch','installmentSearch','correctionSearch'].includes(id)?string(raw.local?.[id]):list(raw.local?.[id]);
-    const claimFilters=input=>{const result={query:string(input?.query)};for(const key of ['country','status','pending','analyst','supplier'])result[key]=list(input?.[key]);return result;};
+    const claimFilters=input=>{const result={query:string(input?.query)};for(const key of ['country','status','pending','analyst','supplier','caseStatusKey'])result[key]=list(input?.[key]);return result;};
     const view=['overview','suppliers','installments','corrections','claims','procurement','analysts','meeting','portfolio','method'].includes(raw.view)?raw.view:'overview';
-    return {version:1,view,supplierYears:cleanYears(raw.supplierYears).slice(0,30),global:{years:list(global.years).map(Number).filter(v=>Number.isInteger(v)&&v>=2000&&v<=2200).slice(0,30),asOf:/^\d{4}-\d{2}-\d{2}$/.test(global.asOf)?global.asOf:'',operations:list(global.operations),controlOperations:list(global.controlOperations),claimStatuses:list(global.claimStatuses),suppliers:list(global.suppliers),correctionScenario:global.correctionScenario==='original'?'original':'corrected'},local:locals,claims:{claims:claimFilters(raw.claims?.claims),procurement:claimFilters(raw.claims?.procurement),supplier:string(raw.claims?.supplier)},tableState:F.sanitizeState?.(raw.tableState)||{tables:[]},supplierMode:raw.supplierMode==='annual'?'annual':'summary',sort:['claimed','received','recoveryRate','name'].includes(raw.sort)?raw.sort:'claimed',chartMonth:/^\d{4}-(0[1-9]|1[0-2])$/.test(raw.chartMonth)?raw.chartMonth:'',analystYear:Number.isInteger(raw.analystYear)?raw.analystYear:null,meeting:{year:Number.isInteger(raw.meeting?.year)?raw.meeting.year:null,month:Number.isInteger(raw.meeting?.month)&&raw.meeting.month>=-1&&raw.meeting.month<=12?raw.meeting.month:0}};
+    return {version:1,view,supplierYears:cleanYears(raw.supplierYears).slice(0,30),claimYears:cleanYears(raw.claimYears??(view==='claims'?global.years:[])).slice(0,100),global:{years:list(global.years).map(Number).filter(v=>Number.isInteger(v)&&v>=2000&&v<=2200).slice(0,30),asOf:/^\d{4}-\d{2}-\d{2}$/.test(global.asOf)?global.asOf:'',operations:list(global.operations),controlOperations:list(global.controlOperations),claimStatuses:list(global.claimStatuses),suppliers:list(global.suppliers),correctionScenario:global.correctionScenario==='original'?'original':'corrected'},local:locals,claims:{claims:claimFilters(raw.claims?.claims),procurement:claimFilters(raw.claims?.procurement),supplier:string(raw.claims?.supplier)},tableState:F.sanitizeState?.(raw.tableState)||{tables:[]},supplierMode:raw.supplierMode==='annual'?'annual':'summary',sort:['claimed','received','recoveryRate','name'].includes(raw.sort)?raw.sort:'claimed',chartMonth:/^\d{4}-(0[1-9]|1[0-2])$/.test(raw.chartMonth)?raw.chartMonth:'',analystYear:Number.isInteger(raw.analystYear)?raw.analystYear:null,meeting:{year:Number.isInteger(raw.meeting?.year)?raw.meeting.year:null,month:Number.isInteger(raw.meeting?.month)&&raw.meeting.month>=-1&&raw.meeting.month<=12?raw.meeting.month:0}};
   }
   function captureView(){
     if(!state.model)throw new Error('Carregue uma análise antes de salvar a visão.');
     if(!viewScopeMatches())throw new Error('Aguarde a atualização desta aba antes de salvar a visão.');
     const appliedOptions=state.appliedGlobal||state.model.meta||{};
-    return sanitizeView({view:state.view,supplierYears:state.view==='suppliers'?(state.model.meta.allYears?[]:state.model.meta.years):state.supplierYears,global:{years:state.view==='suppliers'?globalYears():appliedOptions.years,asOf:appliedOptions.asOf,operations:appliedGlobalValues('operation'),controlOperations:appliedGlobalValues('controlOperation'),claimStatuses:asList(appliedOptions.claimStatuses),suppliers:appliedGlobalValues('supplier'),correctionScenario:currentScenario()},local:applied,claims:window.MinervaClaimControl?.getViewState(),tableState:F.exportState?.(),supplierMode:state.supplierMode,sort:state.sort,chartMonth:state.chartMonth,analystYear:window.MinervaAnalysts?.getViewState?.().year,meeting:window.MinervaMeetings?.getViewState?.()});
+    return sanitizeView({view:state.view,claimYears:state.view==='claims'?(state.model.meta.allYears?[]:state.model.meta.years):state.claimYears,supplierYears:state.view==='suppliers'?(state.model.meta.allYears?[]:state.model.meta.years):state.supplierYears,global:{years:['suppliers','claims'].includes(state.view)?globalYears():appliedOptions.years,asOf:appliedOptions.asOf,operations:appliedGlobalValues('operation'),controlOperations:appliedGlobalValues('controlOperation'),claimStatuses:asList(appliedOptions.claimStatuses),suppliers:appliedGlobalValues('supplier'),correctionScenario:currentScenario()},local:applied,claims:window.MinervaClaimControl?.getViewState(),tableState:F.exportState?.(),supplierMode:state.supplierMode,sort:state.sort,chartMonth:state.chartMonth,analystYear:window.MinervaAnalysts?.getViewState?.().year,meeting:window.MinervaMeetings?.getViewState?.()});
   }
   async function restoreView(value){
     if(state.analysisBusy||state.restoringSavedView)throw new Error('Aguarde a análise atual terminar.');
     if(!state.model)throw new Error('Carregue uma análise antes de aplicar a visão.');
     const saved=sanitizeView(value),years=[...document.querySelectorAll('input[name="year"]')],available=years.map(el=>Number(el.value));
-    if(!saved.global.years.length||saved.global.years.some(year=>!available.includes(year)))throw new Error('O período desta visão não está disponível nos filtros atuais.');
+    if(saved.view!=='claims'&&(!saved.global.years.length||saved.global.years.some(year=>!available.includes(year))))throw new Error('O período desta visão não está disponível nos filtros atuais.');
     if(!saved.global.asOf)throw new Error('Esta visão não possui uma data de análise válida.');
     state.restoringSavedView=true;
     try{
@@ -686,6 +702,7 @@
       const viewVersion=state.viewVersion||0;
       clearActiveTableFilters();if(saved.view==='installments')state.chartMonth='';
       if(saved.view==='suppliers'){state.supplierYears=saved.supplierYears;state.claimStatuses=saved.global.claimStatuses;populateSupplierYears();populateSupplierStatuses();}
+      if(saved.view==='claims'){state.claimYears=saved.claimYears;populateClaimYears();}
       state.operations=saved.global.operations;state.controlOperations=saved.global.controlOperations;state.operation=state.operations.join(' · ');state.controlOperation=state.controlOperations.join(' · ');populateOperations();
       for(const value of saved.global.suppliers)if(!Array.from($('supplierFilter').options).some(option=>option.value===value))$('supplierFilter').add(new Option(value,value));
       setSelected('supplierFilter',saved.global.suppliers);years.forEach(el=>el.checked=saved.global.years.includes(Number(el.value)));$('asOf').value=saved.global.asOf;$('correctionScenario').value=saved.global.correctionScenario;

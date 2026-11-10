@@ -56,7 +56,7 @@ test('local deferred analysis discards the old view result and recomputes withou
 });
 
 test('repeated programmatic scope changes use the final view and do not loop or retain historical results',async()=>{
- const f=fixture();f.context.view('suppliers');f.context.view('overview');f.context.view('suppliers');f.context.view('claims');
+ const f=fixture();f.state.claimYears=[2026];f.context.view('suppliers');f.context.view('overview');f.context.view('suppliers');f.context.view('claims');
  assert.equal(f.requests.length,4);assert(f.requests.slice(0,3).every(request=>request.options.signal.aborted));
  f.requests[3].resolve(payload(false));await flush();assert.deepEqual(f.renders,[{view:'claims',allYears:false,claimed:10}]);
  for(const i of [2,0,1])f.requests[i].resolve(payload(i%2===0));await flush();assert.equal(f.renders.length,1);assert.equal(f.requests.length,4);assert.equal(f.state.analysisBusy,false);
@@ -92,14 +92,14 @@ test('local navigation coalesces to the final scope and releases controls after 
 });
 
 test('historical values remain hidden after timeout and appear only after a matching retry succeeds',async()=>{
- const f=fixture({initialModel:model(true),respectAbort:true});f.state.view='suppliers';f.node('supplierFilter').value='Fornecedor exemplo';const claimRenders=[];f.context.window.MinervaExecutive={renderClaims(value){claimRenders.push(value);}};
+ const f=fixture({initialModel:model(true),respectAbort:true});f.state.view='suppliers';f.state.claimYears=[2026];f.node('supplierFilter').value='Fornecedor exemplo';const claimRenders=[];f.context.window.MinervaExecutive={renderClaims(value){claimRenders.push(value);}};
  f.context.view('claims');assert.equal(f.node('view-claims').hidden,true);assert.equal(f.node('viewScopeNotice').hidden,false);assert.equal(f.node('viewScopeRetry').disabled,true);assert.equal(claimRenders.length,0);assert.equal(f.node('exportReport').disabled,true);
  f.expireLatest();await flush();assert.equal(f.state.model.meta.allYears,true);assert.equal(f.node('view-claims').hidden,true);assert.equal(f.node('viewScopeRetry').disabled,false);assert.match(f.node('viewScopeTitle').textContent,/Não foi possível/);assert.equal(f.node('exportPdf').disabled,true);
  const retry=f.context.analyze();assert.equal(f.node('view-claims').hidden,true);f.requests[1].resolve(payload(false));await retry;await flush();assert.equal(f.state.model.meta.allYears,false);assert.equal(f.node('view-claims').hidden,false);assert.equal(f.node('viewScopeNotice').hidden,true);assert.equal(f.node('exportReport').disabled,false);assert.equal(f.node('exportPdf').disabled,false);assert.equal(f.node('supplierFilter').value,'','Claims does not inherit the supplier tab draft');
 });
 
 test('returning to suppliers after a failed scope change reveals the retained matching model',async()=>{
- const f=fixture({initialModel:model(true),respectAbort:true});f.state.view='suppliers';f.context.view('claims');f.expireLatest();await flush();f.context.view('suppliers');
+ const f=fixture({initialModel:model(true),respectAbort:true});f.state.view='suppliers';f.state.claimYears=[2026];f.context.view('claims');f.expireLatest();await flush();f.context.view('suppliers');
  assert.equal(f.requests.length,1);assert.equal(f.node('view-suppliers').hidden,false);assert.equal(f.node('view-claims').hidden,true);assert.equal(f.node('viewScopeNotice').hidden,true);assert.equal(f.node('exportReport').disabled,false);assert.equal(f.state.model.meta.allYears,true);assert(f.nav.every(button=>!button.disabled));
 });
 
@@ -110,19 +110,19 @@ test('initial empty state remains usable, but a failed first load has a visible 
 });
 
 test('render failure cannot reveal partially updated values and year mismatch cannot be exported',async()=>{
- const f=fixture({initialModel:model(true),renderError:true});f.state.view='suppliers';f.context.view('claims');f.requests[0].resolve(payload(false));await flush();assert.equal(f.node('view-claims').hidden,true);assert.equal(f.node('exportReport').disabled,true);assert.equal(f.node('viewScopeNotice').hidden,false);
+ const f=fixture({initialModel:model(true),renderError:true});f.state.view='suppliers';f.state.claimYears=[2026];f.context.view('claims');f.requests[0].resolve(payload(false));await flush();assert.equal(f.node('view-claims').hidden,true);assert.equal(f.node('exportReport').disabled,true);assert.equal(f.node('viewScopeNotice').hidden,false);
  const g=fixture();g.years[0].checked=true;g.years[1].checked=false;g.context.refreshViewScope();assert.equal(g.node('view-overview').hidden,true);assert.equal(g.node('exportPdf').disabled,true);
  const workbook=between(appSource,'  function makeWorkbook(','  async function exportBook(');vm.runInContext(workbook,g.context);assert.throws(()=>g.context.makeWorkbook(),/Atualize o período/);
 });
 
 test('scope notice is outside global filters and its retry button invokes analysis',()=>{
  const {createDOM}=require('./dom-fixture.cjs'),dom=createDOM(),main=dom.element('main'),globalFilters=dom.element('div',{id:'globalFilterBlock'},main),receipt=dom.element('nav',{id:'receiptViews'},main),claims=dom.element('section',{id:'view-claims'},main),exports=dom.element('button',{id:'exportReport'},main);let retries=0;
- const context={state:{view:'claims',model:model(true)},document:dom.document,$:id=>dom.document.getElementById(id),asList:value=>value||[],analyze(){retries++;}};vm.createContext(context);vm.runInContext(between(appSource,'  function cleanYears','  function captureSupplierYears')+between(appSource,'  function viewScopeMatches','  const currentScenario'),context);context.refreshViewScope();
+ const context={state:{view:'claims',claimYears:[2026],model:model(true)},document:dom.document,$:id=>dom.document.getElementById(id),asList:value=>value||[],analyze(){retries++;}};vm.createContext(context);vm.runInContext(between(appSource,'  function cleanYears','  function captureSupplierYears')+between(appSource,'  function viewScopeMatches','  const currentScenario'),context);context.refreshViewScope();
  const banner=dom.document.getElementById('viewScopeNotice'),retry=dom.document.getElementById('viewScopeRetry');assert.equal(banner.parentElement,main);assert.equal(globalFilters.contains(banner),false);assert.equal(main.children.indexOf(banner)+1,main.children.indexOf(receipt));assert.equal(claims.hidden,true);assert.equal(exports.disabled,true);retry.click();assert.equal(retries,1);
 });
 
 test('supplier year scope is independent and changing between two restricted scopes reloads the correct years',async()=>{
- const f=fixture();f.state.supplierYears=[2025];f.context.view('suppliers');
+ const f=fixture();f.state.supplierYears=[2025];f.state.claimYears=[2026];f.context.view('suppliers');
  assert.equal(f.requests.length,1);let query=new URLSearchParams(f.requests[0].url.split('?')[1]);assert.equal(query.has('allYears'),false);assert.equal(query.get('years'),'2025');assert.equal(f.node('view-suppliers').hidden,true);
  f.requests[0].resolve(payload(false,[2025]));await flush();assert.equal(f.context.viewScopeMatches(),true);assert.deepEqual(f.years.map(y=>y.checked),[false,true]);
  f.context.view('claims');assert.equal(f.requests.length,2);query=new URLSearchParams(f.requests[1].url.split('?')[1]);assert.equal(query.get('years'),'2026');assert.equal(f.node('view-claims').hidden,true);
@@ -153,8 +153,19 @@ test('supplier year field uses the shared searchable multi-select contract and r
  select.dispatchEvent({type:'change'});assert.deepEqual(Array.from(state.supplierYears),[2025,2026]);context.populateSupplierYears({meta:{allYears:false,years:[2026]}});assert(select.innerHTML.includes('value="2020"'));context.setupSupplierYears();assert.equal(filters.querySelectorAll('#supplierYearField').length,1);
 });
 
+test('Claim year scope defaults to all history and keeps a historical restriction independent of other panes',async()=>{
+ const f=fixture();f.context.view('claims');assert.equal(new URLSearchParams(f.requests[0].url.split('?')[1]).get('allYears'),'1');f.requests[0].resolve(payload(true));await flush();assert.equal(f.context.viewScopeMatches(),true);assert.deepEqual(f.years.map(year=>year.checked),[false,true]);
+ f.state.claimYears=[2020,2021];const selected=f.context.analyze();assert.equal(new URLSearchParams(f.requests[1].url.split('?')[1]).get('years'),'2020,2021');f.context.view('overview');assert.equal(f.requests[1].options.signal.aborted,true);f.requests[1].resolve(payload(false,[2020,2021]));f.requests[2].resolve(payload(false));await selected;await flush();assert.equal(f.state.view,'overview');assert.deepEqual(f.state.model.meta.years,[2026]);assert.deepEqual(Array.from(f.state.viewFilters.claims.desired.years),[2020,2021]);assert.deepEqual(f.years.map(year=>year.checked),[false,true]);
+});
+
+test('Claim year dropdown uses all dynamic BD years and preserves selected years missing from a new base',()=>{
+ const {createDOM}=require('./dom-fixture.cjs'),dom=createDOM(),filters=dom.element('section',{class:'filters-panel'});dom.element('div',{class:'year-selector'},filters);let selection=[];
+ const state={view:'claims',claimYears:[2019,2020],model:{meta:{caseYears:[2020,2021,2026]}}},context={state,document:dom.document,$:id=>dom.document.getElementById(id),asList:value=>Array.isArray(value)?value:value?[value]:[],setSelected(_el,values){selection=Array.from(values);},selectValues:()=>['2026','2020']};vm.createContext(context);vm.runInContext(between(appSource,'  function cleanYears','  function renderView'),context);context.setupClaimYears();
+ const field=dom.document.getElementById('claimYearField'),select=dom.document.getElementById('claimYearFilter');assert.equal(field.hidden,false);assert.equal(select.multiple,true);assert.equal(select.hasAttribute('data-multi-select'),true);assert.equal(select.dataset.applyTarget,'#applyFilters');assert.equal(select.dataset.placeholder,'Todos os anos');assert.deepEqual(selection,[2019,2020]);assert.deepEqual([...select.innerHTML.matchAll(/value="(\d+)"/g)].map(match=>Number(match[1])),[2026,2021,2020,2019]);select.dispatchEvent({type:'change'});assert.deepEqual(Array.from(state.claimYears),[2020,2026]);context.setupClaimYears();assert.equal(filters.querySelectorAll('#claimYearField').length,1);
+});
+
 test('leaving a lean supplier report requests full data even when the selected years match',async()=>{
- const lean=model(false);lean.meta.reportView='suppliers';const f=fixture({initialModel:lean});f.state.view='suppliers';f.state.supplierYears=[2026];f.context.view('claims');assert.equal(f.requests.length,1);assert.equal(new URLSearchParams(f.requests[0].url.split('?')[1]).has('view'),false);assert.equal(f.node('view-claims').hidden,true);assert.equal(f.node('exportReport').disabled,true);
+ const lean=model(false);lean.meta.reportView='suppliers';const f=fixture({initialModel:lean});f.state.view='suppliers';f.state.supplierYears=[2026];f.state.claimYears=[2026];f.context.view('claims');assert.equal(f.requests.length,1);assert.equal(new URLSearchParams(f.requests[0].url.split('?')[1]).has('view'),false);assert.equal(f.node('view-claims').hidden,true);assert.equal(f.node('exportReport').disabled,true);
  f.requests[0].resolve(payload(false));await flush();assert.equal(f.node('view-claims').hidden,false);assert.equal(f.node('exportReport').disabled,false);
 });
 

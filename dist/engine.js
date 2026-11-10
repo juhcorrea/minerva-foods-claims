@@ -548,6 +548,7 @@
     const correctionScenario = options.correctionScenario === 'original' ? 'original' : 'corrected', useOriginal = correctionScenario === 'original';
     const suppliersOnly = options.reportView === 'suppliers';
     const model = analyzeScope(bdRows, controlRows, options, true, !suppliersOnly);
+    model.meta.caseYears=unique(bdRows.slice(1).map(row=>parseDate(row?.[1])).filter(Boolean).map(date=>Number(date.slice(0,4)))).sort((a,b)=>a-b);
     model.claimStatusOptions=[...new Map(bdRows.slice(1).filter(row=>row?.slice(0,36).some(value=>value!=null&&value!=='')).map(row=>[claimStatusKey(row[6]),text(row[6])||'Não informado'])).values()].sort((a,b)=>a.localeCompare(b,'pt-BR'));
     Object.assign(model.meta,globalFilterMeta(options),{controlOperation:options.controlOperation,controlOperations:[...options.controlOperations],filterBasis:'OU entre seleções de um filtro; E entre fornecedor e operação. Recebimentos e saldos com operações agrupadas exigem que todas as operações identificadas pertençam à seleção global, sem ratear ou repetir linhas.'});
     model.meta.allYears=options.allYears===true;model.meta.yearScope=model.meta.allYears?'all':'selected';
@@ -1205,7 +1206,7 @@
     const operationFilter=new Set(options.operations.map(normalizeStatus)),supplierFilter=new Set(options.suppliers.map(norm));
     const negotiating=new Map(),pipeline=new Map(),reasons=new Map(),causes=new Map(),sectors=new Map(),monthly=new Map(),sla=new Map(),claimRows=new Map(),controlClaims=[];
     const financialRows=new Set(model.claims.map(claim=>claim.row));
-    const optional={country:[19,'País'],cause:[49,'Causador'],armador:[31,'Cia Maritima'],analysis:[57,'SLA 25 Dias'],analysisDate:[9,'Data Fim Análise'],negotiation:[61,'Prazo Neg. Claims'],negotiationDate:[8,'Data ultima posição'],opening:[62,'Media Abertura Claim'],openingDate:[13,'Abertura claim'],pending:[7,'Pendência'],daysWithoutUpdate:[63,'Dias Sem Atualização']};
+    const optional={caseStatus:[5,'Status'],country:[19,'País'],cause:[49,'Causador'],armador:[31,'Cia Maritima'],analysis:[57,'SLA 25 Dias'],analysisDate:[9,'Data Fim Análise'],negotiation:[61,'Prazo Neg. Claims'],negotiationDate:[8,'Data ultima posição'],opening:[62,'Media Abertura Claim'],openingDate:[13,'Abertura claim'],pending:[7,'Pendência'],daysWithoutUpdate:[63,'Dias Sem Atualização']};
     const available=Object.fromEntries(Object.entries(optional).map(([key,[at,name]])=>[key,headerKey(bdRows[0]?.[at])===headerKey(name)]));
     available.sector=headerKey(controlRows[0]?.[0])==='SETOR';
     const read=(source,key)=>available[key]?source[optional[key][0]]:null;
@@ -1250,10 +1251,12 @@
       const rncDate=parseDate(source[1]),statusKey=normalizeStatus(source[6]);
       const row={row:n+1,sgr:text(source[0]),...claimDimensions(bdRows[0],source),status:text(source[6]),statusKey,supplier,claimed:number(source[35]),rncDate,operation:text(source[25])};
       const periodEligible=rncDate&&rncDate<=asOf&&yearSet.has(Number(rncDate.slice(0,4))),war=norm(source[10])==='INTERFERENCIA EXTERNA';
-      if(periodEligible){
+      {
         const excluded=[];if(EXCLUDED_STATUSES.has(statusKey))excluded.push('Situação fora do financeiro: '+row.status);if(war)excluded.push('Motivo INTERFERÊNCIA EXTERNA');
+        if(!rncDate)excluded.push('Data RNC ausente ou inválida');else if(rncDate>asOf)excluded.push('Data RNC posterior à data da análise');else if(!yearSet.has(Number(rncDate.slice(0,4))))excluded.push('Ano da Data RNC fora do recorte financeiro');
         const days=number(read(source,'daysWithoutUpdate'));
-        controlClaims.push({...row,order:text(source[22]),...claimFollowUpFields(bdRows[0],source,agingDate),financialEligible:financialRows.has(row.row),reasonExcluded:excluded.join('; '),pending:text(read(source,'pending')),lastUpdateDate:parseDate(read(source,'negotiationDate')),daysWithoutUpdate:days!=null&&days>=0?days:null,analyst:text(source[56])||'Não informado'});
+        const caseStatus=text(read(source,'caseStatus'))||'Não informado',caseStatusKey=norm(caseStatus)==='ABERTO'?'open':norm(caseStatus)==='FECHADO'?'closed':'unknown';
+        controlClaims.push({...row,caseStatus,caseStatusKey,rncYear:rncDate?Number(rncDate.slice(0,4)):null,order:text(source[22]),...claimFollowUpFields(bdRows[0],source,agingDate),financialEligible:financialRows.has(row.row),reasonExcluded:excluded.join('; '),pending:text(read(source,'pending')),lastUpdateDate:parseDate(read(source,'negotiationDate')),daysWithoutUpdate:days!=null&&days>=0?days:null,analyst:text(source[56])||'Não informado'});
       }
       if(war)continue;
       if(periodEligible&&statuses[statusKey]){
@@ -1272,12 +1275,12 @@
     const negotiationByCountry=finish(negotiating).map(({name,...item})=>({country:name,...item}));
     const openByCountry=[...pipeline.values()].map(({_ids,_negotiating,_inAnalysis,_awaitingCosts,...item})=>({...item,negotiating:_negotiating.size,inAnalysis:_inAnalysis.size,awaitingCosts:_awaitingCosts.size,total:_ids.size,recordCount:item.rows.length})).sort((a,b)=>b.total-a.total||a.country.localeCompare(b.country,'pt-BR'));
     const slaByMonth=[...sla.values()].map(({_analysis,_negotiation,_opening,...item})=>({...item,analysisRate:item.analysisCount?_analysis/item.analysisCount:null,negotiationDays:item.negotiationCount?_negotiation/item.negotiationCount:null,openingDays:item.openingCount?_opening/item.openingCount:null}));
-    model.executiveReport={years,monthlyReceipts,negotiationByCountry,openByCountry,reasonRanking:finish(reasons),causeRanking:finish(causes),sectorReceipts:finish(sectors),slaByMonth,claimRows:[...claimRows.values()].sort((a,b)=>a.row-b.row),receiptRows,controlClaims,
+    model.executiveReport={years,caseYears:[...model.meta.caseYears],monthlyReceipts,negotiationByCountry,openByCountry,reasonRanking:finish(reasons),causeRanking:finish(causes),sectorReceipts:finish(sectors),slaByMonth,claimRows:[...claimRows.values()].sort((a,b)=>a.row-b.row),receiptRows,controlClaims,
       meta:{asOf,correctionScenario:model.meta.correctionScenario,...globalFilterMeta(options),available,
         receiptBasis:'Caixa do recorte global: mesmos coortes existentes, M = Pago, R válida nos anos selecionados e T positivo. Cada linha do Controle entra uma vez. Setor é A do Controle; não é a operação Z da BD.',
         financialBasis:'Motivo, causador e negociação por país usam os claims financeiros já selecionados. Causador vem de AX da BD, separado do fornecedor em AC. Valores financeiros existentes não são recalculados por este relatório.',
         pipelineBasis:'BD: ano de Data RNC selecionado, Data RNC até a análise, operações e fornecedor do recorte global, sem INTERFERÊNCIA EXTERNA. Situações: EM ANÁLISE, AGUARDANDO CUSTOS e EM NEGOCIAÇÃO - PROCEDENTE. Sem listas manuais de exclusões de pendência do BI. Não representa o saldo de parcelas do Controle.',
-        controlClaimBasis:'Controle operacional da BD: todas as situações e motivos, inclusive linhas fora do financeiro, no período de Data RNC e nos filtros globais. Pendência H e dias sem atualização BL são preservados da base. financialEligible e reasonExcluded indicam a participação no financeiro; nenhuma linha da planilha é alterada.',
+        controlClaimBasis:'Controle operacional da BD: todos os anos, situações e motivos, inclusive Seguro, INTERFERÊNCIA EXTERNA e linhas sem Data RNC, nos filtros globais de fornecedor e operação. Aberto e Fechado seguem exclusivamente o Status F; Situação G permanece separada. F ausente, inválida ou desconhecida não é inferida por G. Cada linha com SGR preenchido conta um caso, inclusive SGR repetido; linhas sem SGR permanecem identificadas. Anos e status operacionais são filtrados na própria aba, sem alterar o financeiro. Pendência H e dias BL são preservados; financialEligible e reasonExcluded indicam a participação no recorte financeiro.',
         occurrenceBasis:'Contagens de casos: SGR distinto por grupo; sem SGR, linha Excel. Valores somam linhas e recordCount mostra registros. O mesmo SGR pode aparecer em mais de uma categoria; total de um país deduplica o SGR entre situações.',
         slaBasis:'Média do indicador BF por data J; média de dias BJ por data I somente com RESSARCIMENTO ENCAMINHADO; média de dias BK por data N. Datas dos eventos nos anos selecionados e até a análise, independentemente do ano RNC, com fornecedor/operação/expurgo do recorte global. Zero válido participa; ausentes, inválidos e dias negativos não participam.',
         analysisBasis:'BF é o índice SLA da base entre 0 e 1. A média é exibida como percentual do índice; esta projeção não recria nem presume a fórmula do prazo de 25 dias.',

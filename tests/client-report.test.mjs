@@ -16,9 +16,9 @@ class MemoryBucket{
 }
 function input(){
  const bh=Array(64).fill(null),ch=Array(32).fill(null),b=Array(64).fill(null),c=Array(32).fill(null);
- Object.assign(bh,{0:'Nº SGR',1:'Data RNC',3:'Mercado',6:'Situação',10:'Motivo',16:'Área negociação',22:'Ordem',24:'NF',25:'Operação',28:'Negociação',35:'Reclamado (USD)',56:'Analista'});
+ Object.assign(bh,{0:'Nº SGR',1:'Data RNC',3:'Mercado',5:'Status',6:'Situação',10:'Motivo',16:'Área negociação',22:'Ordem',24:'NF',25:'Operação',28:'Negociação',35:'Reclamado (USD)',56:'Analista'});
  Object.assign(ch,{1:'Ano Entrada',3:'Mercado',7:'Referência (Ordem/NF)',9:'N° Confissão',10:'Fornecedor',11:'Tipo de Negociação',12:'Status Pagamento',13:'Data Pagamento',14:'Valor USD',17:'Data compensação',19:'Valor Recebido USD',23:'Pagamento',30:'ANO COMPENSAÇÃO',31:'ANALISTA'});
- Object.assign(b,{0:'QA-1',1:'2026-01-05',2:'UNUSED-PRIVATE-BD',3:'ME',6:'RESSARCIMENTO ENCAMINHADO',16:'Seguro',22:'QA/001',28:'TEST SUPPLIER',35:100});
+ Object.assign(b,{0:'QA-1',1:'2026-01-05',2:'UNUSED-PRIVATE-BD',3:'ME',5:'Aberto',6:'RESSARCIMENTO ENCAMINHADO',16:'Seguro',22:'QA/001',28:'TEST SUPPLIER',35:100});
  Object.assign(c,{1:2026,4:'UNUSED-PRIVATE-CONTROL',7:'QA/001',10:'TEST SUPPLIER',12:'Pago',14:25,17:'2026-02-01',19:25});
  return {bd:[bh,b],control:[ch,c],files:{bd:'BD.xlsx',control:'Controle.xlsx'},asOf:'2026-11-10'};
 }
@@ -43,36 +43,36 @@ test('browser publication is atomic, immutable, hash checked and never runs serv
  for(const sheet of ['bd','control']){assert.equal((await f.part(id,sheet,[data[sheet][0]])).status,201);assert.equal((await f.part(id,sheet,[data[sheet][1]],1,1)).status,201);}
  const done=await f.commit(id);assert.equal(done.body.revision,id);assert.equal((await f.commit(id)).status,200);
  const manifest=(await f.call('/api/client-report',{cookie:f.admin})).body;assert.equal(manifest.parts.length,4);assert.deepEqual(manifest.rows,{bd:2,control:2});
- assert.equal(manifest.projectionVersion,CLIENT_REPORT_PROJECTION_VERSION);assert.equal(done.body.projectionVersion,2);
+ assert.equal(manifest.projectionVersion,CLIENT_REPORT_PROJECTION_VERSION);assert.equal(done.body.projectionVersion,3);
  for(const descriptor of manifest.parts){const result=await f.call(descriptor.url,{cookie:f.admin});assert.equal(result.status,200);assert.equal(hash(result.text),descriptor.sha256);assert(!result.text.includes('UNUSED-PRIVATE'));assert.equal(result.headers.get('cache-control'),'private, no-store');}
  assert.equal((await f.call('/api/session',{cookie:f.admin})).body.reportMeta.revision,id);
  assert.equal((await f.call('/api/report/meta',{cookie:f.admin})).body.reportMeta.revision,id);
  for(const method of ['GET','POST'])assert.equal((await f.call('/api/report',{cookie:f.admin,method,body:method==='POST'?{}:undefined})).body.code,'BROWSER_ANALYSIS_REQUIRED');
  assert.equal(f.analyses(),0);
 });
-test('projection v2 preserves BD Q for Seguro and matches analysis from complete originals',()=>{
+test('projection v3 preserves BD F Status and Q Seguro and matches complete original analysis',()=>{
  const data=input(),before=JSON.stringify(data),projected={bd:projectClientRows('bd',data.bd),control:projectClientRows('control',data.control)};
- assert.equal(CLIENT_REPORT_PROJECTION_VERSION,2);assert(clientReportColumns.bd.includes(16));assert.equal(projected.bd[0][16],data.bd[0][16]);assert.equal(projected.bd[1][16],'Seguro');assert(!JSON.stringify(projected).includes('UNUSED-PRIVATE'));
+ assert.equal(CLIENT_REPORT_PROJECTION_VERSION,3);assert(clientReportColumns.bd.includes(16));assert(clientReportColumns.bd.includes(5));assert.equal(projected.bd[0][5],'Status');assert.equal(projected.bd[1][5],'Aberto');assert.equal(projected.bd[0][16],data.bd[0][16]);assert.equal(projected.bd[1][16],'Seguro');assert(!JSON.stringify(projected).includes('UNUSED-PRIVATE'));
  for(const options of [{allYears:true},{years:[2026]},{allYears:true,reportView:'suppliers'}])assert.deepEqual(engine.analyze(projected.bd,projected.control,{...options,asOf:data.asOf}),engine.analyze(data.bd,data.control,{...options,asOf:data.asOf}));
  assert.equal(JSON.stringify(data),before);
 });
 
 test('old publication cannot feed analysis or cache but retains session metadata, original backup and republishing',async()=>{
  const f=await fixture(),data=input(),saved=await f.publish(data),pointerKey='private/client-report-v2.json',stored=JSON.parse(f.env.BUCKET.objects.get(pointerKey).text),stalePart=(await f.call('/api/client-report',{cookie:f.admin})).body.parts.find(part=>part.sheet==='bd');
- for(const version of [1,undefined]){
+ for(const version of [1,2,undefined]){
   const old={...stored};if(version===undefined)delete old.projectionVersion;else old.projectionVersion=version;await f.env.BUCKET.put(pointerKey,JSON.stringify(old));
   for(const route of ['/api/client-report','/api/report/meta',stalePart.url]){const blocked=await f.call(route,{cookie:f.admin});assert.equal(blocked.status,409,route);assert.equal(blocked.body.code,'REPORT_PROJECTION_OUTDATED');assert.match(blocked.body.error,/publicar novamente as duas bases/);}
-  const session=await f.call('/api/session',{cookie:f.admin});assert.equal(session.status,200);assert.equal(session.body.approved,true);assert.equal(session.body.reportMeta.revision,saved.revision);assert.equal(session.body.reportMeta.projectionVersion,1);
-  const backup=await f.call('/api/client-report/backup',{cookie:f.admin});assert.equal(backup.status,200);assert.equal(backup.body.projectionVersion,1);const original=await f.call(backup.body.parts.find(part=>part.sheet==='bd').url,{cookie:f.admin});assert.equal(original.status,200);assert.equal(original.body.rows[1][16],'Seguro');
+  const session=await f.call('/api/session',{cookie:f.admin});assert.equal(session.status,200);assert.equal(session.body.approved,true);assert.equal(session.body.reportMeta.revision,saved.revision);assert.equal(session.body.reportMeta.projectionVersion,version??1);
+  const backup=await f.call('/api/client-report/backup',{cookie:f.admin});assert.equal(backup.status,200);assert.equal(backup.body.projectionVersion,version??1);const original=await f.call(backup.body.parts.find(part=>part.sheet==='bd').url,{cookie:f.admin});assert.equal(original.status,200);assert.equal(original.body.rows[1][16],'Seguro');assert.equal(original.body.rows[1][5],'Aberto');
   assert.equal((await f.call('/api/client-report')).status,401,'Compatibility errors never replace authorization');
  }
- const renewed=await f.publish(data,saved.revision);assert.notEqual(renewed.revision,saved.revision);assert.equal(renewed.projectionVersion,2);const manifest=await f.call('/api/client-report',{cookie:f.admin});assert.equal(manifest.status,200);assert.equal(manifest.body.projectionVersion,2);const projected=await f.call(manifest.body.parts.find(part=>part.sheet==='bd').url,{cookie:f.admin});assert.equal(projected.body.rows[1][16],'Seguro');assert.equal((await f.call('/api/report/meta',{cookie:f.admin})).status,200);assert.equal(f.analyses(),0);
+ const renewed=await f.publish(data,saved.revision);assert.notEqual(renewed.revision,saved.revision);assert.equal(renewed.projectionVersion,3);const manifest=await f.call('/api/client-report',{cookie:f.admin});assert.equal(manifest.status,200);assert.equal(manifest.body.projectionVersion,3);const projected=await f.call(manifest.body.parts.find(part=>part.sheet==='bd').url,{cookie:f.admin});assert.equal(projected.body.rows[1][16],'Seguro');assert.equal(projected.body.rows[1][5],'Aberto');assert.equal((await f.call('/api/report/meta',{cookie:f.admin})).status,200);assert.equal(f.analyses(),0);
 });
 
 test('upload stages prepared with old projection cannot mix parts or commit under the new version',async()=>{
- const f=await fixture(),data=input(),id=(await f.start(data)).body.uploadId;await f.part(id,'bd',data.bd);await f.part(id,'control',data.control);const key='private/client-staging/'+id+'.json',stage=JSON.parse(f.env.BUCKET.objects.get(key).text);delete stage.projectionVersion;await f.env.BUCKET.put(key,JSON.stringify(stage));
- for(const result of [await f.part(id,'bd',data.bd),await f.commit(id)]){assert.equal(result.status,409);assert.equal(result.body.code,'UPLOAD_PROJECTION_OUTDATED');}
- assert.equal(f.env.BUCKET.objects.has('private/client-report-v2.json'),false);assert.equal((await f.publish(data)).projectionVersion,2);
+ const f=await fixture(),data=input(),id=(await f.start(data)).body.uploadId;await f.part(id,'bd',data.bd);await f.part(id,'control',data.control);const key='private/client-staging/'+id+'.json',stage=JSON.parse(f.env.BUCKET.objects.get(key).text);
+ for(const version of [2,undefined]){if(version===undefined)delete stage.projectionVersion;else stage.projectionVersion=version;await f.env.BUCKET.put(key,JSON.stringify(stage));for(const result of [await f.part(id,'bd',data.bd),await f.commit(id)]){assert.equal(result.status,409);assert.equal(result.body.code,'UPLOAD_PROJECTION_OUTDATED');}}
+ assert.equal(f.env.BUCKET.objects.has('private/client-report-v2.json'),false);assert.equal((await f.publish(data)).projectionVersion,3);
 });
 test('pending and anonymous users cannot read any bases; viewers cannot read originals or publish',async()=>{
  const f=await fixture();await f.publish();
