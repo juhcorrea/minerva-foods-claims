@@ -30,13 +30,12 @@
     $('themeToggle').setAttribute('aria-pressed', String(dark));
     $('themeToggle').title = dark ? 'Desativar modo noturno' : 'Ativar modo noturno';
     $('textSizeSelect').value = String(preferences.textSize);
+    $('textSizeSelect').title = 'Tamanho do texto: '+preferences.textSize+'%';
     const collapsed = preferences.menuCollapsed;
     $('menuToggle').setAttribute('aria-expanded', String(!collapsed));
     $('menuToggle').setAttribute('aria-label', collapsed ? 'Expandir menu lateral' : 'Recolher menu para ícones');
     $('menuToggle').title = collapsed ? 'Expandir menu lateral' : 'Recolher menu para ícones';
     $('menuToggleLabel').textContent = collapsed ? 'Expandir menu' : 'Recolher menu';
-    const compact=$('sidebarCompactToggle');
-    if(compact){compact.setAttribute('aria-expanded',String(!collapsed));compact.setAttribute('aria-label',$('menuToggle').title);compact.title=$('menuToggle').title;}
     const sidebar = document.querySelector('.sidebar');
     if (sidebar) {sidebar.inert = false;sidebar.removeAttribute('aria-hidden');}
   }
@@ -184,7 +183,6 @@
     const sidebar=document.querySelector('.sidebar');if (sidebar) sidebar.id='appSidebar';
     if(sidebar){
       for(const item of sidebar.querySelectorAll('.nav-item')){const label=item.querySelector('span')?.textContent?.trim();if(label){item.setAttribute('aria-label',label);item.title=label;}}
-      const compact=document.createElement('button');compact.id='sidebarCompactToggle';compact.type='button';compact.className='sidebar-compact-toggle';compact.setAttribute('aria-controls','appSidebar');compact.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6m5-12v12"/></svg>';compact.addEventListener('click',()=>setMenuCollapsed(!preferences.menuCollapsed));sidebar.querySelector('.brand-lockup')?.append(compact);
     }
     const profile=document.createElement('button');profile.id='profileButton';profile.type='button';profile.className='profile-button';profile.hidden=global.MINERVA_HOSTED===true;profile.setAttribute('aria-haspopup','dialog');profile.setAttribute('aria-expanded','false');profile.setAttribute('aria-controls','profilePanel');
     profile.innerHTML='<span id="profileAvatar" class="profile-avatar" aria-hidden="true"></span><span class="profile-label"><small>PERFIL EM USO</small><strong id="profileName"></strong><span id="profileRole"></span></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>';

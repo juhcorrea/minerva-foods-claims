@@ -9,6 +9,7 @@
   const laserButtons=[];
   function setLaser(enabled) {
     state.laser=Boolean(enabled)&&isProcurement();
+    document.body.classList.toggle('dashboard-laser-active',state.laser);
     for(const button of laserButtons){button.setAttribute('aria-pressed',String(state.laser));button.title=state.laser?'Desligar apontador laser · Esc':'Ligar apontador laser';}
     if(!state.laser)laserDot.hidden=true;
   }
