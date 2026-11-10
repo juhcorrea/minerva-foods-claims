@@ -24,6 +24,8 @@
   const problemText = problem => [problem.title,problem.where,problem.action].filter(Boolean).join(' · ');
   function issueProblem(issue) {
     const row=issue.row, source=issueSource(issue), location=columns=>sourceColumns(source,columns,row);
+    const linkedRows=[...new Set((issue.bdRows||[]).filter(value=>Number.isInteger(value)&&value>0))].sort((a,b)=>a-b);
+    const claimReferences=linkedRows.length?linkedRows.map(value=>sourceColumns('BD',['W','Y'],value)).join(' / '):'BD!W / BD!Y';
     const definitions={
       CLAIM_FORWARDED_WITHOUT_CONTROL:['Ressarcimento encaminhado sem registro correspondente no Controle',sourceColumns('BD',['G','Q','W','Y'],row),'Não encontramos esta ordem/NF no Controle. Confira a referência em BD W/Y e Controle H; se o lançamento realmente não existir, cadastre o ressarcimento no Controle. Isso não comprova ausência de pagamento.'],
       CLAIM_WITHOUT_LINK:['Ordem/NF da BD sem correspondência no Controle',sourceColumns('BD',['W','Y'],row),'Confira a ordem/NF da BD e a referência no Controle H. Não encontrar o vínculo não significa que o pagamento não ocorreu.'],
@@ -36,8 +38,8 @@
       INVALID_CLAIM_AMOUNT:['Valor reclamado vazio ou inválido na BD',location(['AJ']),'Confira e informe o valor reclamado numérico em USD na BD.'],
       MISSING_CLAIM_STATUS:['Situação não informada na BD',location(['G']),'Preencha a situação correta do claim na BD e importe novamente.'],
       MISSING_CLAIM_REFERENCE:['Ordem/NF não informada ou inválida na BD',location(['W','Y']),'Confira e preencha a referência da ocorrência na BD.'],
-      AMBIGUOUS_LINK:['Referência não permite atribuir o recebimento com segurança',location(['H'])+' / BD!W / BD!Y','Confira todas as ordens/NFs e os fornecedores/anos envolvidos. Não repartir o valor entre claims por suposição.'],
-      NF_CONTEXT_COLLISION:['NF coincide com um claim de contexto diferente',location(['H','K','D'])+' / BD!W / BD!Y','Confira a ordem, o fornecedor e o mercado nas duas planilhas antes de vincular a NF. O pagamento confirmado é preservado.'],
+      AMBIGUOUS_LINK:['Referência não permite atribuir o recebimento com segurança',location(['H'])+' / '+claimReferences,'Confira todas as ordens/NFs e os fornecedores/anos envolvidos. Não repartir o valor entre claims por suposição.'],
+      NF_CONTEXT_COLLISION:['NF coincide com um claim de contexto diferente',location(['H','K','D'])+' / '+claimReferences,'Confira a ordem, o fornecedor e o mercado nas duas planilhas antes de vincular a NF. O pagamento confirmado é preservado.'],
       INVALID_RECEIPT_AMOUNT:['Valor recebido inválido no Controle',location(['T']),'Confira e informe o valor numérico recebido em USD; valores inválidos não são somados.'],
       MISSING_EXPECTED_AMOUNT:['Parcela em aberto sem valor válido',location(['O','M']),'Preencha o valor previsto da parcela em Controle O. O saldo está incompleto enquanto esse valor faltar.'],
       PAID_WITHOUT_VALID_AMOUNT:['Parcela marcada Pago sem valor recebido válido',location(['M','T']),'Confira o status Pago e informe em T o valor positivo efetivamente recebido.'],
@@ -54,7 +56,12 @@
       RECEIVED_ABOVE_FORWARDED:['Recebido supera o reclamado encaminhado do fornecedor','BD!G / BD!AJ / Controle!H / Controle!T','Confira valores, câmbio e referências entre as planilhas. A diferença negativa é preservada.']
     };
     const known=definitions[issue.kind], exact=(issue.sourceCells||[]).join(' / ');
-    return known ? {title:known[0],where:exact||known[1],action:known[2]} : {title:issue.type && !/^(Pendências|Vínculo\s*\/\s*dados)$/i.test(issue.type)?issue.type:'Informação de origem precisa de conferência',where:exact||`${source}${row?' · linha '+row:''}`,action:issue.detail||'Abra o detalhe e confira os campos indicados na planilha de origem.'};
+    if(issue.kind==='INSURANCE_MIXED_REFERENCE'){
+      const references=[...new Set((issue.insuranceReferences||[]).map(value=>String(value).trim()).filter(Boolean))];
+      return {title:'Pagamentos de claim e seguro na mesma referência',where:exact||location(['H'])+' / '+claimReferences,action:(issue.detail||'Esta referência reúne pagamentos de claim e seguro. Confira a qual registro pertence o recebimento. O valor não foi dividido entre os registros.')+(references.length?' Referência de seguro: '+references.join(' · ')+'.':'')};
+    }
+    const specific=['AMBIGUOUS_LINK','NF_CONTEXT_COLLISION'].includes(issue.kind)?String(issue.detail||'').trim():'';
+    return known ? {title:known[0],where:exact||known[1],action:specific?specific+(/[.!?]$/.test(specific)?' ':'. ')+known[2]:known[2]} : {title:issue.type && !/^(Pendências|Vínculo\s*\/\s*dados)$/i.test(issue.type)?issue.type:'Informação de origem precisa de conferência',where:exact||`${source}${row?' · linha '+row:''}`,action:issue.detail||'Abra o detalhe e confira os campos indicados na planilha de origem.'};
   }
   function reviewProblems(entry) {
     const result=[],add=(title,where,action)=>result.push({title,where,action});
