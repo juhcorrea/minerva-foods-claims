@@ -27,18 +27,18 @@ test('chart titles disclose the financial year/base and rankings include eligibl
  assert.match(ui.claims.innerHTML,/Fornecedor: Fornecedor exemplo · Operação: COMERCIAL/);
  assert.match(ui.claims.innerHTML,/Não usa Status F nem filtros locais da lista operacional/);
  assert.match(ui.dashboard.innerHTML,/Recebido por compensação · Controle · 2026/);
- assert.match(ui.dashboard.innerHTML,/Este gráfico inclui pendências H contendo FUP SUPRIMENTOS; o card Em negociação as exclui/);
+ assert.match(ui.dashboard.innerHTML,/Exclui pendências contendo FUP SUPRIMENTOS, assim como o card Em negociação/);
  assert.doesNotMatch(visible(ui.dashboard.innerHTML),columnCodes);assert.doesNotMatch(visible(ui.claims.innerHTML),columnCodes);
  assert.match(visible(ui.dashboard.innerHTML),/Status pagamento: Pago · Data de compensação/);
  assert.equal(JSON.stringify(model),before);
 });
 
-test('negotiation card opens only its non-FUP rows while country chart keeps its broader scope and cents',()=>{
+test('negotiation card and country chart open the same non-FUP rows and preserve cents',()=>{
  const ui=executive(),model=fixture();ui.api.render(model);
  const card=ui.dashboard.innerHTML.match(/Em negociação<[^]*?<button[^>]*data-exec-detail="([^"]+)"/);assert(card);
  ui.click(card[1]);assert.match(ui.content.innerHTML,/NEG-KEEP/);assert.doesNotMatch(ui.content.innerHTML,/NEG-FUP/);assert.match(ui.content.innerHTML,/100,41/);
  const country=ui.dashboard.innerHTML.match(/class="exec-country" data-exec-detail="([^"]+)"/);assert(country);
- ui.click(country[1]);assert.match(ui.content.innerHTML,/NEG-KEEP/);assert.match(ui.content.innerHTML,/NEG-FUP/);assert.match(ui.content.innerHTML,/200,49/);
+ ui.click(country[1]);assert.match(ui.content.innerHTML,/NEG-KEEP/);assert.doesNotMatch(ui.content.innerHTML,/NEG-FUP/);assert.match(ui.content.innerHTML,/100,41/);
  assert.match(ui.dashboard.innerHTML,/exclui pendência H contendo FUP SUPRIMENTOS/);
 });
 
