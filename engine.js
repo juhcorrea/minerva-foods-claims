@@ -31,6 +31,9 @@
   };
   const norm = v => {const value=text(v);return memo(analysisMemo?.norm,value,()=>value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' '));};
   const normalizeStatus = v => {const value=norm(v);return memo(analysisMemo?.status,value,()=>value.replace(/\s*[-–—]\s*/g, ' - '));};
+  // Every monetary negotiation view uses the same source rule, regardless of
+  // its filters or projection. Other pending values, including blank, qualify.
+  const negotiatingClaim = source => normalizeStatus(source?.[6]) === NEGOTIATING && !norm(source?.[7]).includes('FUP SUPRIMENTOS');
   const insuranceClaim = source => norm(source?.[16]) === 'SEGURO';
   const requiresControlLink = source => normalizeStatus(source?.[6]) === FORWARDED && !insuranceClaim(source);
   const controlLinkBasis = 'Exigir vínculo BD → Controle somente para G = RESSARCIMENTO ENCAMINHADO e Q — Área negociação diferente de SEGURO. A área segue Q, nunca AC — Negociação. Demais situações não geram pendência por ausência de Controle. Registros com Q = SEGURO ficam fora de toda a Correção de base e dos candidatos a vínculo com o Controle, preservados na BD histórica. AC e Causador não definem essa exclusão.';
@@ -253,7 +256,7 @@
       const s = supplierRow(c.supplierKey), a = annualMap.get(c.year);
       s.claimed += c.claimed; if (c.sgr) s._occurrences.add(c.row); s.recordCount++; a.claimed += c.claimed;
       if (c.statusKey === FORWARDED) {s.forwarded += c.claimed; a.forwarded += c.claimed;}
-      else if (c.statusKey === NEGOTIATING && !norm(bdRows[c.row-1]?.[7]).includes('FUP SUPRIMENTOS')) {s.negotiating += c.claimed; a.negotiating += c.claimed;}
+      else if (negotiatingClaim(bdRows[c.row-1])) {s.negotiating += c.claimed; a.negotiating += c.claimed;}
       else {s.otherClaimed += c.claimed; a.otherClaimed += c.claimed;}
     }
 
@@ -1317,7 +1320,7 @@
     for(const claim of model.claims){
       const row=detail(claim);remember(row);
       add(reasons,row.reason,row,row.claimed);add(causes,row.cause,row,row.claimed);
-      if(row.statusKey===NEGOTIATING)add(negotiating,row.country,row,row.claimed);
+      if(negotiatingClaim(bdRows[row.row-1]))add(negotiating,row.country,row,row.claimed);
     }
     const statuses={[NEGOTIATING]:'negotiating','EM ANALISE':'inAnalysis','AGUARDANDO CUSTOS':'awaitingCosts'};
     const addSla=(row,source,key,dateKey,target)=>{
@@ -1364,6 +1367,7 @@
       meta:{asOf,correctionScenario:model.meta.correctionScenario,...globalFilterMeta(options),available,
         receiptBasis:'Caixa do recorte global: mesmos coortes existentes, M = Pago, R válida nos anos selecionados e T positivo. Cada linha do Controle entra uma vez. Setor é A do Controle; não é a operação Z da BD.',
         financialBasis:'Motivo, causador e negociação por país usam os claims financeiros já selecionados. Causador vem de AX da BD, separado do fornecedor em AC. Valores financeiros existentes não são recalculados por este relatório.',
+        negotiationBasis:'Todo valor Em negociação soma Reclamado USD somente com Situação EM NEGOCIAÇÃO - PROCEDENTE e Pendência sem o texto FUP SUPRIMENTOS. Todas as demais pendências, inclusive vazias, são aceitas. Os filtros restringem o recorte, sem substituir essa regra. Card, países, fornecedores, detalhes e exportações usam as mesmas linhas elegíveis.',
         pipelineBasis:'BD: ano de Data RNC selecionado, Data RNC até a análise, operações e fornecedor do recorte global, sem INTERFERÊNCIA EXTERNA. Situações: EM ANÁLISE, AGUARDANDO CUSTOS e EM NEGOCIAÇÃO - PROCEDENTE. Sem listas manuais de exclusões de pendência do BI. Não representa o saldo de parcelas do Controle.',
         controlClaimBasis:'Controle operacional da BD: todos os anos, situações e motivos, inclusive Seguro, INTERFERÊNCIA EXTERNA e linhas sem Data RNC, nos filtros globais de fornecedor e operação. Aberto e Fechado seguem exclusivamente o Status F; Situação G permanece separada. F ausente, inválida ou desconhecida não é inferida por G. Cada linha com SGR preenchido conta um caso, inclusive SGR repetido; linhas sem SGR permanecem identificadas. Anos e status operacionais são filtrados na própria aba, sem alterar o financeiro. Pendência H e dias BL são preservados; financialEligible e reasonExcluded indicam a participação no recorte financeiro.',
         occurrenceBasis:'Situações por país: cada linha BD com SGR preenchido conta um caso, inclusive SGR repetido; etapas, total por país, total geral e detalhe usam as mesmas linhas. Linhas sem SGR não entram nessa contagem. Nos rankings monetários, count continua SGR distinto por grupo, com linha Excel quando ausente; valores somam linhas e recordCount mostra registros.',
@@ -1387,7 +1391,7 @@
       const source=bdRows[n];if(!source||normalizeStatus(source[6])!==NEGOTIATING)continue;
       const supplier=text(source[28])||'(SEM NEGOCIAÇÃO)',operation=text(source[25]);
       if((supplierFilter.size&&!supplierFilter.has(norm(supplier)))||(operationFilter.size&&!operationFilter.has(normalizeStatus(operation))))continue;
-      const pending=available.pending?text(source[7]):'',excludedFup=norm(pending).includes('FUP SUPRIMENTOS'),category=norm(supplier).includes('JURIDICO')?'legal':'negotiation';
+      const pending=text(source[7]),excludedFup=!negotiatingClaim(source),category=norm(supplier).includes('JURIDICO')?'legal':'negotiation';
       const row={row:n+1,sgr:text(source[0]),order:text(source[22]),supplier,...claimDimensions(headers,source),...claimFollowUpFields(headers,source,agingDate),pending,claimed:number(source[35]),category,included:!excludedFup,exclusionReason:excludedFup?'Pendência H contém FUP SUPRIMENTOS; fora dos totais':'',operation,status:text(source[6]),statusKey:NEGOTIATING,analyst:text(source[56])||'Não informado',rncDate:parseDate(source[1])};
       const id=identity(row);ids.all.add(id);
       if(excludedFup){ids.excluded.add(id);excludedAmount+=row.claimed||0;excludedRecords++;continue;}
