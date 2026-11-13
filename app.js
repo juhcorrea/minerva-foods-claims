@@ -101,9 +101,17 @@
     const activeScope=state.analysisBusy&&state.requestedOptions?state.requestedOptions:state.model?.meta;
     if(!state.restoringView && state.model && (!sameReportScope(activeScope,filterScope().desired)||!reportSupportsView(activeScope,name)))analyze({fromNavigation:true});
   }
-  function cleanYears(values){return [...new Set(asList(values).map(Number).filter(year=>Number.isInteger(year)&&year>=2000&&year<=2200))].sort((a,b)=>a-b);}
-  function globalYears(){return cleanYears([...document.querySelectorAll('input[name="year"]:checked')].map(el=>el.value));}
-  function requestedYearScope(name=state.view){const dropdown=['suppliers','claims'].includes(name),years=dropdown?cleanYears(name==='claims'?state.claimYears:state.supplierYears):globalYears();return {years:years.length?years:globalYears(),allYears:dropdown&&!years.length};}
+  function cleanYears(values){return [...new Set(asList(values).map(Number).filter(year=>Number.isInteger(year)&&year>=1900&&year<=2100))].sort((a,b)=>a-b);}
+  function globalYears(){const select=$('globalYearFilter');return cleanYears(select?.multiple?selectValues(select):[...document.querySelectorAll('input[name="year"]:checked')].map(el=>el.value));}
+  function setGlobalYears(values){const years=cleanYears(values),select=$('globalYearFilter');if(select?.multiple){for(const year of years)if(!Array.from(select.options).some(option=>Number(option.value)===year))select.add(new Option(String(year),String(year)));setSelected(select,years);}document.querySelectorAll('input[name="year"]').forEach(el=>el.checked=years.includes(Number(el.value)));}
+  function populateGlobalYears(model=state.model){
+    const select=$('globalYearFilter');if(!select?.multiple)return;
+    const selected=globalYears(),available=model?.meta?.availableYears||model?.meta?.caseYears;
+    if(Array.isArray(available))state.globalYearOptions=cleanYears(available);
+    const years=cleanYears([...(state.globalYearOptions||[]),...selected]).reverse();
+    select.innerHTML='<option value="">Todos os anos</option>'+years.map(year=>'<option value="'+year+'">'+year+'</option>').join('');setSelected(select,selected);
+  }
+  function requestedYearScope(name=state.view){const dropdown=['suppliers','claims'].includes(name),years=dropdown?cleanYears(name==='claims'?state.claimYears:state.supplierYears):globalYears();return {years:years.length?years:globalYears(),allYears:(dropdown||$('globalYearFilter')?.multiple===true)&&!years.length};}
   function sameYearScope(actual,expected){return Boolean(actual)&&Boolean(actual.allYears)===expected.allYears&&(expected.allYears||cleanYears(actual.years).join(',')===cleanYears(expected.years).join(','));}
   function reportSupportsView(meta,name=state.view){return name==='suppliers'||meta?.reportView!=='suppliers';}
   // Each pane owns its applied scope and its unfinished form edits. Navigation
@@ -131,11 +139,11 @@
     const draft=normalizedFilters(value);
     if(state.view==='suppliers')state.supplierYears=draft.allYears?[]:draft.years;
     else if(state.view==='claims')state.claimYears=draft.allYears?[]:draft.years;
-    else document.querySelectorAll('input[name="year"]').forEach(el=>el.checked=draft.years.includes(Number(el.value)));
+    else setGlobalYears(draft.allYears?[]:draft.years);
     $('asOf').value=draft.asOf;$('correctionScenario').value=draft.correctionScenario;
     state.operations=draft.operations;state.controlOperations=draft.controlOperations;state.operation=draft.operations.join(' · ');state.controlOperation=draft.controlOperations.join(' · ');state.claimStatuses=draft.claimStatuses;
     for(const value of draft.suppliers)if(!Array.from($('supplierFilter').options||[]).some(option=>option.value===value))$('supplierFilter').add(new Option(value,value));
-    setSelected('supplierFilter',draft.suppliers);populateOperations();populateSupplierYears();populateSupplierStatuses();populateClaimYears();window.MinervaMultiSelect?.refresh?.();
+    setSelected('supplierFilter',draft.suppliers);populateOperations();populateGlobalYears();populateSupplierYears();populateSupplierStatuses();populateClaimYears();window.MinervaMultiSelect?.refresh?.();
   }
   function sameReportScope(actual,expected){
     if(!sameYearScope(actual,expected))return false;
@@ -160,7 +168,8 @@
   function captureSupplierYears(){const select=$('supplierYearFilter');if(state.view==='suppliers'&&select?.multiple)state.supplierYears=cleanYears(selectValues(select));}
   function populateSupplierYears(model=state.model){
     const select=$('supplierYearFilter');if(!select?.multiple)return;
-    if(model?.meta?.allYears)state.supplierYearOptions=cleanYears(model.meta.years);
+    if(Array.isArray(model?.meta?.availableYears))state.supplierYearOptions=cleanYears(model.meta.availableYears);
+    else if(model?.meta?.allYears)state.supplierYearOptions=cleanYears(model.meta.years);
     const years=cleanYears([...(state.supplierYearOptions||[]),...[...document.querySelectorAll('input[name="year"]')].map(el=>el.value),...(state.supplierYears||[])]).reverse();
     select.innerHTML='<option value="">Todos os anos</option>'+years.map(year=>'<option value="'+year+'">'+year+'</option>').join('');setSelected(select,cleanYears(state.supplierYears));
   }
@@ -349,7 +358,7 @@
   function supplierFooter(){const s=state.model.summary,o=supplierOpenTotals();return ['Total do recorte',money(s.claimed),...claimYearValues(s).map(money),money(comparativeReceived(s)),pct(comparativeRate(s)),money(loss(s)),pct(s.claimed?loss(s)/s.claimed:null),money(s.negotiating),integer(s.occurrences),s.claimed?'100%':'—',s.claimed?'100%':'—',moneyExact(o.openBalance),moneyExact(o.overdueBalance),integer(s.reviewCount)];}
   function render(force=false){
     const draftOperations=state.fullReportLoad&&!state.analysisBusy?selectValues('operationFilter'):null;
-    const m=state.model,s=m.summary;renderScenarioStatus();populateOperations();populateSupplierYears(m);populateSupplierStatuses(m);populateClaimYears(m);
+    const m=state.model,s=m.summary;renderScenarioStatus();populateOperations();populateGlobalYears(m);populateSupplierYears(m);populateSupplierStatuses(m);populateClaimYears(m);
     if(state.view==='installments'&&state.chartMonth&&!m.meta.years.includes(Number(state.chartMonth.slice(0,4))))state.chartMonth='';
     setText('periodLabel',`${m.meta.allYears?'Todos os anos':m.meta.years.join(' + ')} · posição em ${date(m.meta.asOf)}`);const reviewCount=m.meta.reportView==='suppliers'?m.meta.correctionQueueCount:reviewQueue().length;setText('correctionBadge',integer(reviewCount));setText('correctionCount',integer(reviewCount));setText('issueCount',integer(s.reviewCount));
     const badge=$('correctionBadge');if(badge){badge.hidden=!reviewCount;badge.title=`${integer(reviewCount)} referências para conferir`;badge.setAttribute('aria-label',badge.title);}
@@ -369,16 +378,7 @@
     else if(name==='portfolio')window.MinervaPortfolio?.render(m);
     else if(name==='method')renderMethodExtra();
   }
-  function renderOverview(){
-    const m=state.model,s=m.summary;
-    setText('metricClaimed',money(s.claimed));setText('metricReceived',money(comparativeReceived(s)));setText('metricRecovery',pct(comparativeRate(s)));setText('metricBalance',money(loss(s)));setText('metricNegotiating',money(s.negotiating));setText('metricOverdue',integer(s.overdue));setText('metricOpenBalance',money(s.openBalance));
-    document.querySelectorAll('[data-loss-formula],#lossFormula,#lossFormulaShort').forEach(el=>el.textContent=lossFormula());
-    $('annualCards').innerHTML=m.annual.map(a=>`<article class="annual-card"><span class="eyebrow">ANO ${a.year}</span><div class="annual-values"><div><span>Reclamado · Data RNC</span><strong>${money(a.claimed)}</strong></div><div><span>Recebido · claims do período selecionado</span><strong>${money(comparativeReceived(a))}</strong></div><div><span>Recebido / reclamado</span><strong>${pct(comparativeRate(a))}</strong></div></div></article>`).join('');
-    renderMonthly();renderRanking();window.MinervaExecutive?.render(m);
-    $('qualityNotice').hidden=false;$('qualityNotice').innerHTML=`<strong>${s.reviewCount?`${integer(s.reviewCount)} apontamentos para conferência`:'Referências conciliadas'}</strong><span>${integer(s.unmatchedClaims)} encaminhados sem correspondência; ${integer(m.meta.ambiguousControlRows)} parcelas com vínculo a conferir. Recebimentos confirmados no Controle são contados mesmo sem as ordens detalhadas. ${integer(s.receivedWithoutClaimDetailCount||0)} pagamentos sem detalhamento: USD ${money(s.receivedWithoutClaimDetail||0)}. ${receiptOperationNote()}</span><button class="button secondary" data-view="corrections">Conferir a base</button>`;
-    const overviewRows=F.prepare('overviewTable',supplierHeaders(),m.suppliers,supplierCells,'Resumo por fornecedor',SUP_SORT);
-    $('overviewTable').innerHTML=table(supplierHeaders(),(F.has('overviewTable')?overviewRows:overviewRows.slice(0,6)).map(supplierCells),{caption:'Principais fornecedores por valor reclamado',filterId:'overviewTable',prepared:true,footer:F.has('overviewTable')?null:supplierFooter()});
-  }
+  function renderOverview(){window.MinervaExecutive?.render(state.model);}
   function chartMonthLabel(month){return new Intl.DateTimeFormat('pt-BR',{month:'long',year:'numeric',timeZone:'America/Sao_Paulo'}).format(new Date(month+'-01T12:00:00Z'));}
   function renderMonthly(){
     const list=state.model.monthly,max=Math.max(1,...list.map(m=>m.received));
@@ -408,7 +408,7 @@
     // A chart click refines the applied report, without applying unfinished form edits.
     if(state.view==='suppliers'){state.supplierYears=meta.allYears?[]:cleanYears(meta.years);populateSupplierYears();}
     else if(state.view==='claims'){state.claimYears=meta.allYears?[]:cleanYears(meta.years);populateClaimYears();}
-    else if(!meta.allYears)document.querySelectorAll('input[name="year"]').forEach(el=>el.checked=meta.years.includes(Number(el.value)));
+    else setGlobalYears(meta.allYears?[]:meta.years);
     $('asOf').value=meta.asOf;$('correctionScenario').value=currentScenario();state.operations=appliedGlobalValues('operation');state.controlOperations=asList(controlModel()?.meta?.operations??controlModel()?.meta?.operation);state.operation=state.operations.join(' · ');state.controlOperation=state.controlOperations.join(' · ');populateOperations();
     if(name&&!Array.from($('supplierFilter').options).some(option=>option.value===name))$('supplierFilter').add(new Option(name,name));
     setSelected('supplierFilter',name?[name]:[]);state.chartSupplierBusy=true;renderRanking();
@@ -633,7 +633,7 @@
       {supplier:'ARMADOR DELTA',country:'COL',status:'EM NEGOCIAÇÃO - PROCEDENTE',pending:'NEGOCIAÇÃO EM ANDAMENTO',amount:15000,reason:'ATRASO NA ENTREGA',operation:'EXPORTAÇÃO - CTNR',rncDate:'2024-10-01',openingDate:'2024-10-15',invoiceDate:'2024-09-20'}
     ];
     pipeline.forEach((item,i)=>{const r=Array(64).fill(null);Object.assign(r,{0:'DEMO-'+(i+7),1:item.rncDate||'2026-02-15',2:item.rncDate||'2026-02-16',3:'ME',5:'ABERTO',6:item.status,7:item.pending,8:'2026-03-25',9:null,10:item.reason,11:'2026-03-01',13:item.openingDate||'2026-03-05',19:item.country,22:'DEMO/ORD-'+(i+7),24:900007+i,25:item.operation,28:item.supplier,31:item.supplier.startsWith('ARMADOR')?item.supplier:'',32:i===1?'DEMO-CONT-008':'',35:item.amount,46:item.invoiceDate||'2026-02-01',49:'CAUSADOR DEMONSTRAÇÃO '+(i+1),56:'ANALISTA DEMONSTRAÇÃO',57:null,61:null,62:item.openingDate?null:20,63:6});claims.push(r);});
-    state.bd=[bd,...claims];state.control=[cr,...controls];state.bdName='BD — demonstração fictícia';state.controlName='Controle — demonstração fictícia';state.demo=true;setSelected('supplierFilter',[]);$('asOf').value=demoAsOf;document.querySelectorAll('input[name="year"]').forEach(el=>el.checked=Number(el.value)===2026);analyze();
+    state.bd=[bd,...claims];state.control=[cr,...controls];state.bdName='BD — demonstração fictícia';state.controlName='Controle — demonstração fictícia';state.demo=true;setSelected('supplierFilter',[]);$('asOf').value=demoAsOf;setGlobalYears([2026]);analyze();
   }
   function exportPdf(){
     if(!viewScopeMatches()){refreshViewScope();return;}
@@ -666,7 +666,6 @@
   $('bdFile').addEventListener('change',e=>fileChanged(e,'bd'));$('controlFile').addEventListener('change',e=>fileChanged(e,'control'));
   $('correctionScenario').addEventListener('change',renderScenarioStatus);
   $('runAnalysis').addEventListener('click',analyze);$('applyFilters').addEventListener('click',analyze);$('demoButton').addEventListener('click',demo);
-  document.querySelector('.year-options').addEventListener('change',event=>{const input=event.target;if(input.name!=='year')return;if(!document.querySelector('input[name="year"]:checked')){input.checked=true;say('Mantenha pelo menos um ano selecionado.');return;}if(state.model)analyze();});
   function applySection(ids,renderFn){ids.forEach(id=>applied[id]=$(id).multiple?selectValues(id):$(id).value);state.correctionsPage=state.issuesPage=state.installmentsPage=state.processesPage=1;renderFn();}
   function addApply(id,host,ids,renderFn){const button=document.createElement('button');button.id=id;button.type='button';button.className='button button-filter section-filter-apply';button.textContent='Aplicar';host.append(button);button.addEventListener('click',()=>applySection(ids,renderFn));ids.forEach(inputId=>$(inputId).addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();button.click();}}));}
   addApply('applySupplierTable',$('supplierSearch').closest('.panel-heading'),['supplierSearch'],renderSuppliers);
@@ -683,7 +682,8 @@
   $('brandLogo')?.addEventListener('error',event=>{event.target.hidden=true;const fallback=$('brandFallback');if(fallback)fallback.hidden=false;});
   for(const id of ['supplierFilter','operationFilter','typeFilter','statusFilter','analystFilter','correctionProgressFilter']){const el=$(id);if(el){el.multiple=true;el.setAttribute('data-multi-select','');el.dataset.placeholder=el.options[0]?.textContent||'Todos';el.dataset.applyTarget=['supplierFilter','operationFilter'].includes(id)?'#applyFilters':['typeFilter','statusFilter'].includes(id)?'#applyControlFilters':'#applyCorrectionFilters';}}
   const currentYear=Number(E.today().slice(0,4));
-  document.querySelector('.year-options').innerHTML=[currentYear-1,currentYear].map(year=>'<label><input type="checkbox" name="year" value="'+year+'"'+(year===currentYear?' checked':'')+'><span>'+year+'</span></label>').join('');
+  state.globalYearOptions=[currentYear];
+  $('globalYearFilter').innerHTML='<option value="">Todos os anos</option><option value="'+currentYear+'" selected>'+currentYear+'</option>';
   $('asOf').value=E.today();$('runAnalysis').disabled=true;$('exportReport').disabled=$('exportCorrections').disabled=$('exportPdf').disabled=$('exportControl').disabled=$('exportControlPdf').disabled=true;extraControls();setupSupplierYears();setupSupplierStatuses();setupClaimYears();state.filterDefaults=normalizedFilters({years:globalYears(),asOf:E.today()});
   document.querySelectorAll('[data-loss-formula],#lossFormula,#lossFormulaShort').forEach(el=>el.textContent=lossFormula());
   function setPublishedReport(payload){if(!acceptScenarioModel(payload.model)){refreshScopeWhenReady();return false;}state.appliedGlobal={...(state.requestedOptions||options())};state.bdName=payload.files.bd;state.controlName=payload.files.control;state.demo=false;state.publishedMeta={revision:payload.revision,updatedAt:payload.updatedAt,updatedBy:payload.updatedBy};if(payload.model.controlReport?.supplierOptions)state.supplierOptions=payload.model.controlReport.supplierOptions;else if(!$('supplierFilter').value)state.supplierOptions=payload.model.suppliers.map(s=>s.name);state.correctionsPage=state.installmentsPage=state.processesPage=state.issuesPage=1;$('emptyState').hidden=true;$('loadedContent').hidden=false;$('demoBanner').hidden=true;populateSuppliers();render();state.scopeRenderPending=false;state.scopeLoadFailed=false;refreshViewScope();document.dispatchEvent(new CustomEvent('minerva:model-updated'));say('Relatório compartilhado carregado.');}
@@ -693,19 +693,19 @@
     const locals={};for(const id of Object.keys(applied))locals[id]=['supplierSearch','installmentSearch','correctionSearch'].includes(id)?string(raw.local?.[id]):list(raw.local?.[id]);
     const claimFilters=input=>{const result={query:string(input?.query)};for(const key of ['country','status','pending','analyst','supplier','caseStatusKey'])result[key]=list(input?.[key]);return result;};
     const view=['overview','suppliers','installments','corrections','claims','procurement','analysts','meeting','portfolio','method'].includes(raw.view)?raw.view:'overview';
-    return {version:1,view,supplierYears:cleanYears(raw.supplierYears).slice(0,30),claimYears:cleanYears(raw.claimYears??(view==='claims'?global.years:[])).slice(0,100),global:{years:list(global.years).map(Number).filter(v=>Number.isInteger(v)&&v>=2000&&v<=2200).slice(0,30),asOf:/^\d{4}-\d{2}-\d{2}$/.test(global.asOf)?global.asOf:'',operations:list(global.operations),controlOperations:list(global.controlOperations),claimStatuses:list(global.claimStatuses),suppliers:list(global.suppliers),correctionScenario:global.correctionScenario==='original'?'original':'corrected'},local:locals,claims:{claims:claimFilters(raw.claims?.claims),procurement:claimFilters(raw.claims?.procurement),supplier:string(raw.claims?.supplier)},tableState:F.sanitizeState?.(raw.tableState)||{tables:[]},supplierMode:raw.supplierMode==='annual'?'annual':'summary',sort:['claimed','received','recoveryRate','name'].includes(raw.sort)?raw.sort:'claimed',chartMonth:/^\d{4}-(0[1-9]|1[0-2])$/.test(raw.chartMonth)?raw.chartMonth:'',analystYear:Number.isInteger(raw.analystYear)?raw.analystYear:null,meeting:{year:Number.isInteger(raw.meeting?.year)?raw.meeting.year:null,month:Number.isInteger(raw.meeting?.month)&&raw.meeting.month>=-1&&raw.meeting.month<=12?raw.meeting.month:0}};
+    return {version:1,view,supplierYears:cleanYears(raw.supplierYears).slice(0,30),claimYears:cleanYears(raw.claimYears??(view==='claims'?global.years:[])).slice(0,100),global:{years:cleanYears(global.years).slice(0,100),allYears:global.allYears===true,asOf:/^\d{4}-\d{2}-\d{2}$/.test(global.asOf)?global.asOf:'',operations:list(global.operations),controlOperations:list(global.controlOperations),claimStatuses:list(global.claimStatuses),suppliers:list(global.suppliers),correctionScenario:global.correctionScenario==='original'?'original':'corrected'},local:locals,claims:{claims:claimFilters(raw.claims?.claims),procurement:claimFilters(raw.claims?.procurement),supplier:string(raw.claims?.supplier)},tableState:F.sanitizeState?.(raw.tableState)||{tables:[]},supplierMode:raw.supplierMode==='annual'?'annual':'summary',sort:['claimed','received','recoveryRate','name'].includes(raw.sort)?raw.sort:'claimed',chartMonth:/^\d{4}-(0[1-9]|1[0-2])$/.test(raw.chartMonth)?raw.chartMonth:'',analystYear:Number.isInteger(raw.analystYear)?raw.analystYear:null,meeting:{year:Number.isInteger(raw.meeting?.year)?raw.meeting.year:null,month:Number.isInteger(raw.meeting?.month)&&raw.meeting.month>=-1&&raw.meeting.month<=12?raw.meeting.month:0}};
   }
   function captureView(){
     if(!state.model)throw new Error('Carregue uma análise antes de salvar a visão.');
     if(!viewScopeMatches())throw new Error('Aguarde a atualização desta aba antes de salvar a visão.');
     const appliedOptions=state.appliedGlobal||state.model.meta||{};
-    return sanitizeView({view:state.view,claimYears:state.view==='claims'?(state.model.meta.allYears?[]:state.model.meta.years):state.claimYears,supplierYears:state.view==='suppliers'?(state.model.meta.allYears?[]:state.model.meta.years):state.supplierYears,global:{years:['suppliers','claims'].includes(state.view)?globalYears():appliedOptions.years,asOf:appliedOptions.asOf,operations:appliedGlobalValues('operation'),controlOperations:appliedGlobalValues('controlOperation'),claimStatuses:asList(appliedOptions.claimStatuses),suppliers:appliedGlobalValues('supplier'),correctionScenario:currentScenario()},local:applied,claims:window.MinervaClaimControl?.getViewState(),tableState:F.exportState?.(),supplierMode:state.supplierMode,sort:state.sort,chartMonth:state.chartMonth,analystYear:window.MinervaAnalysts?.getViewState?.().year,meeting:window.MinervaMeetings?.getViewState?.()});
+    return sanitizeView({view:state.view,claimYears:state.view==='claims'?(state.model.meta.allYears?[]:state.model.meta.years):state.claimYears,supplierYears:state.view==='suppliers'?(state.model.meta.allYears?[]:state.model.meta.years):state.supplierYears,global:{years:['suppliers','claims'].includes(state.view)?globalYears():appliedOptions.years,allYears:['suppliers','claims'].includes(state.view)?!globalYears().length:appliedOptions.allYears===true,asOf:appliedOptions.asOf,operations:appliedGlobalValues('operation'),controlOperations:appliedGlobalValues('controlOperation'),claimStatuses:asList(appliedOptions.claimStatuses),suppliers:appliedGlobalValues('supplier'),correctionScenario:currentScenario()},local:applied,claims:window.MinervaClaimControl?.getViewState(),tableState:F.exportState?.(),supplierMode:state.supplierMode,sort:state.sort,chartMonth:state.chartMonth,analystYear:window.MinervaAnalysts?.getViewState?.().year,meeting:window.MinervaMeetings?.getViewState?.()});
   }
   async function restoreView(value){
     if(state.analysisBusy||state.restoringSavedView)throw new Error('Aguarde a análise atual terminar.');
     if(!state.model)throw new Error('Carregue uma análise antes de aplicar a visão.');
-    const saved=sanitizeView(value),years=[...document.querySelectorAll('input[name="year"]')],available=years.map(el=>Number(el.value));
-    if(saved.view!=='claims'&&(!saved.global.years.length||saved.global.years.some(year=>!available.includes(year))))throw new Error('O período desta visão não está disponível nos filtros atuais.');
+    const saved=sanitizeView(value),yearSelect=$('globalYearFilter'),available=cleanYears(yearSelect?.multiple?Array.from(yearSelect.options).map(el=>el.value):[...document.querySelectorAll('input[name="year"]')].map(el=>el.value));
+    if(saved.view!=='claims'&&!saved.global.allYears&&(!saved.global.years.length||saved.global.years.some(year=>!available.includes(year))))throw new Error('O período desta visão não está disponível nos filtros atuais.');
     if(!saved.global.asOf)throw new Error('Esta visão não possui uma data de análise válida.');
     state.restoringSavedView=true;
     try{
@@ -716,7 +716,7 @@
       if(saved.view==='claims'){state.claimYears=saved.claimYears;populateClaimYears();}
       state.operations=saved.global.operations;state.controlOperations=saved.global.controlOperations;state.operation=state.operations.join(' · ');state.controlOperation=state.controlOperations.join(' · ');populateOperations();
       for(const value of saved.global.suppliers)if(!Array.from($('supplierFilter').options).some(option=>option.value===value))$('supplierFilter').add(new Option(value,value));
-      setSelected('supplierFilter',saved.global.suppliers);years.forEach(el=>el.checked=saved.global.years.includes(Number(el.value)));$('asOf').value=saved.global.asOf;$('correctionScenario').value=saved.global.correctionScenario;
+      setSelected('supplierFilter',saved.global.suppliers);setGlobalYears(saved.global.allYears?[]:saved.global.years);$('asOf').value=saved.global.asOf;$('correctionScenario').value=saved.global.correctionScenario;
       const analyzed=await analyze();if(analyzed!==true||!state.model||state.view!==saved.view||(state.viewVersion||0)!==viewVersion||!viewScopeMatches())throw new Error('Não foi possível atualizar os dados desta visão. Tente novamente.');
       const activeLocal=Object.fromEntries(localFilterIds(saved.view).map(id=>[id,saved.local[id]]));Object.assign(applied,activeLocal);for(const[id,value]of Object.entries(activeLocal)){const el=$(id);if(!el)continue;if(el.multiple){for(const selected of asList(value))if(!Array.from(el.options).some(option=>option.value===selected))el.add(new Option(selected,selected));setSelected(el,value);}else el.value=value;}
       if(saved.view==='suppliers'){state.supplierMode=saved.supplierMode;state.sort=saved.sort;state.direction=saved.sort==='name'?1:-1;}if(saved.view==='installments')state.chartMonth=saved.chartMonth;state.correctionsPage=state.installmentsPage=state.processesPage=state.issuesPage=1;

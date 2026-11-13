@@ -103,7 +103,7 @@
       <div id="statusMessage" class="status-message" role="status" aria-live="polite"></div>
 
       <section class="filters-panel" aria-label="Filtros da análise">
-        <fieldset class="year-selector"><legend id="yearFilterLabel">Ano do claim e do recebimento</legend><div class="year-options"><label><input type="checkbox" name="year" value="2025"><span>2025</span></label><label><input type="checkbox" name="year" value="2026" checked><span>2026</span></label></div></fieldset>
+        <fieldset class="year-selector"><legend id="yearFilterLabel">Ano do claim e do recebimento</legend><select id="globalYearFilter" multiple data-multi-select data-placeholder="Todos os anos" data-filter-title="Ano do claim e do recebimento" data-apply-target="#applyFilters" aria-labelledby="yearFilterLabel"></select></fieldset>
         <label class="filter-field"><span>Data da análise</span><input id="asOf" type="date" aria-label="Data de referência para a análise"></label>
         <label class="filter-field supplier-filter"><span>Fornecedor / causador</span><select id="supplierFilter"><option value="">Todos os fornecedores</option></select></label>
         <label class="filter-field operation-filter"><span>Operação</span><select id="operationFilter"><option value="">Todas as operações</option></select></label>
@@ -121,19 +121,7 @@
 
         <div id="loadedContent" hidden>
           <div id="executiveDashboard"></div>
-          <details class="executive-comparative"><summary>Comparativo financeiro detalhado <span>Reclamado, recebido, perda e fornecedores</span></summary>
-            <section class="metric-strip" aria-label="Indicadores do período">
-            <article class="metric"><span class="metric-label">Reclamado</span><strong id="metricClaimed">—</strong><small>Situações elegíveis da BD · após expurgos</small></article>
-            <article class="metric metric-received"><span class="metric-label">Recebido · claims do período</span><strong id="metricReceived">—</strong><small>Claim e pagamento dentro dos anos selecionados</small></article>
-            <article class="metric metric-ratio"><span class="metric-label">Recebido / reclamado</span><strong id="metricRecovery">—</strong><small>Recebido de claims do período / reclamado do período</small></article>
-            <article class="metric"><span class="metric-label">Perda</span><strong id="metricBalance">—</strong><small id="lossFormulaShort">Conforme critério da análise</small></article>
-            <article class="metric"><span class="metric-label">Em negociação</span><strong id="metricNegotiating">—</strong><small>Pagamento ainda em tratativa</small></article>
-          </section>
-
-            <div id="annualCards" class="annual-cards" aria-label="Comparativo anual"></div>
-            <section class="panel summary-panel"><div class="panel-heading"><div><span class="section-kicker">COMPARATIVO POR FORNECEDOR</span><h2>Onde estão os valores</h2></div><button class="button button-text" type="button" data-view="suppliers">Abrir visão completa<svg class="icon"><use href="#icon-arrow"/></svg></button></div><div id="overviewTable" class="table-container" tabindex="0" aria-label="Resumo por fornecedor"></div></section>
-          </details>
-          <div class="executive-compatibility" hidden aria-hidden="true"><span id="metricOverdue"></span><span id="metricOpenBalance"></span><div id="qualityNotice"></div><div id="monthlyChart"></div><div id="topSuppliers"></div></div>
+         <div class="executive-compatibility" hidden aria-hidden="true"><span id="metricOverdue"></span><span id="metricOpenBalance"></span><div id="qualityNotice"></div><div id="monthlyChart"></div><div id="topSuppliers"></div></div>
         </div>
       </section>
 
