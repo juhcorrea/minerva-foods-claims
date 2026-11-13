@@ -85,21 +85,6 @@
         ['#analystYearForm','analysts','Filtros por analista'],
         ['#meetingFilters','meeting','Filtros da reunião']
       ]) { const target = $(selector); if (target) bind('filters:' + key, 'filters', [target], null, label); }
-      const supplierSearch = document.getElementById('supplierSearch')?.closest('.search-field');
-      if (supplierSearch) {
-        const heading = supplierSearch.closest('.panel-heading');
-        if (heading) {
-          heading.classList.add('sc-supplier-heading');
-          let controls = document.getElementById('scSupplierControls');
-          if (!controls) {
-            controls = document.createElement('div'); controls.id = 'scSupplierControls'; controls.className = 'sc-supplier-controls';
-            const tools = heading.querySelector('.table-tools-extra'), apply = document.getElementById('applySupplierTable');
-            heading.insertBefore(controls, supplierSearch);
-            for (const element of [supplierSearch, tools, apply]) if (element) controls.append(element);
-          }
-          bind('filters:suppliers', 'filters', [controls], null, 'Filtros dos fornecedores');
-        }
-      }
       for (const form of all('.cc-filters')) {
         const scope = form.dataset.ccForm || form.closest('[id]')?.id || 'claims';
         bind('filters:cc-' + scope, 'filters', [form], null, 'Filtros ' + (scope === 'procurement' ? 'do FUP' : 'dos claims'));

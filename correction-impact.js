@@ -5,7 +5,7 @@
   const amount = value => Number(value || 0).toLocaleString('pt-BR', {maximumFractionDigits:0});
   const state = {model:null, audit:null, reconciliation:null, original:false, page:1, claimPage:1, printing:false, criteria:{distribution:false,financial:false}};
   const filters = () => global.MinervaTableFilters;
-  const criteria = (key, body) => `<details class="correction-impact-criteria" data-correction-criteria="${key}"${state.printing || state.criteria[key] ? ' open' : ''}><summary>Critérios</summary><div>${body}</div></details>`;
+  const criteria = (key, body) => `<details hidden class="correction-impact-criteria" data-correction-criteria="${key}"${state.printing || state.criteria[key] ? ' open' : ''}><summary>Critérios</summary><div>${body}</div></details>`;
   const filterSummary = id => filters().has?.(id) || filters().hasSort?.(id) ? filters().summary(id) : '';
   const tableId = () => 'correction-impact-' + (state.original ? 'original' : 'corrected');
   const label = () => state.original ? 'Sem correções · valores originais do Controle' : 'Com correções · referências da BD';
