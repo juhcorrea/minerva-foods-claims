@@ -24,6 +24,7 @@
   <link rel="stylesheet" href="correction-impact.css">
   <link rel="stylesheet" href="portfolio.css">
   <link rel="stylesheet" href="meetings.css">
+  <link rel="stylesheet" href="materials.css">
   <script src="preferences.js"></script>
   <link rel="stylesheet" href="executive-shell.css">
   <link rel="stylesheet" href="executive.css">
@@ -72,7 +73,7 @@
 <button class="nav-item" type="button" data-view="corrections"><svg class="icon"><use href="#icon-check"/></svg><span>Correção de base</span><span id="correctionBadge" class="nav-count" hidden>0</span></button>
 <button class="nav-item" type="button" data-view="installments"><svg class="icon"><use href="#icon-list"/></svg><span>Controle de recebimento</span></button>
 <button class="nav-item" type="button" data-view="claims"><svg class="icon"><use href="#icon-file"/></svg><span>Controle de claim</span></button>
-<button class="nav-item" type="button" data-view="procurement"><svg class="icon"><use href="#icon-building"/></svg><span>FUP suprimentos</span></button></nav>
+<button class="nav-item" type="button" data-view="procurement"><svg class="icon"><use href="#icon-building"/></svg><span>Materiais</span></button></nav>
     <div class="sidebar-bottom sidebar-status">
       <div class="sidebar-status-heading"><span>Última publicação</span><button id="sidebarRefresh" type="button" aria-label="Atualizar bases publicadas" title="Atualizar bases publicadas" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9c2.52 0 4.93 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9c-2.52 0-4.93-1-6.74-2.74L3 16M3 21v-5h5"/></svg></button></div>
       <dl class="sidebar-base-dates"><div><dt>BD Claims</dt><dd><time id="sidebarUpdatedAt">—</time></dd></div><div><dt>Recebimentos</dt><dd><time id="sidebarControlUpdatedAt">—</time></dd></div></dl>
@@ -103,12 +104,13 @@
       <div id="statusMessage" class="status-message" role="status" aria-live="polite"></div>
 
       <section class="filters-panel" aria-label="Filtros da análise">
-        <fieldset class="year-selector"><legend id="yearFilterLabel">Ano do claim e do recebimento</legend><select id="globalYearFilter" multiple data-multi-select data-placeholder="Todos os anos" data-filter-title="Ano do claim e do recebimento" data-apply-target="#applyFilters" aria-labelledby="yearFilterLabel"></select></fieldset>
-        <label class="filter-field"><span>Data da análise</span><input id="asOf" type="date" aria-label="Data de referência para a análise"></label>
-        <label class="filter-field supplier-filter"><span>Fornecedor / causador</span><select id="supplierFilter"><option value="">Todos os fornecedores</option></select></label>
+        <fieldset class="year-selector"><legend id="yearFilterLabel">Ano</legend><select id="globalYearFilter" multiple data-multi-select data-placeholder="Todos os anos" data-filter-title="Ano do claim e do recebimento" data-apply-target="#applyFilters" aria-labelledby="yearFilterLabel"></select></fieldset>
+        <label class="filter-field month-filter" id="globalMonthField"><span>Mês</span><select id="globalMonthFilter" multiple data-multi-select data-placeholder="Todos os meses" data-filter-title="Mês" data-apply-target="#applyFilters" aria-label="Mês da análise"><option value="">Todos os meses</option><option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option><option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option><option value="7">Julho</option><option value="8">Agosto</option><option value="9">Setembro</option><option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option></select></label>
+        <label class="filter-field analysis-date-filter" hidden><span>Data da análise</span><input id="asOf" type="date" aria-label="Data de referência para a análise"></label>
+        <label class="filter-field supplier-filter"><span>Fornecedor</span><select id="supplierFilter"><option value="">Todos os fornecedores</option></select></label>
         <label class="filter-field operation-filter"><span>Operação</span><select id="operationFilter"><option value="">Todas as operações</option></select></label>
-        <label class="filter-field scenario-filter"><span>Valores do painel</span><select id="correctionScenario" aria-describedby="scenarioStatus"><option value="corrected">Com correções da BD</option><option value="original">Sem correções · base original</option></select></label>
-        <button id="applyFilters" class="button button-filter" type="button">Aplicar filtros<svg class="icon"><use href="#icon-arrow"/></svg></button>
+        <label class="filter-field scenario-filter"><span>Valores</span><select id="correctionScenario" aria-describedby="scenarioStatus"><option value="corrected">Com correções da BD</option><option value="original">Sem correções · base original</option></select></label>
+        <div class="global-filter-actions"><button id="applyFilters" class="button button-filter" type="button"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7v6l-4 2v-8Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>Filtrar</button><button id="clearAnalysisFilters" class="button filter-clear" type="button" title="Limpar filtros desta aba" aria-label="Limpar filtros desta aba"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button></div>
         <p id="scenarioStatus" class="scenario-status" role="status">Com correções da BD. Selecione “Sem correções” e clique em Aplicar filtros para comparar o resultado.</p>
       </section>
       </div>
@@ -149,7 +151,7 @@
       </section>
 
       <section id="view-claims" class="view-pane" aria-label="Controle de claim" hidden><div id="claimAnalytics"></div><div id="claimCaseSummary"></div><div id="claimRecords"></div></section>
-      <section id="view-procurement" class="view-pane" aria-label="FUP suprimentos" hidden><div id="procurementContent"></div></section>
+      <section id="view-procurement" class="view-pane" aria-label="Materiais" hidden><nav id="materialsViews" class="receipt-subnav materials-subnav" aria-label="Materiais de apresentação" role="tablist"><button type="button" id="materialsTabFup" data-materials-tab="fup" role="tab" aria-controls="procurementContent" aria-selected="true">FUP suprimentos</button><button type="button" id="materialsTabDirectors" data-materials-tab="directors" role="tab" aria-controls="materialsDirectors" aria-selected="false" tabindex="-1">Report de claims — Diretoria</button><button type="button" id="materialsTabCarriers" data-materials-tab="carriers" role="tab" aria-controls="materialsCarriers" aria-selected="false" tabindex="-1">Report armadores</button></nav><div id="procurementContent" role="tabpanel" aria-labelledby="materialsTabFup"></div><div id="materialsDirectors" role="tabpanel" aria-labelledby="materialsTabDirectors" hidden></div><div id="materialsCarriers" role="tabpanel" aria-labelledby="materialsTabCarriers" hidden></div></section>
       <section id="view-meeting" class="view-pane" aria-label="Reunião de resultados" hidden></section>
       <section id="view-portfolio" class="view-pane" aria-label="Conheça o painel" hidden></section>
       <section id="view-analysts" class="view-pane" hidden></section>
@@ -197,6 +199,8 @@
   <script src="claim-control.js"></script>
   <script src="calculation-rules.js"></script>
   <script src="receipts-executive.js"></script>
+  <script src="materials-data.js"></script>
+  <script src="materials.js"></script>
   <script src="app.js"></script>
   <script src="presentation-mode.js"></script>
   <script src="section-collapse.js"></script>
