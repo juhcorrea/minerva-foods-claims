@@ -16,37 +16,45 @@ function fixture(){
  return E.analyze([bh,row('NEG-KEEP','EM NEGOCIAÇÃO - PROCEDENTE',100.41),row('NEG-FUP','EM NEGOCIAÇÃO - PROCEDENTE',200.49,'AGUARDANDO FUP SUPRIMENTOS RETORNO'),row('FORWARDED','RESSARCIMENTO ENCAMINHADO',50.25),row('ANALYSIS','EM ANÁLISE',700),row('COSTS','AGUARDANDO CUSTOS',800),row('DENIED','RESPONDIDO - NÃO PROCEDE',900)],[ch],{years:[2026],asOf:'2026-11-10',operations:['COMERCIAL'],suppliers:['Fornecedor exemplo']});
 }
 
-test('chart titles disclose the financial year/base and rankings include eligible non-procedente situations',()=>{
+test('chart titles retain the financial year and footers disclose the base without changing eligible situations',()=>{
  const ui=executive(),model=fixture(),before=JSON.stringify(model);
  assert.equal(model.summary.claimed,351.15);assert.equal(model.summary.negotiating,100.41);
  ui.api.render(model);ui.api.renderClaims(model,ui.claims);
- assert.match(ui.claims.innerHTML,/<h3>Valor reclamado por causador · BD · 2026<\/h3>/);
+ assert.match(ui.claims.innerHTML,/<h3>Valor reclamado por causador · 2026<\/h3>/);
  assert.match(ui.claims.innerHTML,/Situações elegíveis · Data RNC/);
  assert.match(ui.claims.innerHTML,/exceto EM ANÁLISE, AGUARDANDO CUSTOS e RESPONDIDO - NÃO PROCEDE/);
  assert.match(ui.claims.innerHTML,/Causador AX da BD, distinto do fornecedor de negociação AC/);
  assert.match(ui.claims.innerHTML,/Fornecedor: Fornecedor exemplo · Operação: COMERCIAL/);
  assert.match(ui.claims.innerHTML,/Não usa Status F nem filtros locais da lista operacional/);
- assert.match(ui.dashboard.innerHTML,/Recebido por compensação · Controle · 2026/);
- assert.match(ui.dashboard.innerHTML,/Exclui pendências contendo FUP SUPRIMENTOS, assim como o card Em negociação/);
+ assert.match(ui.dashboard.innerHTML,/Recebimento mensal · 2026/);
+ assert.match(ui.dashboard.innerHTML,/<h3>Maiores causadores · 2026<\/h3>/);
+ assert.match(ui.dashboard.innerHTML,/<h3>Recebimento em aberto por fornecedor · todos os anos<\/h3>/);
+ assert.match(ui.dashboard.innerHTML,/<h3>Recebimento por fornecedor · 2026<\/h3>/);
+ assert.equal((ui.dashboard.innerHTML.match(/<footer class="exec-source-foot">BASE: (?:BD|RECEBIMENTO)<\/footer>/g)||[]).length,6);
+ assert.equal((ui.claims.innerHTML.match(/<footer class="exec-source-foot">BASE: BD<\/footer>/g)||[]).length,3);
+ for(const html of [ui.dashboard.innerHTML,ui.claims.innerHTML])assert.doesNotMatch([...html.matchAll(/<h3>(.*?)<\/h3>/g)].map(match=>match[1]).join(' '),/\bBD\b|\bControle\b|BASE:/);
+ assert.match(ui.dashboard.innerHTML,/Exclui pendências contendo FUP SUPRIMENTOS/);
+ assert.match(ui.dashboard.innerHTML,/Este gráfico segue os anos selecionados; o card Em negociação mostra todos os anos/);
  assert.doesNotMatch(visible(ui.dashboard.innerHTML),columnCodes);assert.doesNotMatch(visible(ui.claims.innerHTML),columnCodes);
  assert.match(visible(ui.dashboard.innerHTML),/Status pagamento: Pago · Data de compensação/);
  assert.equal(JSON.stringify(model),before);
 });
 
-test('negotiation card and country chart open the same non-FUP rows and preserve cents',()=>{
+test('negotiation card and country chart preserve non-FUP detail and cents when all eligible rows are in the selected year',()=>{
  const ui=executive(),model=fixture();ui.api.render(model);
  const card=ui.dashboard.innerHTML.match(/Em negociação<[^]*?<button[^>]*data-exec-detail="([^"]+)"/);assert(card);
  ui.click(card[1]);assert.match(ui.content.innerHTML,/NEG-KEEP/);assert.doesNotMatch(ui.content.innerHTML,/NEG-FUP/);assert.match(ui.content.innerHTML,/100,41/);
  const country=ui.dashboard.innerHTML.match(/class="exec-country" data-exec-detail="([^"]+)"/);assert(country);
  ui.click(country[1]);assert.match(ui.content.innerHTML,/NEG-KEEP/);assert.doesNotMatch(ui.content.innerHTML,/NEG-FUP/);assert.match(ui.content.innerHTML,/100,41/);
- assert.match(ui.dashboard.innerHTML,/exclui pendência H contendo FUP SUPRIMENTOS/);
+ assert.match(ui.dashboard.innerHTML,/Exclui Pendência contendo FUP SUPRIMENTOS e Motivo INTERFERÊNCIA EXTERNA/);
+ assert.match(ui.dashboard.innerHTML,/Carteira de todos os anos, independente do filtro de ano/);
 });
 
 test('scope labels follow applied metadata, compact only continuous years, and do not revive cleared legacy filters',()=>{
  const ui=executive(),model=fixture();model.meta.years=[2024,2025,2026];model.meta.suppliers=['A','B','C'];model.meta.claimStatuses=['RESSARCIMENTO ENCAMINHADO'];ui.api.renderClaims(model,ui.claims);
- assert.match(ui.claims.innerHTML,/BD · 2024–2026/);assert.match(ui.claims.innerHTML,/Fornecedor: A, B \+ 1/);assert.match(ui.claims.innerHTML,/Fornecedores: A, B, C/);assert.match(ui.claims.innerHTML,/Situação: RESSARCIMENTO ENCAMINHADO/);
+ assert.match(ui.claims.innerHTML,/<h3>Claims em aberto por país · 2024–2026<\/h3>/);assert.match(ui.claims.innerHTML,/Fornecedor: A, B \+ 1/);assert.match(ui.claims.innerHTML,/Fornecedores: A, B, C/);assert.match(ui.claims.innerHTML,/Situação: RESSARCIMENTO ENCAMINHADO/);
  model.meta.years=[2024,2026];model.meta.suppliers=[];model.meta.supplier='stale supplier';model.meta.operations=[];model.meta.operation='stale operation';ui.api.renderClaims(model,ui.claims);
- assert.match(ui.claims.innerHTML,/BD · 2024 e 2026/);assert.match(ui.claims.innerHTML,/Fornecedor: todos · Operação: todas/);assert.doesNotMatch(ui.claims.innerHTML,/stale supplier|stale operation/);
+ assert.match(ui.claims.innerHTML,/<h3>Claims em aberto por país · 2024 e 2026<\/h3>/);assert.match(ui.claims.innerHTML,/Fornecedor: todos · Operação: todas/);assert.doesNotMatch(ui.claims.innerHTML,/stale supplier|stale operation/);
 });
 
 test('receipt headings separate compensation years from all-year open balances and use only the applied scope argument',()=>{
@@ -57,6 +65,8 @@ test('receipt headings separate compensation years from all-year open balances a
  assert.match(dashboard.innerHTML,/Filtros aplicados · Fornecedor: Supplier A · Operação: CONTROL APPLIED · Busca: &lt;applied&gt;/);assert.doesNotMatch(dashboard.innerHTML,/<applied>|GLOBAL DRAFT/);
  assert.match(dashboard.innerHTML,/Data prevista anterior à posição em 10\/11\/2026/);assert.match(dashboard.innerHTML,/Status pagamento = Pago, Data de compensação válida em 2025 e 2026 e Valor Recebido USD positivo/);
  assert.equal((dashboard.innerHTML.match(/class="rx-info" tabindex="0"/g)||[]).length,5);assert.deepEqual(reads,['receiptsExecutive']);assert.equal(JSON.stringify(model),before);
+ assert.equal((dashboard.innerHTML.match(/<footer class="rx-source-foot">BASE: RECEBIMENTO<\/footer>/g)||[]).length,5);
+ assert.doesNotMatch([...dashboard.innerHTML.matchAll(/<(?:h3|p class="rx-panel-scope")>(.*?)<\/(?:h3|p)>/g)].map(match=>match[1]).join(' '),/\bControle\b|BASE:/);
  assert.doesNotMatch(visible(dashboard.innerHTML),columnCodes);
  window.MinervaReceiptsExecutive.render(model,rows);assert.match(dashboard.innerHTML,/Operação do Controle: CONTROL APPLIED/);assert.doesNotMatch(dashboard.innerHTML,/&lt;applied&gt;|GLOBAL DRAFT/);
 });
@@ -74,7 +84,7 @@ test('analytical detail headers use field names while keeping exact amounts and 
 
 test('the original situation chart and both financial rankings stay visible before the additional case-status view',()=>{
  const ui=executive(),model=fixture(),before=JSON.stringify(model);ui.api.renderClaims(model,ui.claims);const html=ui.claims.innerHTML;
- assert.match(html,/Claims em aberto por país · BD · 2026/);assert.match(html,/class="exec-sla"/);assert.match(html,/Valor reclamado por motivo/);assert.match(html,/Valor reclamado por causador/);
+ assert.match(html,/Claims em aberto por país · 2026/);assert.match(html,/class="exec-sla"/);assert.match(html,/Valor reclamado por motivo/);assert.match(html,/Valor reclamado por causador/);
  for(const color of ['#2E5372','#BDB58C','#E84752'])assert(html.includes('background:'+color));
  const countryId=html.match(/class="exec-country-row" data-exec-detail="([^"]+)"/)[1];ui.claims.events.click({target:{closest:()=>({dataset:{execDetail:countryId}})}});
  for(const reference of ['NEG-KEEP','NEG-FUP','ANALYSIS','COSTS'])assert(ui.content.innerHTML.includes(reference));assert.doesNotMatch(ui.content.innerHTML,/FORWARDED|DENIED/);
@@ -92,7 +102,7 @@ test('country chart total is prominent and opens exactly the union of case rows,
 
 test('all-year and long selected periods use short truthful labels in both chart modules',()=>{
  const ui=executive(),model=fixture();model.meta.allYears=true;model.meta.years=Array.from({length:11},(_,i)=>2018+i);ui.api.renderClaims(model,ui.claims);
- assert.match(ui.claims.innerHTML,/Claims em aberto por país · BD · Todos os anos/);assert.doesNotMatch(visible(ui.claims.innerHTML),/BD · 2018[– ]/);
+ assert.match(ui.claims.innerHTML,/Claims em aberto por país · Todos os anos/);assert.doesNotMatch(visible(ui.claims.innerHTML),/Claims em aberto por país · 2018[– ]/);
  model.meta.allYears=false;model.meta.years=[2018,2020,2026];ui.api.renderClaims(model,ui.claims);assert.match(ui.claims.innerHTML,/3 anos selecionados desde 2018/);assert.doesNotMatch(ui.claims.innerHTML,/2018 e 2020 e 2026/);
  const dashboard=host(),document={getElementById:id=>id==='receiptsExecutive'?dashboard:null,addEventListener(){}},window={};vm.runInNewContext(read('receipts-executive.js'),{window,document});model.meta.allYears=true;window.MinervaReceiptsExecutive.render(model,[]);assert.match(dashboard.innerHTML,/Recebido por mês · Todos os anos/);
  model.meta.allYears=false;model.meta.years=[2024,2025,2026];window.MinervaReceiptsExecutive.render(model,[]);assert.match(dashboard.innerHTML,/Recebido por mês · 2024–2026/);

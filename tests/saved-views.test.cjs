@@ -59,7 +59,7 @@ test('supplier saved views retain their applied years independently of the other
  const f=fixture();f.state.view='suppliers';f.state.model.meta={allYears:false,years:[2021,2025]};f.state.supplierYears=[2026];f.state.appliedGlobal.years=[2021,2025];
  const saved=plain(f.api.captureView());assert.deepEqual(saved.supplierYears,[2021,2025]);assert.deepEqual(saved.global.years,[2026]);f.state.supplierYears=[];await f.api.restoreView(saved);assert.deepEqual(plain(f.state.supplierYears),[2021,2025]);assert.deepEqual(f.context.supplierYearOptions,[2021,2025]);assert.deepEqual(f.years.map(y=>y.checked),[false,true]);
  delete saved.supplierYears;await f.api.restoreView(saved);assert.deepEqual(plain(f.state.supplierYears),[]);assert.deepEqual(f.context.supplierYearOptions,[]);
- assert.deepEqual(plain(f.api.sanitizeView({supplierYears:['2026',2025,2026,'bad',1999,2201]}).supplierYears),[2025,2026]);
+ assert.deepEqual(plain(f.api.sanitizeView({supplierYears:['2026',2025,2026,'bad',1999,2201]}).supplierYears),[1999,2025,2026]);
  f.state.model.meta={allYears:true,years:[2021,2025,2026]};assert.deepEqual(plain(f.api.captureView().supplierYears),[]);
 });
 
@@ -67,6 +67,13 @@ test('supplier situation selections are saved from the applied scope, sanitized 
  const f=fixture();f.state.view='suppliers';f.state.model.meta={allYears:true,years:[2025,2026]};f.state.appliedGlobal.claimStatuses=['EM ANÁLISE','RESSARCIMENTO ENCAMINHADO'];f.state.claimStatuses=['Rascunho'];const saved=plain(f.api.captureView());assert.deepEqual(saved.global.claimStatuses,['EM ANÁLISE','RESSARCIMENTO ENCAMINHADO']);
  await f.api.restoreView(saved);assert.deepEqual(plain(f.state.claimStatuses),saved.global.claimStatuses);delete saved.global.claimStatuses;await f.api.restoreView(saved);assert.deepEqual(plain(f.state.claimStatuses),[],'Legacy views default to every situation');
  assert.deepEqual(plain(f.api.sanitizeView({global:{claimStatuses:['EM ANÁLISE','EM ANÁLISE']}}).global.claimStatuses),['EM ANÁLISE']);f.context.viewScopeMatches=()=>false;assert.throws(()=>f.api.captureView(),/atualização desta aba/);
+});
+
+test('overview saved views preserve explicit all-years scope instead of collapsing to the year checkboxes',async()=>{
+ const f=fixture();f.state.view='overview';f.state.appliedGlobal.allYears=true;f.state.appliedGlobal.years=[2018,2020,2026];
+ const saved=plain(f.api.captureView());assert.equal(saved.global.allYears,true);assert.deepEqual(saved.global.years,[2018,2020,2026]);
+ await f.api.restoreView(saved);assert.equal(f.calls.length,1);assert.deepEqual(f.years.map(year=>year.checked),[false,false]);
+ const legacy=plain(f.api.sanitizeView({global:{years:[2026]}}));assert.equal(legacy.global.allYears,false);
 });
 
 test('restoring a claim view preserves procurement choices and does not finish on a different tab',async()=>{

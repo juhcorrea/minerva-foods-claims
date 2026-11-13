@@ -560,6 +560,7 @@
     const suppliersOnly = options.reportView === 'suppliers';
     const model = analyzeScope(bdRows, controlRows, options, true, !suppliersOnly);
     model.meta.caseYears=unique(bdRows.slice(1).map(row=>parseDate(row?.[1])).filter(Boolean).map(date=>Number(date.slice(0,4)))).sort((a,b)=>a-b);
+    model.meta.availableYears=allSourceYears(bdRows,controlRows);
     model.claimStatusOptions=[...new Map(bdRows.slice(1).filter(row=>row?.slice(0,36).some(value=>value!=null&&value!=='')).map(row=>[claimStatusKey(row[6]),text(row[6])||'Não informado'])).values()].sort((a,b)=>a.localeCompare(b,'pt-BR'));
     Object.assign(model.meta,globalFilterMeta(options),{controlOperation:options.controlOperation,controlOperations:[...options.controlOperations],filterBasis:'OU entre seleções de um filtro; E entre fornecedor e operação. Recebimentos e saldos com operações agrupadas exigem que todas as operações identificadas pertençam à seleção global, sem ratear ou repetir linhas.'});
     model.meta.allYears=options.allYears===true;model.meta.yearScope=model.meta.allYears?'all':'selected';
@@ -1294,6 +1295,7 @@
     const operationFilter=new Set(options.operations.map(normalizeStatus)),supplierFilter=new Set(options.suppliers.map(norm));
     const negotiating=new Map(),pipeline=new Map(),reasons=new Map(),causes=new Map(),sectors=new Map(),monthly=new Map(),sla=new Map(),claimRows=new Map(),controlClaims=[];
     const financialRows=new Set(model.claims.map(claim=>claim.row));
+    const negotiationPortfolio={amount:0,count:0,rows:[],years:[],allYears:true},portfolioYears=new Set();
     const optional={caseStatus:[5,'Status'],country:[19,'País'],cause:[49,'Causador'],armador:[31,'Cia Maritima'],analysis:[57,'SLA 25 Dias'],analysisDate:[9,'Data Fim Análise'],negotiation:[61,'Prazo Neg. Claims'],negotiationDate:[8,'Data ultima posição'],opening:[62,'Media Abertura Claim'],openingDate:[13,'Abertura claim'],pending:[7,'Pendência'],daysWithoutUpdate:[63,'Dias Sem Atualização']};
     const available=Object.fromEntries(Object.entries(optional).map(([key,[at,name]])=>[key,headerKey(bdRows[0]?.[at])===headerKey(name)]));
     available.sector=headerKey(controlRows[0]?.[0])==='SETOR';
@@ -1347,6 +1349,12 @@
         controlClaims.push({...row,caseStatus,caseStatusKey,rncYear:rncDate?Number(rncDate.slice(0,4)):null,order:text(source[22]),...claimFollowUpFields(bdRows[0],source,agingDate),financialEligible:financialRows.has(row.row),reasonExcluded:excluded.join('; '),pending:text(read(source,'pending')),lastUpdateDate:parseDate(read(source,'negotiationDate')),daysWithoutUpdate:days!=null&&days>=0?days:null,analyst:text(source[56])||'Não informado'});
       }
       if(war)continue;
+      // The overview card is the historical pending portfolio. Only its year
+      // scope differs from the selected-period monetary reports below.
+      if(rncDate&&rncDate<=asOf&&negotiatingClaim(source)&&(options.allOperations!==false||OPS.has(operation))){
+        negotiationPortfolio.amount+=row.claimed||0;negotiationPortfolio.count++;
+        negotiationPortfolio.rows.push(row.row);portfolioYears.add(Number(rncDate.slice(0,4)));remember(row);
+      }
       if(periodEligible&&statuses[statusKey]&&row.sgr){
         const key=norm(row.country),bucket=statuses[statusKey];
         if(!pipeline.has(key))pipeline.set(key,{country:row.country,negotiating:0,inAnalysis:0,awaitingCosts:0,total:0,rows:[],_ids:new Set(),_negotiating:new Set(),_inAnalysis:new Set(),_awaitingCosts:new Set()});
@@ -1360,14 +1368,16 @@
       if(claimRows.has(row.row))Object.assign(claimRows.get(row.row),Object.fromEntries(['analysisEvent','negotiationEvent','openingEvent'].filter(key=>row[key]).map(key=>[key,row[key]])));
     }
     const monthlyReceipts=[...monthly.values()].map(item=>({...item,received:money(item.received)}));
+    negotiationPortfolio.amount=money(negotiationPortfolio.amount);
+    negotiationPortfolio.years=[...portfolioYears].sort((a,b)=>a-b);
     const negotiationByCountry=finish(negotiating).map(({name,...item})=>({country:name,...item}));
     const openByCountry=[...pipeline.values()].map(({_ids,_negotiating,_inAnalysis,_awaitingCosts,...item})=>({...item,negotiating:_negotiating.size,inAnalysis:_inAnalysis.size,awaitingCosts:_awaitingCosts.size,total:_ids.size,recordCount:item.rows.length})).sort((a,b)=>b.total-a.total||a.country.localeCompare(b.country,'pt-BR'));
     const slaByMonth=[...sla.values()].map(({_analysis,_negotiation,_opening,...item})=>({...item,analysisRate:item.analysisCount?_analysis/item.analysisCount:null,negotiationDays:item.negotiationCount?_negotiation/item.negotiationCount:null,openingDays:item.openingCount?_opening/item.openingCount:null}));
-    model.executiveReport={years,caseYears:[...model.meta.caseYears],monthlyReceipts,negotiationByCountry,openByCountry,reasonRanking:finish(reasons),causeRanking:finish(causes),sectorReceipts:finish(sectors),slaByMonth,claimRows:[...claimRows.values()].sort((a,b)=>a.row-b.row),receiptRows,controlClaims,
+    model.executiveReport={years,caseYears:[...model.meta.caseYears],monthlyReceipts,negotiationPortfolio,negotiationByCountry,openByCountry,reasonRanking:finish(reasons),causeRanking:finish(causes),sectorReceipts:finish(sectors),slaByMonth,claimRows:[...claimRows.values()].sort((a,b)=>a.row-b.row),receiptRows,controlClaims,
       meta:{asOf,correctionScenario:model.meta.correctionScenario,...globalFilterMeta(options),available,
         receiptBasis:'Caixa do recorte global: mesmos coortes existentes, M = Pago, R válida nos anos selecionados e T positivo. Cada linha do Controle entra uma vez. Setor é A do Controle; não é a operação Z da BD.',
         financialBasis:'Motivo, causador e negociação por país usam os claims financeiros já selecionados. Causador vem de AX da BD, separado do fornecedor em AC. Valores financeiros existentes não são recalculados por este relatório.',
-        negotiationBasis:'Todo valor Em negociação soma Reclamado USD somente com Situação EM NEGOCIAÇÃO - PROCEDENTE e Pendência sem o texto FUP SUPRIMENTOS. Todas as demais pendências, inclusive vazias, são aceitas. Os filtros restringem o recorte, sem substituir essa regra. Card, países, fornecedores, detalhes e exportações usam as mesmas linhas elegíveis.',
+        negotiationBasis:'Todo valor Em negociação soma Reclamado USD somente com Situação EM NEGOCIAÇÃO - PROCEDENTE e Pendência sem o texto FUP SUPRIMENTOS. Todas as demais pendências, inclusive vazias, são aceitas. O card da Visão geral e seu detalhe mostram todos os anos, mantendo fornecedor, operação, Data RNC válida até a análise e exclusão de INTERFERÊNCIA EXTERNA. Países, fornecedores e demais cálculos financeiros continuam no período selecionado. Cada exportação acompanha o escopo da sua visão.',
         pipelineBasis:'BD: ano de Data RNC selecionado, Data RNC até a análise, operações e fornecedor do recorte global, sem INTERFERÊNCIA EXTERNA. Situações: EM ANÁLISE, AGUARDANDO CUSTOS e EM NEGOCIAÇÃO - PROCEDENTE. Sem listas manuais de exclusões de pendência do BI. Não representa o saldo de parcelas do Controle.',
         controlClaimBasis:'Controle operacional da BD: todos os anos, situações e motivos, inclusive Seguro, INTERFERÊNCIA EXTERNA e linhas sem Data RNC, nos filtros globais de fornecedor e operação. Aberto e Fechado seguem exclusivamente o Status F; Situação G permanece separada. F ausente, inválida ou desconhecida não é inferida por G. Cada linha com SGR preenchido conta um caso, inclusive SGR repetido; linhas sem SGR permanecem identificadas. Anos e status operacionais são filtrados na própria aba, sem alterar o financeiro. Pendência H e dias BL são preservados; financialEligible e reasonExcluded indicam a participação no recorte financeiro.',
         occurrenceBasis:'Situações por país: cada linha BD com SGR preenchido conta um caso, inclusive SGR repetido; etapas, total por país, total geral e detalhe usam as mesmas linhas. Linhas sem SGR não entram nessa contagem. Nos rankings monetários, count continua SGR distinto por grupo, com linha Excel quando ausente; valores somam linhas e recordCount mostra registros.',

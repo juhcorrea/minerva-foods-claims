@@ -37,6 +37,14 @@ test('supplier repopulation and metadata preserve plural arrays without splittin
  f.state.model.meta.suppliers=[];assert.deepEqual(clone(f.context.helpers.appliedGlobalValues('supplier')),[],'Explicit all selection does not recover the legacy caption');
 });
 
+test('historical year dropdown drafts and all-years scopes stay isolated between overview and receipts',()=>{
+ const f=fixture(),select=f.node('globalYearFilter');select.multiple=true;select.options=[2018,2020,2023,2026].map(year=>({value:String(year),selected:year===2026}));f.state.model.meta.availableYears=[2018,2020,2023,2026];
+ f.context.options();f.set('globalYearFilter',['2020','2023']);assert.deepEqual(clone(f.context.options().years),[2020,2023]);
+ f.context.view('installments');assert.deepEqual(f.values('globalYearFilter'),['2026']);f.set('globalYearFilter',['2018']);
+ f.context.view('overview');assert.deepEqual(f.values('globalYearFilter'),['2023','2020']);f.set('globalYearFilter',[]);assert.equal(f.context.options().allYears,true);
+ f.context.view('installments');assert.deepEqual(f.values('globalYearFilter'),['2018']);f.context.view('overview');assert.deepEqual(f.values('globalYearFilter'),[]);assert.equal(f.context.options().allYears,true);
+});
+
 test('chart supplier refinement restores applied operation sets and does not apply unrelated draft selections',async()=>{
  const f=fixture();Object.assign(f.state.model.meta,{operations:[EX,MI],controlOperations:[MI,IM],suppliers:[],operation:EX+' · '+MI,supplier:''});f.state.model.controlReport.meta.operations=[MI,IM];
  f.set('operationFilter',[IM]);f.set('supplierFilter',[B]);f.years[0].checked=true;

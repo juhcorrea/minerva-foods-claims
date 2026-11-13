@@ -27,6 +27,8 @@ html[data-theme=light] .executive-mode :is(.table-container,.table-wrap) td{bord
 .executive-mode .filter-field{flex:1;min-width:135px}
 .executive-mode .supplier-filter{flex:1.3}
 .executive-mode .filter-field select,.executive-mode .filter-field input{height:36px;min-height:36px}
+.executive-mode .year-selector{width:190px;min-width:145px;max-width:100%}
+.executive-mode .year-selector .multi-select-control{width:100%}
 .executive-mode .year-options label span{min-height:36px;padding:8px 10px}
 .executive-mode .year-selector legend,.executive-mode .filter-field>span{margin-bottom:4px;font-size:10px}
 .executive-mode .scenario-status{margin:0;padding:0;border:0;background:none;line-height:1.3;font-size:10px;flex-basis:100%}

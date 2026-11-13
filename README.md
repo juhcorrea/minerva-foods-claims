@@ -89,3 +89,9 @@ Instalações com backend podem disponibilizar **Controlar acessos → Baixar ba
 A restauração usa um novo projeto e armazenamento vazio, com credenciais novas e nova aprovação dos navegadores. O utilitário `migration/restore-data.mjs` valida o pacote offline e recusa sobrescrever um destino existente. Bases preservadas em JSON não substituem os XLSX originais com fórmulas e formatação.
 
 A demonstração pública não possui backend nem dados ou contas reais e não oferece esse download. Este repositório contém somente o código e testes fictícios da funcionalidade; backups operacionais nunca devem ser adicionados ao GitHub ou aos assets públicos.
+
+## Carteira de negociação e filtros de anos (13/11/2026)
+
+O card Em negociação na Visão geral e seu detalhe usam a carteira de todos os anos, mantendo fornecedor, operação, Data RNC válida até a análise e a regra EM NEGOCIAÇÃO - PROCEDENTE sem FUP SUPRIMENTOS nem INTERFERÊNCIA EXTERNA. O gráfico por país e os demais cálculos financeiros permanecem no período selecionado. A exportação separa a carteira histórica do gráfico por país.
+
+O seletor de anos oferece todos os anos válidos encontrados nas bases, com busca, multisseleção, marcar/desmarcar todos e Aplicar interno. Cada aba mantém sua configuração. Fontes dos gráficos ficam em rodapés BASE: BD ou BASE: RECEBIMENTO; títulos conservam o período. Rankings exibem US$ e números inteiros completos, preservando precisão em detalhes e exportações.

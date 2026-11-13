@@ -8,7 +8,7 @@ function fixture(){
  const record=name=>()=>{calls.push(name);models[name]=state.model;};
  const context={state,window:{MinervaExecutive:{renderClaims:record('executive-claims')},MinervaClaimControl:{render:record('claim-control')},MinervaCorrectionImpact:{render:record('impact')},MinervaAnalysts:{render:record('analysts')},MinervaMeetings:{render:record('meeting')},MinervaPortfolio:{render:record('portfolio')}},renderOverview:record('overview'),renderSuppliers:record('suppliers'),renderInstallments:record('installments'),renderCorrections:record('corrections'),renderMethodExtra:record('method'),renderScenarioStatus(){},populateOperations(){},setText(){},receiptScopeNote:()=>'',date:String,integer:String,correctionGroups:()=>[],refreshViewScope:()=>!state.scopeRenderPending,activeDetail:null};
  for(const name of ['MinervaClaimControl','MinervaCorrectionImpact','MinervaAnalysts','MinervaMeetings'])context.window[name].handlesTable=()=>false;
- context.$=id=>id==='correctionBadge'?badge:null;context.reviewQueue=()=>[{},{}];context.populateClaimYears=()=>{};context.populateSupplierYears=()=>{};context.populateSupplierStatuses=()=>{};
+ context.$=id=>id==='correctionBadge'?badge:null;context.reviewQueue=()=>[{},{}];context.populateGlobalYears=()=>{};context.populateClaimYears=()=>{};context.populateSupplierYears=()=>{};context.populateSupplierStatuses=()=>{};
  vm.createContext(context);vm.runInContext(renderCode,context);return{context,state,calls,models,badge};
 }
 test('supplier loading builds only its pane and the same model is reused until forced or replaced',()=>{
