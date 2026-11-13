@@ -11,3 +11,21 @@ test('model notifications leave hidden receipt charts untouched and still clear 
  const source=fs.readFileSync(path.join(__dirname,'../dist/receipts-executive.js'),'utf8'),events={},host={innerHTML:'untouched',classList:{add(){},remove(){}},addEventListener(){}},window={MinervaApp:{state:{view:'suppliers',model:{meta:{years:[2026]},controlReport:{installments:[]}}}}},document={getElementById:id=>id==='receiptsExecutive'?host:null,addEventListener(name,callback){events[name]=callback;}};
  vm.runInNewContext(source,{window,document});events['minerva:model-updated']();assert.equal(host.innerHTML,'untouched');window.MinervaApp.state.view='installments';events['minerva:model-updated']();assert(host.innerHTML.includes('rx-kpis'));window.MinervaApp.state.model=null;window.MinervaApp.state.view='suppliers';events['minerva:model-updated']();assert.equal(host.innerHTML,'');
 });
+
+test('receipt and open-balance titles disclose the applied month and restore historical wording when it is cleared',()=>{
+ const source=fs.readFileSync(path.join(__dirname,'../dist/receipts-executive.js'),'utf8'),host={innerHTML:'',classList:{add(){},remove(){}},addEventListener(){}},window={},document={getElementById:id=>id==='receiptsExecutive'?host:null,addEventListener(){}};
+ vm.runInNewContext(source,{window,document});
+ const rows=[row(2,{status:'Pago',includedInConfirmed:true,received:123.49,compensationMonth:'2026-02',compDate:'2026-02-05'}),row(3,{status:'Dentro do Prazo',expected:40.25,dueDate:'2026-02-20'}),row(4,{status:'Vencido',expected:10.75,dueDate:'2026-02-01'})],original=JSON.stringify(rows),model={meta:{years:[2026],months:[2],asOf:'2026-02-10'},controlReport:{installments:rows}};
+ const titles=html=>[...html.matchAll(/<h3>([^]*?)<\/h3>/g)].map(match=>match[1]);
+ const kpis=html=>[...html.matchAll(/<button[^>]*class="rx-kpi [^"]*"[^>]*>([^]*?)<\/button>/g)].map(match=>match[1]);
+ window.MinervaReceiptsExecutive.render(model);
+ assert.deepEqual(titles(host.innerHTML),['Recebido por mês · 2026 · Fev','Carteira em aberto · 2026 · Fev','Fornecedores · aberto · 2026 · Fev','Fornecedores · recebido · 2026 · Fev','Analistas · recebido · 2026 · Fev']);
+ const monthlyKpis=kpis(host.innerHTML);assert.equal(monthlyKpis.length,4);assert(monthlyKpis.every(html=>html.includes('2026 · Fev')));
+ assert.match(host.innerHTML,/Data de compensação válida em 2026 · Fev/);assert.match(host.innerHTML,/com previsão de pagamento em 2026 · Fev/);assert.doesNotMatch(host.innerHTML,/todos os anos/i);
+ const values=monthlyKpis.map(html=>html.match(/<strong>(.*?)<\/strong>/)[1]);assert.deepEqual(values,['123','51','11','40']);
+ model.meta.months=[];window.MinervaReceiptsExecutive.render(model);
+ assert.deepEqual(titles(host.innerHTML),['Recebido por mês · 2026','Carteira em aberto · todos os anos','Fornecedores · aberto · todos os anos','Fornecedores · recebido · 2026','Analistas · recebido · 2026']);
+ assert.match(host.innerHTML,/Data de compensação válida em 2026 e Valor/);assert.match(host.innerHTML,/parcelas em aberto, de todos os anos/);
+ const clearedKpis=kpis(host.innerHTML);assert(clearedKpis.slice(1).every(html=>html.includes('todos os anos')));assert.deepEqual(clearedKpis.map(html=>html.match(/<strong>(.*?)<\/strong>/)[1]),values,'display scope changes do not recalculate or round the supplied financial rows');
+ assert.equal(aggregate(rows,[2026]).summary.confirmed,123.49);assert.equal(aggregate(rows,[2026]).summary.open,51);assert.equal(JSON.stringify(rows),original);
+});

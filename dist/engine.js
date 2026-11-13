@@ -574,6 +574,19 @@
     model.claimStatusOptions=[...new Map(bdRows.slice(1).filter(row=>row?.slice(0,36).some(value=>value!=null&&value!=='')).map(row=>[claimStatusKey(row[6]),text(row[6])||'Não informado'])).values()].sort((a,b)=>a.localeCompare(b,'pt-BR'));
     Object.assign(model.meta,globalFilterMeta(options),{controlOperation:options.controlOperation,controlOperations:[...options.controlOperations],filterBasis:'OU entre seleções de um filtro; E entre fornecedor e operação. Recebimentos e saldos com operações agrupadas exigem que todas as operações identificadas pertençam à seleção global, sem ratear ou repetir linhas.'});
     model.meta.allYears=options.allYears===true;model.meta.yearScope=model.meta.allYears?'all':'selected';
+    if(options.months.length){
+      // Select review references, never individual installments inside an audit.
+      // The source dates are authoritative; an absent R cannot fall back to N.
+      const reviewYears=new Set(model.meta.years),reviewMonths=new Set(options.months),bdPeriodRows=[],controlPeriodRows=[];
+      for(let n=1;n<bdRows.length;n++)if(dateInPeriod(parseDate(bdRows[n]?.[1]),reviewYears,reviewMonths))bdPeriodRows.push(n+1);
+      for(let n=1;n<controlRows.length;n++){
+        const source=controlRows[n];if(!source)continue;
+        const date=parseDate(source[normalizeStatus(source[12])==='PAGO'?17:13]);
+        if(dateInPeriod(date,reviewYears,reviewMonths))controlPeriodRows.push(n+1);
+      }
+      model.meta.correctionPeriod={years:[...model.meta.years],months:[...options.months],bdRows:bdPeriodRows,controlRows:controlPeriodRows,
+        basis:'A referência entra quando alguma Data RNC da BD ou data do Controle pertence ao período: compensação para Pago; previsão para os demais status. A conferência preserva todas as parcelas vinculadas. Datas ausentes ou inválidas não são inferidas.'};
+    }
     model.meta.correctionScenario = correctionScenario;
     model.meta.correctionScenarioNote = useOriginal ? 'Visão original: fornecedor K, ano de entrada B, mercado D e valor integral U do Controle. Reclamado e negociação continuam na BD; datas R e valores recebidos T não mudam.' : 'Visão corrigida: fornecedor e classificação seguem vínculos seguros com a BD; U segue AJ somente para um claim único. Reclamado e negociação continuam na BD; datas R e valores recebidos T não mudam.';
     const unknownOperation = 'SEM OPERAÇÃO IDENTIFICADA';
@@ -592,6 +605,17 @@
       }
     }
     for (const installment of model.installments) installment.operations = unique(installment.operations.map(label => labels.get(normalizeStatus(label)) || label));
+    if(model.meta.correctionPeriod){
+      // A clean linked installment can make a BD warning relevant to the
+      // selected month even when it has no warning/audit node of its own.
+      const period=model.meta.correctionPeriod,parents=new Map();
+      const find=key=>{if(!parents.has(key))parents.set(key,key);let root=key;while(parents.get(root)!==root)root=parents.get(root);while(key!==root){const next=parents.get(key);parents.set(key,root);key=next;}return root;};
+      const join=(a,b)=>{const first=find(a),second=find(b);if(first!==second)parents.set(second,first);};
+      for(let n=1;n<controlRows.length;n++)if(controlRows[n])for(const claim of controlMatches(controlRows[n],index).matched)join('c'+(n+1),'b'+claim.row);
+      const active=new Set([...period.bdRows.map(id=>find('b'+id)),...period.controlRows.map(id=>find('c'+id))]);
+      period.referenceBdRows=[];period.referenceControlRows=[];
+      for(const key of parents.keys())if(active.has(find(key)))period[key[0]==='b'?'referenceBdRows':'referenceControlRows'].push(Number(key.slice(1)));
+    }
     applyBaseReconciliation(model, bdRows, controlRows, index);
     if (suppliersOnly) return analyzeSupplierView(model, bdRows, controlRows, index, labels, supplierLabels, options);
     const operationsSelected=options.controlOperations.map(value=>labels.get(normalizeStatus(value))||value),operation=operationsSelected.join(' · ');
@@ -792,6 +816,7 @@
   const correctionIssueSource = issue => issue.source === 'BD' || /^(?:CLAIM_|INVALID_RNC_DATE$|INVALID_CLAIM_AMOUNT$|MISSING_CLAIM_)/.test(issue.kind || '') ? 'BD' : 'Controle';
   function buildCorrectionReviewItems(model, groups = model?.correctionGroups || []) {
     const validRows = values => (values || []).filter(value => Number.isInteger(value) && value > 0);
+    const period=model?.meta?.correctionPeriod,periodBD=new Set(period?.referenceBdRows||period?.bdRows||[]),periodControl=new Set(period?.referenceControlRows||period?.controlRows||[]);
     const sourceKeys = node => [...validRows(node.bdRows).map(row=>'BD:'+row), ...validRows(node.controlRows).map(row=>'Controle:'+row)];
     const nodes = [...groups.map(group=>({groups:[group],audits:[],issues:[],bdRows:group.bdRows||[],controlRows:group.rows||[]})),
       ...(model?.claimValueAudit?.rows||[]).map(audit=>({groups:[],audits:[audit],issues:[],bdRows:audit.connectedBdRows||audit.bdRows||[],controlRows:audit.controlRows||[]})),
@@ -807,7 +832,7 @@
       let entry=sourceOwners.get(key);if(!entry){if(!standalone.has(key))standalone.set(key,{groups:[],audits:[],issues:[],bdRows:source==='BD'?validRows([issue.row]):[],controlRows:source==='Controle'?validRows([issue.row]):[]});entry=standalone.get(key);}entry.issues.push(issue);if(!Object.hasOwn(entry,'identityBdRows'))entry.identityBdRows=[...entry.bdRows];entry.bdRows.push(...validRows(issue.bdRows));
     }
     const warning=audit=>audit.uncertain||audit.hasClaimValueMismatch||audit.hasReceivedMismatch||audit.status!=='Conferido';
-    return [...components.values(),...standalone.values()].filter(entry=>entry.groups.length||entry.issues.length||entry.audits.some(warning)).map(entry=>{
+    return [...components.values(),...standalone.values()].filter(entry=>(entry.groups.length||entry.issues.length||entry.audits.some(warning))&&(!period||entry.bdRows.some(row=>periodBD.has(row))||entry.controlRows.some(row=>periodControl.has(row)))).map(entry=>{
       const sources=[...entry.groups,...entry.audits,...entry.issues],progress=sources.find(source=>source.reviewProgress?.key)?.reviewProgress;
       return {...entry,bdRows:[...new Set(validRows(entry.bdRows))].sort((a,b)=>a-b),controlRows:[...new Set(validRows(entry.controlRows))].sort((a,b)=>a-b),...(progress?{progress}:{} )};
     });
@@ -850,6 +875,7 @@
   // Even a clean audit can connect corrections/issues, so join all audit nodes
   // first and only then discard components without any warning.
   function correctionQueueCount(model) {
+    if(model.meta?.correctionPeriod)return buildCorrectionReviewItems(model).length;
     const validRows = rows => (rows || []).filter(row => Number.isInteger(row) && row > 0);
     const keys = (bdRows,controlRows) => [...validRows(bdRows).map(row => 'BD:'+row), ...validRows(controlRows).map(row => 'Controle:'+row)];
     const nodes = [...model.correctionGroups.map(group => ({keys:keys(group.bdRows,group.rows),warning:true})),
@@ -1441,6 +1467,7 @@
   // user explicitly requests a different financial formula or scope.
   function applyProcurementReport(model, bdRows, options) {
     const headers=bdRows[0],supplierFilter=new Set(options.suppliers.map(norm)),operationFilter=new Set(options.operations.map(normalizeStatus)),agingDate=today();
+    const years=new Set(model.meta.years),months=new Set(options.months);
     const rows=[],groups=new Map(),amounts={negotiation:0,legal:0},ids={negotiation:new Set(),legal:new Set(),included:new Set(),excluded:new Set(),all:new Set()};
     const identity=row=>row.sgr?`SGR:${norm(row.sgr)}`:`ROW:${row.row}`;
     const available={pending:headerKey(headers?.[7])==='PENDENCIA',invoiceDate:headerKey(headers?.[46])==='DATANF',container:headerKey(headers?.[32])==='NOCONTAINER',openingDate:headerKey(headers?.[13])==='ABERTURACLAIM'};
@@ -1449,8 +1476,10 @@
       const source=bdRows[n];if(!source||normalizeStatus(source[6])!==NEGOTIATING)continue;
       const supplier=text(source[28])||'(SEM NEGOCIAÇÃO)',operation=text(source[25]);
       if((supplierFilter.size&&!supplierFilter.has(norm(supplier)))||(operationFilter.size&&!operationFilter.has(normalizeStatus(operation))))continue;
+      const rncDate=parseDate(source[1]);
+      if(months.size&&(!dateInPeriod(rncDate,years,months)||rncDate>model.meta.asOf))continue;
       const pending=text(source[7]),excludedFup=!negotiatingClaim(source),category=norm(supplier).includes('JURIDICO')?'legal':'negotiation';
-      const row={row:n+1,sgr:text(source[0]),order:text(source[22]),supplier,...claimDimensions(headers,source),...claimFollowUpFields(headers,source,agingDate),pending,claimed:number(source[35]),category,included:!excludedFup,exclusionReason:excludedFup?'Pendência H contém FUP SUPRIMENTOS; fora dos totais':'',operation,status:text(source[6]),statusKey:NEGOTIATING,analyst:text(source[56])||'Não informado',rncDate:parseDate(source[1])};
+      const row={row:n+1,sgr:text(source[0]),order:text(source[22]),supplier,...claimDimensions(headers,source),...claimFollowUpFields(headers,source,agingDate),pending,claimed:number(source[35]),category,included:!excludedFup,exclusionReason:excludedFup?'Pendência H contém FUP SUPRIMENTOS; fora dos totais':'',operation,status:text(source[6]),statusKey:NEGOTIATING,analyst:text(source[56])||'Não informado',rncDate};
       const id=identity(row);ids.all.add(id);
       if(excludedFup){ids.excluded.add(id);excludedAmount+=row.claimed||0;excludedRecords++;continue;}
       ids.included.add(id);ids[category].add(id);includedRecords++;
@@ -1468,8 +1497,8 @@
     const counts={negotiation:ids.negotiation.size,legal:ids.legal.size,total:ids.included.size,excludedFup:ids.excluded.size,listed:ids.negotiation.size,records:rows.length,listedRecords:rows.length,totalRecords:includedRecords};
     const bySupplier=[...groups.values()].map(({_ids,_excluded,...group})=>({...group,negotiation:money(group.negotiation),legal:money(group.legal),total:money(money(group.negotiation)+money(group.legal)),claimCount:_ids.size,excludedFupCount:_excluded.size})).sort((a,b)=>b.total-a.total||a.supplier.localeCompare(b.supplier,'pt-BR'));
     model.procurementReport={rows,excludedFup:[],negotiationTotal,legalTotal,grandTotal,counts,bySupplier,summary:{negotiation:negotiationTotal,legal:legalTotal,total:grandTotal,claimCount:counts.negotiation},
-      meta:{allYears:true,agingDate,asOf:model.meta.asOf,...globalFilterMeta(options),correctionScenario:model.meta.correctionScenario,available,criteriaIncomplete:!available.pending,missingAmountCount:missingAmounts,amountIncomplete:missingAmounts>0,excludedFupCount:ids.excluded.size,excludedFupRecords:excludedRecords,excludedFupAmount:money(excludedAmount),legalDetailAvailable:false,
-        scope:'Carteira de negociação aberta da BD, de todos os anos. Os filtros globais de fornecedor e operação se aplicam; anos de Data RNC não retiram casos ainda em negociação.',
+      meta:{allYears:!months.size,years:[...model.meta.years],agingDate,asOf:model.meta.asOf,...globalFilterMeta(options),correctionScenario:model.meta.correctionScenario,available,criteriaIncomplete:!available.pending,missingAmountCount:missingAmounts,amountIncomplete:missingAmounts>0,excludedFupCount:ids.excluded.size,excludedFupRecords:excludedRecords,excludedFupAmount:money(excludedAmount),legalDetailAvailable:false,
+        scope:months.size?'Carteira de negociação aberta da BD com Data RNC nos anos e meses selecionados. Mantém fornecedor e operação; datas ausentes, inválidas ou posteriores à análise ficam fora deste recorte mensal.':'Carteira de negociação aberta da BD, de todos os anos. Os filtros globais de fornecedor e operação se aplicam; anos de Data RNC não retiram casos ainda em negociação.',
         basis:'G = EM NEGOCIAÇÃO - PROCEDENTE. H contendo FUP SUPRIMENTOS, com normalização de acentos e espaços, não entra nos totais. AC contendo JURIDICO forma o subtotal Jurídico; demais linhas incluídas formam Negociações. Valor da coluna AJ. Total geral = Negociações + Jurídico.',
         listBasis:'rows e bySupplier contêm somente Negociações não jurídicas, sem as linhas cuja pendência H contém FUP SUPRIMENTOS. Jurídico é apenas um subtotal; não há linhas nem detalhes jurídicos neste relatório. As exclusões FUP permanecem somente em contadores agregados de auditoria.',
         ageBasis:'Dias em aberto = data atual de São Paulo menos Abertura claim (N), em dias civis. Abertura ausente, inválida ou futura deixa dias em aberto indisponível. Não substitui abertura por Data RNC ou Data NF.',

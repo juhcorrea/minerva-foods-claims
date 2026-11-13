@@ -18,3 +18,11 @@ test('missing material exports cannot fall back to a different report and changi
  const f=fixture('directors');f.context.window.MinervaMaterials={};await f.context.exportBook('procurement');f.context.exportPdf();assert.equal(f.errors.length,2);assert.deepEqual(f.calls,[]);
  const g=fixture('directors');let finish;g.context.ensureFullModel=()=>new Promise(resolve=>finish=resolve);const pending=g.context.exportBook('procurement');g.state.materialsTab='carriers';finish(true);await pending;assert.deepEqual(g.calls,[]);assert.equal(g.state.exportBookPending,false);
 });
+
+test('body material context never intercepts normal navigation, filter clicks or other page controls',()=>{
+ const h=require('./dom-fixture.cjs').createDOM(),calls=[];h.document.body.dataset.materialsTab='carriers';
+ const main=h.element('nav'),overview=h.element('button',{'data-view':'overview'},main),overviewLabel=h.element('span',{text:'Visão Geral'},overview),filters=h.element('button',{id:'applyFilters'}),tabs=h.element('nav',{id:'materialsViews'}),director=h.element('button',{'data-materials-tab':'directors'},tabs),directorLabel=h.element('span',{text:'Diretoria'},director),outside=h.element('button',{'data-materials-tab':'fup'});
+ const context={document:h.document,selectMaterials:tab=>calls.push(['material',tab]),view:tab=>calls.push(['view',tab])};vm.createContext(context);vm.runInContext(between("  document.addEventListener('click',event=>{","  ['openImports'"),context);
+ h.click(overviewLabel);h.click(filters);h.click(h.document.body);h.click(outside);assert.deepEqual(calls,[['view','overview']]);h.click(directorLabel);assert.deepEqual(calls,[['view','overview'],['material','directors']]);
+ assert.match(source,/querySelectorAll\('#materialsViews button\[data-materials-tab\]'\)/);
+});

@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync(require.resolve('../dist/app.js'),'utf8');
 const between=(start,end)=>{const a=source.indexOf(start),b=source.indexOf(end,a+start.length);assert(a>=0&&b>a,start);return source.slice(a,b);};
-const renderCode=[between('  function currentMaterialsTab','  function renderView('),between('  function renderView(','  function viewScopeMatches'),between('  function render(force','  function renderOverview'),between('  function prepareExportViews','  function makeWorkbook'),between('  function handleTableChange','  F.onChange(handleTableChange)')].join('\n');
+const renderCode=[between('  const asList=','  const filterValues='),between('  function cleanYears','  function globalMonths'),between('  function currentMaterialsTab','  function renderView('),between('  function renderView(','  function viewScopeMatches'),between('  function render(force','  function renderOverview'),between('  function prepareExportViews','  function makeWorkbook'),between('  function handleTableChange','  F.onChange(handleTableChange)')].join('\n');
 function fixture(){
  const calls=[],models={},badge={hidden:true,setAttribute(name,value){this[name]=value;}},state={view:'suppliers',model:{meta:{allYears:true,years:[2025,2026],asOf:'2026-11-06'},summary:{reviewCount:0}},chartMonth:''};
  const record=name=>()=>{calls.push(name);models[name]=state.model;};

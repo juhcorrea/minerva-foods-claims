@@ -22,12 +22,12 @@ test('unified review keeps a compact scenario strip and collapses complementary 
  h.active.add('correction-impact-corrected');h.api.handleFilter();assert(h.host.innerHTML.includes('Filtro ativo'));assert(h.host.innerHTML.includes('Limpar filtros'));
  m.correctionImpact.summary.missingExpectedAmounts=2;h.api.render(m);assert(visible(h.host.innerHTML).includes('Saldo incompleto · 2 parcelas'));
 });
-test('criteria preserve independent choices and print includes full methodology without changing totals',()=>{
+test('criteria stay hidden on screen and normal print while full methodology remains in the profile PDF',()=>{
  const h=setup();h.api.render(model());h.listeners.toggle({target:{dataset:{correctionCriteria:'distribution'},open:true}});h.api.render();
  assert(h.host.innerHTML.includes('data-correction-criteria="distribution" open'));assert(!h.host.innerHTML.includes('data-correction-criteria="financial" open'));
  h.api.beforePrint();assert.equal((h.host.innerHTML.match(/data-correction-criteria="[^"]+" open/g)||[]).length,2);assert(h.host.innerHTML.includes('USD 120'));assert(h.host.innerHTML.includes('data-correction-archive open'));
  h.api.afterPrint();assert(h.host.innerHTML.includes('data-correction-criteria="distribution" open'));assert(!h.host.innerHTML.includes('data-correction-criteria="financial" open'));
- h.api.clear();h.api.render(model());assert(!/data-correction-criteria="[^"]+" open/.test(h.host.innerHTML));
+ assert.equal((h.host.innerHTML.match(/<details hidden class="correction-impact-criteria"/g)||[]).length,2);assert.match(fs.readFileSync(require.resolve('../dist/correction-impact.css'),'utf8'),/\.correction-impact-criteria\[hidden\]\{display:none!important\}/);const rules=fs.readFileSync(require.resolve('../dist/calculation-rules.js'),'utf8');assert(rules.includes('Correções e rastreabilidade'));h.api.clear();h.api.render(model());assert(!/data-correction-criteria="[^"]+" open/.test(h.host.innerHTML));
 });
 test('Excel retains both financial scenarios, source rows and audit reasons',()=>{
  const h=setup(),m=model(),before=JSON.stringify(m);h.api.render(m);const wb=XLSX.utils.book_new();h.api.addWorksheets(wb);

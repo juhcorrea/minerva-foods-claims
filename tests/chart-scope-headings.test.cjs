@@ -66,7 +66,7 @@ test('receipt headings separate compensation years from all-year open balances a
  assert.match(dashboard.innerHTML,/Recebido por mês · 2025 e 2026/);assert.match(dashboard.innerHTML,/Carteira em aberto · todos os anos/);assert.match(dashboard.innerHTML,/Fornecedores · aberto · todos os anos/);assert.match(dashboard.innerHTML,/Analistas · recebido · 2025 e 2026/);
  assert.match(dashboard.innerHTML,/Filtros aplicados · Fornecedor: Supplier A · Operação: CONTROL APPLIED · Busca: &lt;applied&gt;/);assert.doesNotMatch(dashboard.innerHTML,/<applied>|GLOBAL DRAFT/);
  assert.match(dashboard.innerHTML,/Data prevista anterior à posição em 10\/11\/2026/);assert.match(dashboard.innerHTML,/Status pagamento = Pago, Data de compensação válida em 2025 e 2026 e Valor Recebido USD positivo/);
- assert.equal((dashboard.innerHTML.match(/class="rx-info" tabindex="0"/g)||[]).length,5);assert.deepEqual(reads,['receiptsExecutive']);assert.equal(JSON.stringify(model),before);
+ assert.equal((dashboard.innerHTML.match(/class="rx-info" hidden tabindex="-1"/g)||[]).length,5);assert.deepEqual(reads,['receiptsExecutive']);assert.equal(JSON.stringify(model),before);
  assert.equal((dashboard.innerHTML.match(/<footer class="rx-source-foot">BASE: RECEBIMENTO<\/footer>/g)||[]).length,5);
  assert.doesNotMatch([...dashboard.innerHTML.matchAll(/<(?:h3|p class="rx-panel-scope")>(.*?)<\/(?:h3|p)>/g)].map(match=>match[1]).join(' '),/\bControle\b|BASE:/);
  assert.doesNotMatch(visible(dashboard.innerHTML),columnCodes);

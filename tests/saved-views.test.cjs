@@ -51,7 +51,7 @@ test('removed saved suppliers and analysts remain explicit selections after curr
 
 test('saved views accept a revalidated cached model and invalidate hidden pane stamps for restored filters',async()=>{
  const f=fixture();f.state.view='suppliers';const previous=f.state.model,saved=plain(f.api.captureView());f.context.analyze=async()=>true;f.state.renderedViews=new Map([['claims',1],['suppliers',1]]);saved.local.supplierSearch='Synthetic filter';await f.api.restoreView(saved);
- assert.equal(f.state.model,previous);assert.equal(f.applied.supplierSearch,'Synthetic filter');assert.deepEqual([...f.state.renderedViews.keys()],['claims']);assert.equal(f.renders.length,1);
+ assert.equal(f.state.model,previous);assert.equal(f.applied.supplierSearch,'','The removed supplier text filter is discarded rather than remaining active invisibly');assert.deepEqual([...f.state.renderedViews.keys()],['claims']);assert.equal(f.renders.length,1);
  f.context.analyze=async()=>false;await assert.rejects(f.api.restoreView(saved),/Não foi possível atualizar/);
 });
 
@@ -76,13 +76,19 @@ test('overview saved views preserve explicit all-years scope instead of collapsi
  const legacy=plain(f.api.sanitizeView({global:{years:[2026]}}));assert.equal(legacy.global.allYears,false);
 });
 
-test('saved overview retains applied months, normalizes all twelve to Todos and never imports them into another page',async()=>{
+test('saved views retain applied months per page and normalize all twelve to Todos',async()=>{
  const f=fixture();f.state.view='overview';f.state.appliedGlobal.months=[11,2];const select=f.node('globalMonthFilter');select.multiple=true;select.options=Array.from({length:12},(_,i)=>({value:String(i+1),selected:i===8}));
  const saved=plain(f.api.captureView());assert.deepEqual(saved.global.months,[2,11],'saved views capture the applied report, not September draft');
  await f.api.restoreView(saved);assert.deepEqual(select.selectedOptions.map(option=>option.value),['2','11']);
  assert.deepEqual(plain(f.api.sanitizeView({...saved,global:{...saved.global,months:[0,11,13,2,2]}}).global.months),[2,11]);
  assert.deepEqual(plain(f.api.sanitizeView({...saved,global:{...saved.global,months:Array.from({length:12},(_,i)=>i+1)}}).global.months),[]);
- assert.deepEqual(plain(f.api.sanitizeView({...saved,view:'suppliers'}).global.months),[]);assert.deepEqual(plain(f.api.sanitizeView({view:'overview',global:{years:[2026]}}).global.months),[],'legacy view uses every month');
+ for(const view of ['suppliers','corrections','claims','installments','procurement'])assert.deepEqual(plain(f.api.sanitizeView({...saved,view}).global.months),[2,11]);assert.deepEqual(plain(f.api.sanitizeView({view:'overview',global:{years:[2026]}}).global.months),[],'legacy view uses every month');
+});
+
+test('legacy supplier presets discard removed controls but preserve explicit column filters and sorting',async()=>{
+ const f=fixture(),saved=plain(f.api.captureView());saved.view='suppliers';saved.local.supplierSearch='Filtro antigo';saved.supplierMode='annual';saved.sort='received';saved.tableState={tables:[{id:'supplier-summary',filters:[{column:0,values:['Fornecedor A']}],sort:{column:1,direction:'asc'}}]};
+ const clean=plain(f.api.sanitizeView(saved));assert.equal(clean.local.supplierSearch,'');assert.equal(clean.supplierMode,'summary');assert.equal(clean.sort,'claimed');assert.deepEqual(clean.tableState,saved.tableState);
+ f.applied.supplierSearch='Filtro já aplicado';await f.api.restoreView(saved);assert.equal(f.applied.supplierSearch,'');assert.equal(f.state.supplierMode,'summary');assert.equal(f.state.sort,'claimed');assert.equal(f.state.direction,-1);assert.deepEqual(f.storedTables.at(-1).tables.find(table=>table.id==='supplier-summary'),saved.tableState.tables[0]);
 });
 
 test('Materials presets restore the selected report and only sanitized configuration without changing FUP filters',async()=>{

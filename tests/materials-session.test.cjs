@@ -25,6 +25,7 @@ test('late reads cannot restore manual information after logout or replace the n
 
 test('session checks for the same identity preserve loaded information and do not reload the editor',async()=>{
  const f=fixture();f.render();f.reads[0].resolve(documentValue(4321));await turn();const html=f.html();
+ assert.match(html,/data-placeholder="Todos Os Meses"/);for(const [index,name]of ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'].entries())assert(html.includes('<option value="'+(index+1)+'">'+name+'</option>'));assert.doesNotMatch(html,/>Jan<|>Fev<|>Nov</);
  f.setProfile({id:'user-a',email:'a@example.test',role:'admin'});await turn();assert.equal(f.reads.length,1);assert.equal(f.html(),html);
 });
 
