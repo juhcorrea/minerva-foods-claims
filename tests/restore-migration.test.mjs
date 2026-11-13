@@ -9,7 +9,7 @@ import {buildMigrationFiles} from '../worker/migration.js';
 import {validateMigrationBackup,loadMigrationBackup,restoreMigrationObjects,prepareMigrationObjects} from '../migration/restore-data.mjs';
 const E=createRequire(import.meta.url)('../dist/engine.js');
 const hash=x=>createHash('sha256').update(x).digest('hex');
-const keys=['private/report-latest-v1.json','private/correction-progress-v1.json','private/access-v3.json'];
+const keys=['private/report-latest-v1.json','private/correction-progress-v1.json','private/access-v3.json','private/material-inputs-v1.json'];
 const stamp='2026-01-05T10:00:00.000Z';
 class Bucket{
   objects=new Map();writes=[];
@@ -28,6 +28,7 @@ function fixtures(){
   return {
     [keys[0]]:{schemaVersion:1,revision:'report-example',updatedAt:stamp,updatedBy:'Responsável Exemplo',updatedByUserId:'owner',files:{bd:'BD exemplo.xlsx',control:'Controle exemplo.xlsx'},asOf:'2026-01-05',bd:[bh,bd],control:[ch,cr]},
     [keys[1]]:{schemaVersion:1,entries:{['a'.repeat(64)]:{done:true,updatedAt:stamp,updatedBy:'Responsável Exemplo',updatedByUserId:'owner',reportRevision:'older-report'}}},
+    [keys[3]]:{schemaVersion:1,revision:'materials-example',updatedAt:stamp,updatedBy:'Responsável Exemplo',updatedByUserId:'owner',periods:{2026:{containerTotal:10,containerFrozen:7,containerChilled:3,containerDry:null,freightUsd:1234.56,note:'Revisado',agreements:{'ARMADOR EXEMPLO':{1:2,11:null}}},2027:{containerTotal:null,containerFrozen:null,containerChilled:null,containerDry:null,freightUsd:null,note:'',agreements:{}}}},
     [keys[2]]:{schemaVersion:3,revision:'acl-example',updatedAt:stamp,admins:{owner:{id:'owner',name:'Responsável Exemplo',email:'owner@example.test',activatedAt:stamp}},members:{'person-a':{id:'person-a',name:'Pessoa Exemplo',email:'person@example.test',status:'approved',role:'editor',requestCode:'ABCD-2345',requestedAt:stamp,approvedAt:stamp,approvedBy:'Responsável Exemplo'},'legacy-b':{id:'legacy-b',name:'Legado Exemplo',email:'legacy@example.test',status:'approved'}},audit:[{at:stamp,actorId:'owner',actorName:'Responsável Exemplo',action:'access_approved',target:'person-a'}]},
   };
 }
@@ -83,6 +84,21 @@ test('missing objects stay absent, without invented empty records',async()=>{
   assert.deepEqual(result.absentKeys,keys);assert.deepEqual(result.writtenKeys,[]);assert.equal(result.reportRevision,null);assert.equal(destination.objects.size,0);
 });
 
+test('older three-object backups still restore and load without invented manual inputs',async()=>{
+ const backup=await pack(),file='dados/campos-manuais-materiais.json';backup.files.delete(file);backup.manifest.files=backup.manifest.files.filter(item=>item.path!==file);backup.manifest.objects=backup.manifest.objects.filter(item=>item.key!==keys[3]);delete backup.manifest.counts.materialPeriods;
+ const destination=new Bucket(),result=await restoreMigrationObjects(destination,backup,{confirmNewEmptyBucket:true});assert.deepEqual(result.writtenKeys,keys.slice(0,3));assert(!destination.objects.has(keys[3]));
+ const root=await mkdtemp(path.join(tmpdir(),'claims-legacy-migration-'));
+ try{await mkdir(path.join(root,'dados'));await writeFile(path.join(root,'MANIFESTO.json'),JSON.stringify(backup.manifest));for(const[name,data]of backup.files)await writeFile(path.join(root,name),data);assert.equal((await loadMigrationBackup(root)).objects.length,3);}finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('restore refuses injected manual fields and invalid values even with valid rewritten checksums',async()=>{
+ const file='dados/campos-manuais-materiais.json';
+ for(const mutate of [value=>value.token='forged',value=>value.periods[2026].token='forged',value=>value.periods[2026].freightUsd=-1,value=>value.periods[2026].agreements={'TEST':{'1':1.5}}]){
+  const backup=await pack(),value=JSON.parse(new TextDecoder().decode(backup.files.get(file)));mutate(value);const bytes=new TextEncoder().encode(JSON.stringify(value));backup.files.set(file,bytes);Object.assign(backup.manifest.files.find(item=>item.path===file),{bytes:bytes.byteLength,sha256:hash(bytes)});
+  const destination=new Bucket();await assert.rejects(restoreMigrationObjects(destination,backup,{confirmNewEmptyBucket:true}),{code:'MIGRATION_INVALID_STORAGE'});assert.deepEqual(destination.writes,[]);
+ }
+});
+
 test('conditional create blocks a concurrent destination write and reports partial import',async()=>{
   const backup=await pack(),destination=new Bucket(),put=destination.put.bind(destination);
   destination.put=async(key,...args)=>{if(key===keys[1])destination.objects.set(key,{value:{concurrent:true}});return put(key,...args);};
@@ -96,8 +112,9 @@ test('offline loader validates extracted package and preparation writes no exist
     const backup=await pack();await mkdir(path.join(root,'dados'));await writeFile(path.join(root,'MANIFESTO.json'),JSON.stringify(backup.manifest));
     for(const[name,data]of backup.files)await writeFile(path.join(root,name),data);
     const checked=await loadMigrationBackup(root),prepared=path.join(root,'prepared');
-    const plan=await prepareMigrationObjects(checked,prepared);assert.equal(plan.requiresNewEmptyBucket,true);assert.equal(plan.objects.length,3);
+    const plan=await prepareMigrationObjects(checked,prepared);assert.equal(plan.requiresNewEmptyBucket,true);assert.equal(plan.objects.length,4);
     assert.deepEqual(JSON.parse(await readFile(path.join(prepared,'report-latest-v1.json'),'utf8')),fixtures()[keys[0]]);
+    assert.deepEqual(JSON.parse(await readFile(path.join(prepared,'material-inputs-v1.json'),'utf8')),fixtures()[keys[3]]);
     await assert.rejects(prepareMigrationObjects(checked,prepared),error=>error.code==='EEXIST');
   }finally{await rm(root,{recursive:true,force:true});}
 });

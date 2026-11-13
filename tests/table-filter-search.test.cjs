@@ -37,119 +37,76 @@ test('Claim cards ignore only case status while their base facets, drill and rea
  const t=fixture(),host=t.document.createElement('div');host.id='claimRecords';t.document.body.append(host);vm.runInNewContext(fs.readFileSync(require.resolve('../dist/claim-control.js'),'utf8'),{window:t.window,document:t.document,Intl});
  const api=t.window.MinervaClaimControl,id='cc-claims-table',rows=[{row:2,sgr:'CASE-A',supplier:'Analysis open',country:'BRA',status:'EM ANÁLISE',caseStatus:'ABERTO',caseStatusKey:'open',rncYear:2026,claimed:10},{row:3,sgr:'CASE-B',supplier:'Analysis closed',country:'BRA',status:'EM ANÁLISE',caseStatus:'FECHADO',caseStatusKey:'closed',rncYear:2026,claimed:20},{row:4,sgr:'CASE-C',supplier:'Forwarded open',country:'BRA',status:'RESSARCIMENTO ENCAMINHADO',caseStatus:'ABERTO',caseStatusKey:'open',rncYear:2026,claimed:30}],model={meta:{allYears:true,caseYears:[2026]},executiveReport:{controlClaims:rows}},original=JSON.stringify(model);
  t.F.importState({tables:[{id,filters:[{column:1,values:['BRA']},{column:8,values:['Aberto']}],sort:{column:6,direction:'asc'}},{id:'other',filters:[{column:0,values:['preserve']}]}]});let callbacks=0;t.F.onChange(table=>{callbacks++;api.handleFilter(table);});api.render(model);
- const count=key=>host.querySelector('[data-cc-case-metric="'+key+'"]').querySelector('strong').textContent,options=()=>{const popup=t.open(id,2),values=popup.querySelectorAll('.column-filter-option').map(node=>node.querySelector('span').textContent);t.click(popup.querySelector('[data-filter-cancel]'));return values;},records=()=>host.querySelectorAll('[data-cc-detail]').map(node=>Number(node.dataset.ccDetail));
+ const count=key=>host.querySelector('[data-cc-case-metric="'+key+'"]').querySelector('strong').textContent,options=()=>{const popup=t.open(id,2),values=popup.querySelectorAll('.column-filter-option').map(node=>node.querySelector('span').textContent);t.F.close();return values;},records=()=>host.querySelectorAll('[data-cc-detail]').map(node=>Number(node.dataset.ccDetail));
  assert.equal(count('all'),'3');assert.equal(count('closed'),'1');assert.deepEqual(options(),['Analysis open','Forwarded open']);
  t.click(host.querySelector('[data-cc-case-metric="closed"]'));assert.deepEqual(records(),[3]);assert.deepEqual(options(),['Analysis closed']);let saved=plain(t.F.exportState());assert.deepEqual(saved.tables.find(table=>table.id===id),{id,filters:[{column:1,values:['BRA']}],sort:{column:6,direction:'asc'}});assert(saved.tables.some(table=>table.id==='other'));
  t.click(host.querySelector('[data-cc-case-metric="analysis"]'));assert.deepEqual(records(),[2,3]);assert.deepEqual(options(),['Analysis closed','Analysis open']);
- const popup=t.open(id,2);t.search(popup,'Analysis open');t.click(popup.querySelector('.column-filter-only'));assert.equal(callbacks,1);assert.deepEqual(records(),[2]);assert.equal(count('all'),'1');assert.equal(count('closed'),'0');assert.deepEqual(options(),['Analysis closed','Analysis open'],'Own column may expose every option within the actual stage for changing the selection');assert.equal(JSON.stringify(model),original);
+ const popup=t.open(id,2);t.search(popup,'Analysis open');t.click(popup.querySelector('[data-filter-apply]'));assert.equal(callbacks,1);assert.deepEqual(records(),[2]);assert.equal(count('all'),'1');assert.equal(count('closed'),'0');assert.deepEqual(options(),['Analysis closed','Analysis open'],'Own column may expose every option within the actual stage for changing the selection');assert.equal(JSON.stringify(model),original);
 });
 
-test('Somente este replaces all 2209 selected options and leaves other tables unchanged',()=>{
- const t=fixture(),rows=Array.from({length:2209},(_,i)=>({order:'PO/DEMO-'+i,status:'Aberto'}));
- t.prepare('orders',rows);t.prepare('other',rows.slice(0,2));
- const popup=t.open('orders');assert.equal(popup.querySelector('[data-filter-search-apply]').hidden,true);
- t.search(popup,'PO/DEMO-1876');
- assert.equal(popup.querySelectorAll('.column-filter-option').length,1);
- assert.match(popup.querySelector('.column-filter-count').textContent,/1 resultado.*2209 de 2209 opções/);
- assert.equal(t.prepare('orders',rows).length,2209,'Typing a query must not commit a filter');
- t.click(popup.querySelector('.column-filter-only'));
- assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['PO/DEMO-1876']);
- assert.equal(t.prepare('other',rows.slice(0,2)).length,2);
- assert.deepEqual(t.changed,['orders']);assert.equal(t.document.querySelector('.column-filter-popup'),null);
- assert.equal(t.document.activeElement.dataset.filterTable,'orders');
+const toggle=popup=>popup.querySelector('[data-filter-toggle]');
+const apply=popup=>popup.querySelector('[data-filter-apply]');
+function setCheck(popup,label,checked=true){const option=popup.querySelectorAll('.column-filter-option').find(node=>node.querySelector('span').textContent===label);assert(option,'missing option: '+label);const input=option.querySelector('input');input.checked=checked;input.dispatchEvent({type:'change'});}
+
+test('search then Apply replaces all 2209 selected options and leaves other tables unchanged',()=>{
+ const t=fixture(),rows=Array.from({length:2209},(_,i)=>({order:'PO/DEMO-'+i,status:'Aberto'}));t.prepare('orders',rows);t.prepare('other',rows.slice(0,2));
+ const popup=t.open('orders');t.search(popup,'PO/DEMO-1876');assert.equal(popup.querySelectorAll('.column-filter-option').length,1);assert.match(popup.querySelector('.column-filter-count').textContent,/1 resultado.*2209 de 2209 opções/);assert.equal(t.prepare('orders',rows).length,2209,'Typing a query does not commit');t.click(apply(popup));
+ assert.deepEqual(t.prepare('orders',rows).map(row=>row.order),['PO/DEMO-1876']);assert.equal(t.prepare('other',rows.slice(0,2)).length,2);assert.deepEqual(t.changed,['orders']);assert.equal(t.document.querySelector('.column-filter-popup'),null);assert.equal(t.document.activeElement.dataset.filterTable,'orders');
 });
 
-test('search action applies only matching options, retaining other columns and the sort',()=>{
- const t=fixture(),rows=[{order:'Búsqueda 1',status:'Aberto'},{order:'Busca 2',status:'Aberto'},{order:'Busca 3',status:'Fechado'},{order:'Outra',status:'Aberto'}];
- t.F.importState({tables:[{id:'orders',filters:[{column:1,values:['Aberto']}],sort:{column:0,direction:'desc'}}]});t.prepare('orders',rows);
- const popup=t.open('orders');t.search(popup,'bus');const apply=popup.querySelector('[data-filter-search-apply]');
- assert.equal(apply.hidden,false);assert.equal(apply.disabled,false);assert.match(apply.textContent,/\(2\)/);
- t.click(apply);
- assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['Búsqueda 1','Busca 2']);
- assert.deepEqual(plain(t.F.exportState()),{tables:[{id:'orders',filters:[{column:1,values:['Aberto']},{column:0,values:['Busca 2','Búsqueda 1']}],sort:{column:0,direction:'desc'}}]});
+test('search Apply retains other columns and sorting, with accent insensitive matching',()=>{
+ const t=fixture(),rows=[{order:'Búsqueda 1',status:'Aberto'},{order:'Busca 2',status:'Aberto'},{order:'Busca 3',status:'Fechado'},{order:'Outra',status:'Aberto'}];t.F.importState({tables:[{id:'orders',filters:[{column:1,values:['Aberto']}],sort:{column:0,direction:'desc'}}]});t.prepare('orders',rows);
+ const popup=t.open('orders');t.search(popup,'bus');t.click(apply(popup));assert.deepEqual(t.prepare('orders',rows).map(row=>row.order),['Búsqueda 1','Busca 2']);assert.deepEqual(plain(t.F.exportState()),{tables:[{id:'orders',filters:[{column:1,values:['Aberto']},{column:0,values:['Busca 2','Búsqueda 1']}],sort:{column:0,direction:'desc'}}]});
 });
 
-test('no matching options disables search action; cancelling preserves filters and sort',()=>{
- const t=fixture(),rows=[{order:'A',status:'Aberto'},{order:'B',status:'Aberto'}];
- t.F.importState({tables:[{id:'orders',filters:[{column:0,values:['A']}],sort:{column:0,direction:'asc'}}]});t.prepare('orders',rows);const before=plain(t.F.exportState());
- const popup=t.open('orders');t.click(popup.querySelector('[data-sort-direction="desc"]'));t.search(popup,'missing');
- const action=popup.querySelector('[data-filter-search-apply]');assert.equal(action.hidden,false);assert.equal(action.disabled,true);
- action.onclick();assert.deepEqual(plain(t.F.exportState()),before);assert.deepEqual(t.changed,[]);
- t.click(popup.querySelector('[data-filter-cancel]'));assert.deepEqual(plain(t.F.exportState()),before);assert.equal(t.document.querySelector('.column-filter-popup'),null);
+test('no results disables both footer actions; Escape preserves filters and sort',()=>{
+ const t=fixture(),rows=[{order:'A',status:'Aberto'},{order:'B',status:'Aberto'}];t.F.importState({tables:[{id:'orders',filters:[{column:0,values:['A']}],sort:{column:0,direction:'asc'}}]});t.prepare('orders',rows);const before=plain(t.F.exportState());
+ const popup=t.open('orders');t.click(popup.querySelector('[data-sort-direction="desc"]'));t.search(popup,'missing');assert.equal(apply(popup).disabled,true);assert.equal(toggle(popup).disabled,true);apply(popup).onclick();assert.deepEqual(plain(t.F.exportState()),before);assert.deepEqual(t.changed,[]);
+ t.document.dispatchEvent({type:'keydown',key:'Escape',preventDefault(){},stopPropagation(){}});assert.deepEqual(plain(t.F.exportState()),before);assert.equal(t.document.querySelector('.column-filter-popup'),null);
 });
 
-test('checkbox selections stay a cancellable multi-value draft; ordinary Apply commits them',()=>{
- const t=fixture(),rows=[{order:'A',status:'Aberto'},{order:'B',status:'Aberto'},{order:'C',status:'Aberto'}];t.prepare('orders',rows);
- let popup=t.open('orders');t.click(popup.querySelector('[data-filter-none]'));
- for(const option of popup.querySelectorAll('.column-filter-option').slice(0,2)){const checkbox=option.querySelector('input');checkbox.checked=true;checkbox.dispatchEvent({type:'change'});}
- t.click(popup.querySelector('[data-sort-direction="desc"]'));
- assert.equal(t.prepare('orders',rows).length,3);t.click(popup.querySelector('[data-filter-cancel]'));assert.equal(t.F.has('orders'),false);assert.equal(t.F.getSort('orders'),null);
- popup=t.open('orders');t.click(popup.querySelector('[data-filter-none]'));
- for(const option of popup.querySelectorAll('.column-filter-option').slice(0,2)){const checkbox=option.querySelector('input');checkbox.checked=true;checkbox.dispatchEvent({type:'change'});}
- t.click(popup.querySelector('[data-sort-direction="desc"]'));t.click(popup.querySelector('[data-filter-apply]'));
- assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['B','A']);assert.deepEqual(t.changed,['orders']);
+test('checkbox selections remain a cancellable multi-value draft and Apply commits exactly that draft',()=>{
+ const t=fixture(),rows=['A','B','C'].map(order=>({order,status:'Aberto'}));t.prepare('orders',rows);
+ let popup=t.open('orders');assert.equal(toggle(popup).textContent,'Limpar');t.click(toggle(popup));setCheck(popup,'A');setCheck(popup,'B');t.click(popup.querySelector('[data-sort-direction="desc"]'));assert.equal(t.prepare('orders',rows).length,3);t.F.close();assert.equal(t.F.has('orders'),false);assert.equal(t.F.getSort('orders'),null);
+ popup=t.open('orders');t.click(toggle(popup));setCheck(popup,'A');setCheck(popup,'B');t.click(popup.querySelector('[data-sort-direction="desc"]'));t.click(apply(popup));assert.deepEqual(t.prepare('orders',rows).map(row=>row.order),['B','A']);assert.deepEqual(t.changed,['orders']);
 });
 
-test('blank option remains selectable alone and all/none act globally during search',()=>{
- const t=fixture(),rows=[{order:'',status:'Aberto'},{order:'Alpha 1',status:'Aberto'},{order:'Alpha 2',status:'Aberto'},{order:'Beta',status:'Aberto'}];t.prepare('orders',rows);
- let popup=t.open('orders');t.search(popup,'sem informacao');t.click(popup.querySelector('.column-filter-only'));
- assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['']);
- popup=t.open('orders');t.search(popup,'alpha');t.click(popup.querySelector('[data-filter-all]'));t.click(popup.querySelector('[data-filter-apply]'));
- assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['','Alpha 1','Alpha 2','Beta']);assert.equal(t.F.has('orders'),false);
- popup=t.open('orders');t.search(popup,'alpha');t.click(popup.querySelector('[data-filter-none]'));t.click(popup.querySelector('[data-filter-apply]'));
- assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),[]);assert.equal(t.F.has('orders'),true);
+test('blank values remain selectable; bulk search replaces outside choices and Limpar resets the filter',()=>{
+ const t=fixture(),rows=['','Alpha 1','Alpha 2','Beta'].map(order=>({order,status:'Aberto'}));t.prepare('orders',rows);
+ let popup=t.open('orders');t.search(popup,'sem informacao');t.click(apply(popup));assert.deepEqual(t.prepare('orders',rows).map(row=>row.order),['']);
+ popup=t.open('orders');t.search(popup,'alpha');assert.equal(toggle(popup).textContent,'Marcar todos');t.click(toggle(popup));assert.equal(toggle(popup).textContent,'Limpar');assert.equal(t.prepare('orders',rows).length,1);t.click(apply(popup));assert.deepEqual(t.prepare('orders',rows).map(row=>row.order),['Alpha 1','Alpha 2']);
+ popup=t.open('orders');t.search(popup,'alpha');t.click(toggle(popup));assert.equal(popup.querySelector('input[type=search]').value,'');assert.equal(popup.querySelectorAll('.column-filter-option input').filter(input=>input.checked).length,0);t.click(apply(popup));assert.equal(t.F.has('orders'),false);assert.equal(t.prepare('orders',rows).length,4);
 });
 
-test('372 options: clear during search A then check A and B across searches applies exactly A+B',()=>{
- const t=fixture(),rows=Array.from({length:372},(_,i)=>({order:'Fornecedor '+String(i).padStart(3,'0'),status:'Aberto'}));t.prepare('orders',rows);
- const popup=t.open('orders');assert.equal(popup.querySelector('[data-filter-all]').textContent,'Marcar todos');
- assert.equal(popup.querySelector('.column-sort-disclosure').hasAttribute('open'),false,'Sorting starts collapsed');
- t.search(popup,'Fornecedor 011');t.click(popup.querySelector('[data-filter-none]'));
- assert.match(popup.querySelector('.column-filter-count').textContent,/0 de 372/);
- const checkVisible=()=>{const input=popup.querySelector('.column-filter-option input');input.checked=true;input.dispatchEvent({type:'change'});};
- checkVisible();t.search(popup,'Fornecedor 295');checkVisible();t.search(popup,'Fornecedor 011');
- assert.equal(popup.querySelector('.column-filter-option input').checked,true);
- assert.equal(t.prepare('orders',rows).length,372,'A draft must not change table/export source rows');
- t.click(popup.querySelector('[data-filter-apply]'));
- assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['Fornecedor 011','Fornecedor 295']);
- assert.deepEqual(plain(t.F.exportState()).tables[0].filters,[{column:0,values:['Fornecedor 011','Fornecedor 295']}]);
+test('372 options: manual A and B survive searches, including the final revisit to A',()=>{
+ const t=fixture(),rows=Array.from({length:372},(_,i)=>({order:'Fornecedor '+String(i).padStart(3,'0'),status:'Aberto'}));t.prepare('orders',rows);const popup=t.open('orders');t.click(toggle(popup));
+ t.search(popup,'Fornecedor 011');setCheck(popup,'Fornecedor 011');t.search(popup,'Fornecedor 295');setCheck(popup,'Fornecedor 295');t.search(popup,'Fornecedor 011');assert.equal(popup.querySelector('.column-filter-option input').checked,true);assert.equal(t.prepare('orders',rows).length,372);t.click(apply(popup));assert.deepEqual(t.prepare('orders',rows).map(row=>row.order),['Fornecedor 011','Fornecedor 295']);assert.deepEqual(plain(t.F.exportState()).tables[0].filters,[{column:0,values:['Fornecedor 011','Fornecedor 295']}]);
 });
 
-test('select search results adds to the draft across queries without applying or replacing prior choices',()=>{
- const t=fixture(),rows=['Alpha 1','Alpha 2','Beta','Other'].map(order=>({order,status:'Aberto'}));t.prepare('orders',rows);
- const popup=t.open('orders');t.search(popup,'alpha');t.click(popup.querySelector('[data-filter-none]'));t.click(popup.querySelector('[data-filter-search-select]'));
- t.search(popup,'beta');t.click(popup.querySelector('[data-filter-search-select]'));
- assert.deepEqual(t.changed,[]);assert.equal(t.prepare('orders',rows).length,4);
- t.search(popup,'missing');assert.equal(popup.querySelector('[data-filter-search-select]').disabled,true);
- t.click(popup.querySelector('[data-filter-apply]'));assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['Alpha 1','Alpha 2','Beta']);
+test('Marcar todos during each search replaces the draft rather than retaining prior queries',()=>{
+ const t=fixture(),rows=['Alpha 1','Alpha 2','Beta','Other'].map(order=>({order,status:'Aberto'}));t.prepare('orders',rows);const popup=t.open('orders');t.search(popup,'alpha');t.click(toggle(popup));t.search(popup,'beta');t.click(toggle(popup));assert.deepEqual(t.changed,[]);assert.equal(t.prepare('orders',rows).length,4);t.click(apply(popup));assert.deepEqual(t.prepare('orders',rows).map(row=>row.order),['Beta']);
 });
 
-test('choices cascade through other columns, ignore their own filter, and Mark all clears only that column',()=>{
- const t=fixture(),rows=[{order:'A',status:'Aberto'},{order:'B',status:'Aberto'},{order:'C',status:'Fechado'},{order:'A',status:'Fechado'}];
- t.F.importState({tables:[{id:'orders',filters:[{column:0,values:['A']},{column:1,values:['Aberto']}],sort:null}]});t.prepare('orders',rows);
- let popup=t.open('orders');assert.deepEqual(popup.querySelectorAll('.column-filter-option label span').map(n=>n.textContent),['A','B']);
- t.search(popup,'A');t.click(popup.querySelector('[data-filter-all]'));assert.match(popup.querySelector('.column-filter-count').textContent,/2 de 2/);assert.doesNotMatch(popup.querySelector('.column-filter-count').textContent,/fora do recorte/);
- t.click(popup.querySelector('[data-filter-apply]'));assert.deepEqual(plain(t.F.exportState()).tables[0].filters,[{column:1,values:['Aberto']}]);
- assert.deepEqual(t.prepare('orders',rows).map(r=>r.order),['A','B']);
- popup=t.open('orders',1);assert.deepEqual(popup.querySelectorAll('.column-filter-option label span').map(n=>n.textContent),['Aberto','Fechado'],'The current column never filters its own options');t.click(popup.querySelector('[data-filter-cancel]'));
- t.F.importState({tables:[]});t.prepare('orders',rows);popup=t.open('orders');assert.equal(popup.querySelectorAll('.column-filter-option').length,3,'Removing the related filter restores the available choices');
+test('choices cascade through other columns; without search Marcar todos restores only its own universe',()=>{
+ const t=fixture(),rows=[{order:'A',status:'Aberto'},{order:'B',status:'Aberto'},{order:'C',status:'Fechado'},{order:'A',status:'Fechado'}];t.F.importState({tables:[{id:'orders',filters:[{column:0,values:['A']},{column:1,values:['Aberto']}],sort:null}]});t.prepare('orders',rows);
+ let popup=t.open('orders');assert.deepEqual(popup.querySelectorAll('.column-filter-option label span').map(node=>node.textContent),['A','B']);t.click(toggle(popup));t.click(apply(popup));assert.deepEqual(plain(t.F.exportState()).tables[0].filters,[{column:1,values:['Aberto']}]);assert.deepEqual(t.prepare('orders',rows).map(row=>row.order),['A','B']);
+ popup=t.open('orders',1);assert.deepEqual(popup.querySelectorAll('.column-filter-option label span').map(node=>node.textContent),['Aberto','Fechado']);t.F.close();t.F.importState({tables:[]});t.prepare('orders',rows);popup=t.open('orders');assert.equal(popup.querySelectorAll('.column-filter-option').length,3);
 });
 
-test('hidden selections are retained on cancel/apply and global clear still empties them with no search matches',()=>{
- const t=fixture(),rows=[{order:'A',status:'Aberto'},{order:'B',status:'Aberto'},{order:'C',status:'Fechado'}];
- t.F.importState({tables:[{id:'orders',filters:[{column:0,values:['A','C']},{column:1,values:['Aberto']}],sort:null}]});t.prepare('orders',rows);
- let popup=t.open('orders');assert.match(popup.querySelector('.column-filter-count').textContent,/1 de 2.*1 seleção\(ões\) fora/);
- t.search(popup,'none');t.click(popup.querySelector('[data-filter-none]'));t.click(popup.querySelector('[data-filter-cancel]'));
- assert.deepEqual(plain(t.F.exportState()).tables[0].filters[0].values,['A','C']);
- popup=t.open('orders');t.click(popup.querySelector('[data-filter-apply]'));assert.deepEqual(plain(t.F.exportState()).tables[0].filters[0].values,['A','C']);
- popup=t.open('orders');t.search(popup,'none');t.click(popup.querySelector('[data-filter-none]'));t.click(popup.querySelector('[data-filter-apply]'));
- assert.deepEqual(t.prepare('orders',rows),[]);assert.deepEqual(plain(t.F.exportState()).tables[0].filters[0].values,[]);
- popup=t.open('orders');assert.equal(popup.querySelectorAll('.column-filter-option').length,2,'Zero selected still lets users recover through this column');
+test('hidden selections survive ordinary Apply, but explicit search replaces them and never expands a no-result query',()=>{
+ const t=fixture(),rows=[{order:'A',status:'Aberto'},{order:'B',status:'Aberto'},{order:'C',status:'Fechado'}];t.F.importState({tables:[{id:'orders',filters:[{column:0,values:['A','C']},{column:1,values:['Aberto']}],sort:null}]});t.prepare('orders',rows);
+ let popup=t.open('orders');assert.match(popup.querySelector('.column-filter-count').textContent,/1 de 2.*1 seleção\(ões\) fora/);t.click(apply(popup));assert.deepEqual(plain(t.F.exportState()).tables[0].filters[0].values,['A','C']);popup=t.open('orders');t.search(popup,'missing');t.click(apply(popup));assert.deepEqual(plain(t.F.exportState()).tables[0].filters[0].values,['A','C']);t.search(popup,'A');t.click(apply(popup));assert.deepEqual(plain(t.F.exportState()).tables[0].filters[0].values,['A']);
 });
 
-test('an empty related facet cannot silently erase an intentional empty selection',()=>{
- const t=fixture(),rows=[{order:'A',status:'Aberto'}];
- t.F.importState({tables:[{id:'orders',filters:[{column:0,values:[]},{column:1,values:['Fechado']}],sort:null}]});t.prepare('orders',rows);
- const popup=t.open('orders');assert.equal(popup.querySelectorAll('.column-filter-option').length,0);assert.match(popup.querySelector('.column-filter-options').textContent,/demais filtros/);
- t.click(popup.querySelector('[data-filter-apply]'));assert.deepEqual(plain(t.F.exportState()).tables[0].filters,[{column:0,values:[]},{column:1,values:['Fechado']}]);
+test('explicit checkbox deselection can produce zero rows; an empty related facet preserves that filter',()=>{
+ const t=fixture(),rows=[{order:'A',status:'Aberto'}];t.prepare('orders',rows);let popup=t.open('orders');setCheck(popup,'A',false);t.click(apply(popup));assert.deepEqual(t.prepare('orders',rows),[]);assert.deepEqual(plain(t.F.exportState()).tables[0].filters,[{column:0,values:[]}]);
+ t.F.importState({tables:[{id:'orders',filters:[{column:0,values:[]},{column:1,values:['Fechado']}],sort:null}]});t.prepare('orders',rows);popup=t.open('orders');assert.equal(popup.querySelectorAll('.column-filter-option').length,0);assert.match(popup.querySelector('.column-filter-options').textContent,/demais filtros/);t.click(apply(popup));assert.deepEqual(plain(t.F.exportState()).tables[0].filters,[{column:0,values:[]},{column:1,values:['Fechado']}]);
+});
+
+test('first manual edit during an initially-all search drops invisible outside selections',()=>{
+ const t=fixture(),rows=['Alpha 1','Alpha 2','Beta'].map(order=>({order,status:'Aberto'}));t.prepare('orders',rows);const popup=t.open('orders');t.search(popup,'Alpha');setCheck(popup,'Alpha 1',false);t.click(apply(popup));assert.deepEqual(t.prepare('orders',rows).map(row=>row.order),['Alpha 2']);
+});
+
+test('compact popup has search first, two footer actions and collapsed optional sorting',()=>{
+ const t=fixture();t.prepare('orders',[{order:'A',status:'Aberto'}]);const popup=t.open('orders');assert.equal(popup.children[0].className,'filter-search-label');assert.equal(popup.querySelectorAll('.column-filter-footer button').length,2);assert.equal(popup.querySelector('.column-filter-title'),null);assert.equal(popup.querySelector('.column-filter-only'),null);assert.equal(popup.querySelector('.column-sort-disclosure').hasAttribute('open'),false);assert.equal(popup.style.width,'220px');assert.equal(apply(popup).textContent,'Aplicar');
 });

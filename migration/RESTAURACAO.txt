@@ -23,6 +23,9 @@ CONTEÚDO
   correção, com autor, data e revisão. As chaves devem ser preservadas exatamente.
 • dados/cadastros-perfis.json: administradores, solicitações, perfis, status e
   auditoria de acesso preservados, sem segredos de autenticação.
+• dados/campos-manuais-materiais.json: volumes, frete, observações e acordos
+  informados por ano nos materiais, com revisão e autoria. Backups antigos
+  podem não conter esse arquivo; a restauração não inventa esses valores.
 • MANIFESTO.json: data de captura, revisões, ETags, contagens e checksums SHA-256.
 
 Um objeto que não existia no armazenamento aparece como JSON null e
@@ -48,7 +51,7 @@ Se houver erro de checksum, arquivo ausente ou estrutura inválida, interrompa
 a migração e obtenha outro ZIP. Não edite o manifesto para contornar erros.
 Os checksums detectam corrupção; não substituem a confiança na origem do ZIP.
 
-Opcionalmente, prepare os três objetos para a ferramenta de armazenamento:
+Opcionalmente, prepare os objetos privados para a ferramenta de armazenamento:
 
     node migration/restore-data.mjs .. --prepare ../objetos-para-restaurar
 
@@ -95,11 +98,12 @@ Se usar importação direta pela ferramenta da hospedagem, siga upload-plan.json
   bdName, controlName e asOf, exatamente como no plano.
 • private/correction-progress-v1.json = acompanhamento-correcoes.json.
 • private/access-v3.json = cadastros-perfis.json.
+• private/material-inputs-v1.json = campos-manuais-materiais.json, se presente.
 Não crie objetos present:false. Não importe outros caminhos, especialmente
 private/sessions ou private/rates. Não importe ambientes, cookies ou hashes de
-links administrativos antigos. Não disponibilize esses três objetos como assets.
+links administrativos antigos. Não disponibilize esses objetos como assets.
 
-R2 não oferece transação conjunta entre os três objetos. Se uma importação
+R2 não oferece transação conjunta entre os objetos. Se uma importação
 falhar depois de escrever parte deles, mantenha o novo destino sem tráfego,
 confira writtenKeys do erro e use outro bucket novo e vazio. O utilitário não
 apaga registros automaticamente nem repete a restauração sobre um bucket parcial.

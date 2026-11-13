@@ -38,7 +38,7 @@ for(const kind of ['claim','receipt','open','analysis','negotiation','opening'])
  const button=kind==='claim'?t.claims.querySelector('.exec-rank-row'):kind==='receipt'?t.dashboard.querySelector('.exec-kpi-value'):kind==='open'?t.dashboard.querySelectorAll('.exec-kpi')[3].querySelector('button'):t.claims.querySelectorAll('.exec-sla-item button')[['analysis','negotiation','opening'].indexOf(kind)];t.click(button);
  const table=t.content.querySelector('table'),id=table.dataset.tableId,headers=table.querySelectorAll('th');assert(id.startsWith('detail-exec-'));assert.equal(t.content.querySelectorAll('.column-filter-trigger').length,headers.length);
  let popup=t.popup(id,headers.length-1);t.click(popup.querySelector('[data-sort-direction="desc"]'));t.click(popup.querySelector('[data-filter-apply]'));assert.equal(t.content.querySelector('tbody tr td').textContent,'3','raw cents/days/rates determine sort even if formatted values match');
- const supplierColumn=kind==='claim'?3:kind==='receipt'||kind==='open'?1:2;popup=t.popup(id,supplierColumn);t.input(popup.querySelector('input[type=search]'),'Supplier B');t.click(popup.querySelector('.column-filter-only'));
+ const supplierColumn=kind==='claim'?3:kind==='receipt'||kind==='open'?1:2;popup=t.popup(id,supplierColumn);t.input(popup.querySelector('input[type=search]'),'Supplier B');t.click(popup.querySelector('[data-filter-apply]'));
  assert.equal(t.content.querySelectorAll('tbody tr').length,1);assert.equal(t.content.querySelector('tbody tr td').textContent,'2');assert.match(t.content.textContent,/1 de 2 linhas/);assert(t.routed()>=2);
  t.input(t.content.querySelector('#executiveDetailSearch'),'absent');assert.equal(t.content.querySelectorAll('tbody tr').length,0);assert.match(t.content.textContent,/Nenhuma linha neste filtro/);
  t.dialog.close();assert(!t.F.exportState().tables.some(item=>item.id===id));assert(t.F.exportState().tables.some(item=>item.id==='another-view'));assert.equal(JSON.stringify(m),before);
@@ -49,7 +49,7 @@ test('receipt detail combines searchable column filters, date/amount sort and fr
  const dialog=t.document.getElementById('receiptsExecutiveDetail'),id=dialog.querySelector('table').dataset.tableId;assert(id.startsWith('detail-rx-'));assert.equal(dialog.querySelectorAll('.column-filter-trigger').length,9);
  let popup=t.popup(id,6);t.click(popup.querySelector('[data-sort-direction="desc"]'));t.click(popup.querySelector('[data-filter-apply]'));assert.match(dialog.querySelector('tbody tr').textContent,/REF-3/);
  popup=t.popup(id,4);t.click(popup.querySelector('[data-sort-direction="asc"]'));t.click(popup.querySelector('[data-filter-apply]'));assert.match(dialog.querySelector('tbody tr').textContent,/REF-3/,'ISO date values govern ordering');
- popup=t.popup(id,1);t.input(popup.querySelector('input[type=search]'),'Supplier B');t.click(popup.querySelector('.column-filter-only'));assert.equal(dialog.querySelectorAll('tbody tr').length,1);assert.match(dialog.querySelector('tbody tr').textContent,/REF-2/);
+ popup=t.popup(id,1);t.input(popup.querySelector('input[type=search]'),'Supplier B');t.click(popup.querySelector('[data-filter-apply]'));assert.equal(dialog.querySelectorAll('tbody tr').length,1);assert.match(dialog.querySelector('tbody tr').textContent,/REF-2/);
  t.input(dialog.querySelector('#receiptsExecutiveSearch'),'absent');assert.equal(dialog.querySelectorAll('tbody tr').length,0);assert.match(dialog.textContent,/Nenhuma parcela neste filtro/);assert(t.routed()>=3);
  dialog.close();assert(!t.F.exportState().tables.some(item=>item.id===id));assert(t.F.exportState().tables.some(item=>item.id==='detail-cc-procurement'));assert.equal(JSON.stringify(m),before);
 });
@@ -57,7 +57,7 @@ test('receipt detail combines searchable column filters, date/amount sort and fr
 for(const action of ['cleared model','ended session'])test('receipt detail closes and discards private rows on '+action,()=>{
  const t=fixture();t.window.MinervaReceiptsExecutive.render(model());t.click(t.receipts.querySelector('.rx-kpi'));
  const dialog=t.document.getElementById('receiptsExecutiveDetail'),id=dialog.querySelector('table').dataset.tableId;assert(dialog.open);assert.match(dialog.textContent,/REF-2/);
- let popup=t.popup(id,1);t.input(popup.querySelector('input[type=search]'),'Supplier B');t.click(popup.querySelector('.column-filter-only'));assert(t.F.has(id));
+ let popup=t.popup(id,1);t.input(popup.querySelector('input[type=search]'),'Supplier B');t.click(popup.querySelector('[data-filter-apply]'));assert(t.F.has(id));
  if(action==='cleared model')t.window.MinervaReceiptsExecutive.render(null);else t.document.dispatchEvent({type:'minerva:session-updated',detail:null});
  assert.equal(dialog.open,false);assert.equal(dialog.textContent,'');assert.equal(t.receipts.textContent,'');assert(!t.F.has(id));
  t.window.MinervaReceiptsExecutive.handleFilter(id);assert.equal(dialog.textContent,'');assert.equal(dialog.open,false);

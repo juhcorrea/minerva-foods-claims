@@ -70,12 +70,13 @@ function partitionCorrectionProgress(value){
 }
 
 
-/* Private migration snapshot. This module only reads the three operational
+/* Private migration snapshot. This module only reads the allowlisted operational
  * objects below; it deliberately never enumerates the bucket or writes data. */
 const MIGRATION_OBJECTS = Object.freeze([
   {key:'private/report-latest-v1.json', path:'dados/bases-publicadas.json', schemaVersion:1},
   {key:'private/correction-progress-v1.json', path:'dados/acompanhamento-correcoes.json', schemaVersion:1},
   {key:'private/access-v3.json', path:'dados/cadastros-perfis.json', schemaVersion:3},
+  {key:'private/material-inputs-v1.json', path:'dados/campos-manuais-materiais.json', schemaVersion:1},
 ]);
 const migrationEncoder = new TextEncoder();
 
@@ -120,6 +121,39 @@ function migrationProgress(value) {
     entries[key] = migrationPick(record, ['done','updatedAt','updatedBy','updatedByUserId','reportRevision']);
   }
   return {schemaVersion:1, entries};
+}
+
+// Export strips unknown fields; restore rejects them. Both paths use the same
+// bounded validation of the operational values, including cents and nulls.
+function sanitizeMigrationMaterials(value, {rejectUnknown=false}={}) {
+  const allowed=(record,fields)=>{
+    if(!migrationRecord(record)||rejectUnknown&&Object.keys(record).some(key=>!fields.includes(key)))migrationInvalid();
+  };
+  allowed(value,['schemaVersion','revision','periods','updatedAt','updatedBy','updatedByUserId']);
+  if(value.schemaVersion!==1||typeof value.revision!=='string'||!value.revision||!migrationRecord(value.periods)||Object.keys(value.periods).length>101)migrationInvalid();
+  const document=migrationPick(value,['schemaVersion','revision','updatedAt','updatedBy','updatedByUserId']);
+  document.periods=Object.create(null);
+  for(const [year,record]of Object.entries(value.periods)){
+    if(!/^20\d{2}$|^2100$/.test(year))migrationInvalid();
+    allowed(record,['containerTotal','containerFrozen','containerChilled','containerDry','freightUsd','note','agreements']);
+    const values=migrationPick(record,['containerTotal','containerFrozen','containerChilled','containerDry','freightUsd','note']);
+    for(const key of ['containerTotal','containerFrozen','containerChilled','containerDry','freightUsd']){
+      const n=values[key];if(n!==null&&(typeof n!=='number'||!Number.isFinite(n)||n<0||n>1e15||key!=='freightUsd'&&!Number.isSafeInteger(n)))migrationInvalid();
+    }
+    if(typeof values.note!=='string'||values.note.length>1000||!migrationRecord(record.agreements)||Object.keys(record.agreements).length>200)migrationInvalid();
+    values.agreements=Object.create(null);
+    for(const [carrier,months]of Object.entries(record.agreements)){
+      if(!carrier.trim()||carrier.length>160||['__proto__','constructor','prototype'].includes(carrier)||/[\u0000-\u001f]/.test(carrier)||!migrationRecord(months)||Object.keys(months).length>12)migrationInvalid();
+      const counts=Object.create(null);
+      for(const [month,n]of Object.entries(months)){
+        if(!/^(?:[1-9]|1[0-2])$/.test(month)||n!==null&&(typeof n!=='number'||!Number.isSafeInteger(n)||n<0||n>1e9))migrationInvalid();
+        counts[month]=n;
+      }
+      values.agreements[carrier]=counts;
+    }
+    document.periods[year]=values;
+  }
+  return document;
 }
 
 function migrationAcl(value, admins) {
@@ -168,7 +202,7 @@ async function migrationConsistentSnapshot(bucket) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const objects = await Promise.all(MIGRATION_OBJECTS.map(item => migrationRead(bucket, item)));
     // All initial reads finish before all verification reads begin. Stable
-    // ETags establish one shared interval for these three object versions.
+    // ETags establish one shared interval for all operational object versions.
     const verified = await Promise.all(objects.map(item => migrationEtag(bucket, item.key)));
     if (objects.every((item,index) => item.etag === verified[index])) return objects;
   }
@@ -190,18 +224,18 @@ async function buildMigrationFiles({bucket, admins = [], source, now = () => Dat
   const sourceHash = await migrationDigest(sourceData);
   if (source.sha256 !== sourceHash) migrationFail(503, 'MIGRATION_SOURCE_UNAVAILABLE', 'O pacote do código precisa ser conferido antes do backup.');
   const snapshot = await migrationConsistentSnapshot(bucket);
-  const sanitized = snapshot.map((item,index) => item.present ? [migrationReport,migrationProgress,value => migrationAcl(value,admins)][index](item.value) : null);
+  const sanitized = snapshot.map((item,index) => item.present ? [migrationReport,migrationProgress,value => migrationAcl(value,admins),sanitizeMigrationMaterials][index](item.value) : null);
   const files = snapshot.map((item,index) => ({name:item.path, data:migrationJson(sanitized[index])}));
   files.push({name:'codigo-operacional.zip', data:sourceData});
   files.push({name:'RESTAURACAO.txt', data:migrationEncoder.encode(source.restorationInstructions)});
-  const [report,progress,acl] = sanitized;
+  const [report,progress,acl,materials] = sanitized;
   const manifest = {
     schemaVersion:1,
     kind:'minerva-claims-private-migration',
     capturedAt:new Date(now()).toISOString(),
     source:{commitSha:source.commitSha, sha256:sourceHash, fileCount:source.fileCount},
     objects:snapshot.map((item,index) => ({key:item.key, path:item.path, present:item.present, etag:item.etag, schemaVersion:item.present?sanitized[index].schemaVersion:null, revision:item.present?sanitized[index].revision||null:null})),
-    counts:{bdRows:report?Math.max(0,report.bd.length-1):0, controlRows:report?Math.max(0,report.control.length-1):0, correctionEntries:Object.keys(progress?.entries || {}).length, admins:Object.keys(acl?.admins || {}).length, members:Object.keys(acl?.members || {}).length, auditEvents:acl?.audit?.length || 0},
+    counts:{bdRows:report?Math.max(0,report.bd.length-1):0, controlRows:report?Math.max(0,report.control.length-1):0, correctionEntries:Object.keys(progress?.entries || {}).length, admins:Object.keys(acl?.admins || {}).length, members:Object.keys(acl?.members || {}).length, auditEvents:acl?.audit?.length || 0, materialPeriods:Object.keys(materials?.periods || {}).length},
     files:await Promise.all(files.map(async file => ({path:file.name, bytes:file.data.byteLength, sha256:await migrationDigest(file.data)}))),
   };
   files.push({name:'MANIFESTO.json', data:migrationEncoder.encode(JSON.stringify(manifest,null,2)+'\n')});
@@ -302,12 +336,12 @@ function backupValidateManifest(value,origin){
  }
  return value;
 }
-const backupSnapshot=value=>JSON.stringify({reportMeta:value.reportMeta,parts:value.parts,progress:value.progress??null,acl:value.acl??null,source:{sha256:value.source.sha256,fileCount:value.source.fileCount,commitSha:value.source.commitSha,partCount:value.source.partCount,restorationInstructions:value.source.restorationInstructions}});
+const backupSnapshot=value=>JSON.stringify({reportMeta:value.reportMeta,parts:value.parts,progress:value.progress??null,acl:value.acl??null,materialInputs:value.materialInputs??null,source:{sha256:value.source.sha256,fileCount:value.source.fileCount,commitSha:value.source.commitSha,partCount:value.source.partCount,restorationInstructions:value.source.restorationInstructions}});
 async function backupParallel(items,fn){let next=0;await Promise.all(Array.from({length:Math.min(4,items.length)},async()=>{for(;;){const index=next++;if(index>=items.length)return;await fn(items[index],index);}}));}
 async function buildClientBackup({origin,onProgress=()=>{}}){
  const endpoint=backupUrl('/api/client-report/backup','/api/client-report/backup',origin);
  onProgress('Conferindo a publicação e as permissões…');
- const manifest=backupValidateManifest((await backupRead(endpoint,20*1024*1024)).data,origin),initial=backupSnapshot(manifest),pieces=new Map();let loaded=0;
+ const manifest=backupValidateManifest((await backupRead(endpoint,32*1024*1024)).data,origin),initial=backupSnapshot(manifest),pieces=new Map();let loaded=0;
  await backupParallel(manifest.parts,async part=>{
   const {data,bytes}=await backupRead(backupUrl(part.url,'/api/client-report/parts',origin),131072);
   if(await backupDigest(bytes)!==part.sha256||!backupPlain(data)||!Array.isArray(data.rows)||data.rows.length!==part.rowCount)backupFail('Um trecho das bases não passou na conferência de integridade.');
@@ -320,11 +354,11 @@ async function buildClientBackup({origin,onProgress=()=>{}}){
   if(!backupPlain(data)||data.index!==index||typeof data.data!=='string'||!data.data.length||data.data.length>65536||data.data.length%4||!/^[A-Za-z0-9+/]*={0,2}$/.test(data.data)||index<sourceParts.length-1&&data.data.includes('='))backupFail('Um trecho do código de restauração está inválido.');
   sourceParts[index]=data.data;onProgress(`Carregando o código de restauração… ${++loaded} de ${sourceParts.length} trechos`);
  });
- const latest=backupValidateManifest((await backupRead(endpoint,20*1024*1024)).data,origin);if(backupSnapshot(latest)!==initial)backupFail('O painel foi atualizado durante o backup. Tente baixar novamente.');
+ const latest=backupValidateManifest((await backupRead(endpoint,32*1024*1024)).data,origin);if(backupSnapshot(latest)!==initial)backupFail('O painel foi atualizado durante o backup. Tente baixar novamente.');
  let sourceData;try{sourceData=Uint8Array.from(atob(sourceParts.join('')),char=>char.charCodeAt(0));}catch{backupFail('O código de restauração está inválido.');}
  if(await backupDigest(sourceData)!==manifest.source.sha256)backupFail('O código de restauração não passou na conferência de integridade.');
  onProgress('Verificando os arquivos e preparando o ZIP…');
- const objects=new Map([['private/report-latest-v1.json',report],['private/correction-progress-v1.json',manifest.progress??null],['private/access-v3.json',manifest.acl??null]]);
+ const objects=new Map([['private/report-latest-v1.json',report],['private/correction-progress-v1.json',manifest.progress??null],['private/access-v3.json',manifest.acl??null],['private/material-inputs-v1.json',manifest.materialInputs??null]]);
  const tags=new Map(await Promise.all([...objects].map(async([key,value])=>[key,value===null?null:await backupDigest(backupEncoder.encode(JSON.stringify(value)))])));
  const bucket={get:async key=>objects.get(key)==null?null:{etag:tags.get(key),json:async()=>objects.get(key)},head:async key=>objects.get(key)==null?null:{etag:tags.get(key)}};
  const built=await buildMigrationFiles({bucket,source:{...manifest.source,data:sourceData},now:()=>Date.parse(manifest.capturedAt)});

@@ -1,10 +1,11 @@
 import {CORRECTION_PROGRESS_LEGACY_KEY,CorrectionProgressError,readCorrectionProgress,readCorrectionProgressMetadata} from './correction-progress.js';
-/* Private migration snapshot. This module only reads the three operational
+/* Private migration snapshot. This module only reads the allowlisted operational
  * objects below; it deliberately never enumerates the bucket or writes data. */
 const MIGRATION_OBJECTS = Object.freeze([
   {key:'private/report-latest-v1.json', path:'dados/bases-publicadas.json', schemaVersion:1},
   {key:'private/correction-progress-v1.json', path:'dados/acompanhamento-correcoes.json', schemaVersion:1},
   {key:'private/access-v3.json', path:'dados/cadastros-perfis.json', schemaVersion:3},
+  {key:'private/material-inputs-v1.json', path:'dados/campos-manuais-materiais.json', schemaVersion:1},
 ]);
 const migrationEncoder = new TextEncoder();
 
@@ -49,6 +50,39 @@ function migrationProgress(value) {
     entries[key] = migrationPick(record, ['done','updatedAt','updatedBy','updatedByUserId','reportRevision']);
   }
   return {schemaVersion:1, entries};
+}
+
+// Export strips unknown fields; restore rejects them. Both paths use the same
+// bounded validation of the operational values, including cents and nulls.
+export function sanitizeMigrationMaterials(value, {rejectUnknown=false}={}) {
+  const allowed=(record,fields)=>{
+    if(!migrationRecord(record)||rejectUnknown&&Object.keys(record).some(key=>!fields.includes(key)))migrationInvalid();
+  };
+  allowed(value,['schemaVersion','revision','periods','updatedAt','updatedBy','updatedByUserId']);
+  if(value.schemaVersion!==1||typeof value.revision!=='string'||!value.revision||!migrationRecord(value.periods)||Object.keys(value.periods).length>101)migrationInvalid();
+  const document=migrationPick(value,['schemaVersion','revision','updatedAt','updatedBy','updatedByUserId']);
+  document.periods=Object.create(null);
+  for(const [year,record]of Object.entries(value.periods)){
+    if(!/^20\d{2}$|^2100$/.test(year))migrationInvalid();
+    allowed(record,['containerTotal','containerFrozen','containerChilled','containerDry','freightUsd','note','agreements']);
+    const values=migrationPick(record,['containerTotal','containerFrozen','containerChilled','containerDry','freightUsd','note']);
+    for(const key of ['containerTotal','containerFrozen','containerChilled','containerDry','freightUsd']){
+      const n=values[key];if(n!==null&&(typeof n!=='number'||!Number.isFinite(n)||n<0||n>1e15||key!=='freightUsd'&&!Number.isSafeInteger(n)))migrationInvalid();
+    }
+    if(typeof values.note!=='string'||values.note.length>1000||!migrationRecord(record.agreements)||Object.keys(record.agreements).length>200)migrationInvalid();
+    values.agreements=Object.create(null);
+    for(const [carrier,months]of Object.entries(record.agreements)){
+      if(!carrier.trim()||carrier.length>160||['__proto__','constructor','prototype'].includes(carrier)||/[\u0000-\u001f]/.test(carrier)||!migrationRecord(months)||Object.keys(months).length>12)migrationInvalid();
+      const counts=Object.create(null);
+      for(const [month,n]of Object.entries(months)){
+        if(!/^(?:[1-9]|1[0-2])$/.test(month)||n!==null&&(typeof n!=='number'||!Number.isSafeInteger(n)||n<0||n>1e9))migrationInvalid();
+        counts[month]=n;
+      }
+      values.agreements[carrier]=counts;
+    }
+    document.periods[year]=values;
+  }
+  return document;
 }
 
 function migrationAcl(value, admins) {
@@ -97,7 +131,7 @@ async function migrationConsistentSnapshot(bucket) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const objects = await Promise.all(MIGRATION_OBJECTS.map(item => migrationRead(bucket, item)));
     // All initial reads finish before all verification reads begin. Stable
-    // ETags establish one shared interval for these three object versions.
+    // ETags establish one shared interval for all operational object versions.
     const verified = await Promise.all(objects.map(item => migrationEtag(bucket, item.key)));
     if (objects.every((item,index) => item.etag === verified[index])) return objects;
   }
@@ -119,18 +153,18 @@ export async function buildMigrationFiles({bucket, admins = [], source, now = ()
   const sourceHash = await migrationDigest(sourceData);
   if (source.sha256 !== sourceHash) migrationFail(503, 'MIGRATION_SOURCE_UNAVAILABLE', 'O pacote do código precisa ser conferido antes do backup.');
   const snapshot = await migrationConsistentSnapshot(bucket);
-  const sanitized = snapshot.map((item,index) => item.present ? [migrationReport,migrationProgress,value => migrationAcl(value,admins)][index](item.value) : null);
+  const sanitized = snapshot.map((item,index) => item.present ? [migrationReport,migrationProgress,value => migrationAcl(value,admins),sanitizeMigrationMaterials][index](item.value) : null);
   const files = snapshot.map((item,index) => ({name:item.path, data:migrationJson(sanitized[index])}));
   files.push({name:'codigo-operacional.zip', data:sourceData});
   files.push({name:'RESTAURACAO.txt', data:migrationEncoder.encode(source.restorationInstructions)});
-  const [report,progress,acl] = sanitized;
+  const [report,progress,acl,materials] = sanitized;
   const manifest = {
     schemaVersion:1,
     kind:'minerva-claims-private-migration',
     capturedAt:new Date(now()).toISOString(),
     source:{commitSha:source.commitSha, sha256:sourceHash, fileCount:source.fileCount},
     objects:snapshot.map((item,index) => ({key:item.key, path:item.path, present:item.present, etag:item.etag, schemaVersion:item.present?sanitized[index].schemaVersion:null, revision:item.present?sanitized[index].revision||null:null})),
-    counts:{bdRows:report?Math.max(0,report.bd.length-1):0, controlRows:report?Math.max(0,report.control.length-1):0, correctionEntries:Object.keys(progress?.entries || {}).length, admins:Object.keys(acl?.admins || {}).length, members:Object.keys(acl?.members || {}).length, auditEvents:acl?.audit?.length || 0},
+    counts:{bdRows:report?Math.max(0,report.bd.length-1):0, controlRows:report?Math.max(0,report.control.length-1):0, correctionEntries:Object.keys(progress?.entries || {}).length, admins:Object.keys(acl?.admins || {}).length, members:Object.keys(acl?.members || {}).length, auditEvents:acl?.audit?.length || 0, materialPeriods:Object.keys(materials?.periods || {}).length},
     files:await Promise.all(files.map(async file => ({path:file.name, bytes:file.data.byteLength, sha256:await migrationDigest(file.data)}))),
   };
   files.push({name:'MANIFESTO.json', data:migrationEncoder.encode(JSON.stringify(manifest,null,2)+'\n')});

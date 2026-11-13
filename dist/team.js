@@ -13,6 +13,8 @@
     const opts = options || {};
     if (opts.allYears !== true && Array.isArray(opts.years) && opts.years.length) params.set('years', [...new Set(opts.years.map(Number).filter(Number.isInteger))].sort((a,b)=>a-b).join(','));
     if (opts.allYears === true) params.set('allYears', '1');
+    const months = Array.isArray(opts.months) ? [...new Set(opts.months.map(Number).filter(month => Number.isInteger(month) && month >= 1 && month <= 12))].sort((a,b)=>a-b) : [];
+    if (months.length && months.length < 12) params.set('months', months.join(','));
     if (opts.asOf) params.set('asOf', String(opts.asOf));
     for(const [key,plural] of [['supplier','suppliers'],['operation','operations'],['controlOperation','controlOperations'],['claimStatus','claimStatuses']]){
       const value=opts[plural]??opts[key],values=Array.isArray(value)?value:value?[value]:[];
@@ -680,7 +682,21 @@
     catch(error){if(!current())throw cancelled();throw error;}
   }
 
+  async function getMaterialInputs(){
+    const version=sessionVersion,user=session?.userId;
+    if(!isApprovedSession(session))throw new Error('Entre para consultar os materiais.');
+    const result=await api('/api/material-inputs');
+    if(version!==sessionVersion||user!==session?.userId||!isApprovedSession(session))throw Object.assign(new Error('O acesso mudou.'),{name:'AbortError'});
+    return result;
+  }
+  async function saveMaterialInputs(payload){
+    const version=sessionVersion,user=session?.userId;
+    if(!isApprovedSession(session)||!canUpdateBases())throw new Error('Somente Admin ou Atualizar bases pode salvar os campos manuais.');
+    const result=await api('/api/material-inputs',{method:'POST',body:JSON.stringify(payload)});
+    if(version!==sessionVersion||user!==session?.userId||!isApprovedSession(session)||!canUpdateBases())throw Object.assign(new Error('O acesso mudou.'),{name:'AbortError'});
+    return result;
+  }
   createUI();
-  global.MinervaTeam = {refresh:() => {reportCache.clear();return loadReport(app.getOptions());}, setCorrectionProgress, openMembers, copyLink, logout, getProfile:() => {const profile=publicProfile(session);return profile?{...profile,id:session.userId||''}:null;}};
+  global.MinervaTeam = {refresh:() => {reportCache.clear();return loadReport(app.getOptions());}, setCorrectionProgress, getMaterialInputs, saveMaterialInputs, openMembers, copyLink, logout, getProfile:() => {const profile=publicProfile(session);return profile?{...profile,id:session.userId||''}:null;}};
   boot();
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -97,6 +97,26 @@ test('equivalent filter sets share one query and all-years ignores inactive year
  assert.equal(reportQuery({...first,allYears:true}),reportQuery({...second,years:[2020],allYears:true}));
  const h=harness();await h.load(first);await h.load(second);assert.equal(h.requests[1],'/api/report/meta');assert.equal(h.applied[1],h.applied[0]);
 });
+
+test('month scopes have canonical cache keys and all twelve months mean all months',()=>{
+ const all={...opts,months:[]},november={...opts,months:[11]},pair={...opts,months:[11,2,11]};
+ assert.equal(reportQuery(opts),reportQuery(all));
+ assert.equal(reportQuery(all),reportQuery({...opts,months:Array.from({length:12},(_,index)=>index+1)}));
+ assert.notEqual(reportQuery(all),reportQuery(november));
+ assert.notEqual(reportQuery(november),reportQuery({...opts,months:[2]}));
+ assert.equal(reportQuery(pair),reportQuery({...opts,months:[2,11]}));
+ assert.equal(new URLSearchParams(reportQuery(pair)).get('months'),'2,11');
+});
+
+test('changing months recalculates browser models while revisiting a month checks metadata before reuse',async()=>{
+ const h=harness(),jobs=[];h.context.session.analysisMode='browser';
+ h.context.global.MinervaClientAnalysis={load:async(options)=>{jobs.push(options);return {...payload(),monthScope:options.months};}};
+ await h.load({...opts,months:[]});const annual=h.applied.at(-1);
+ await h.load({...opts,months:[11]});const november=h.applied.at(-1);
+ assert.equal(jobs.length,2);assert.deepEqual(jobs[1].months,[11]);assert.notEqual(november,annual);
+ await h.load({...opts,months:[]});assert.equal(jobs.length,2);assert.equal(h.applied.at(-1),annual);assert.deepEqual(h.requests,['/api/report/meta']);
+ await h.load({...opts,months:[11]});assert.equal(jobs.length,2);assert.equal(h.applied.at(-1),november);
+});
 test('metadata access failure never displays the cached report',async()=>{
  const h=harness();await h.load();h.deny();assert.equal(await h.load(),false);assert.equal(h.applied.length,1);assert.equal(h.context.loadingReport,false);assert.equal(h.messages.at(-1)[1],true);
 });

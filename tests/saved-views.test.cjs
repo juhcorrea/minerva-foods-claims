@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),{webcrypto}=require('node:crypto');
 const {repository,identityKey}=require('../dist/saved-views.js');
-const source=fs.readFileSync(require.resolve('../dist/app.js'),'utf8'),start=source.indexOf('  function sanitizeView('),end=source.indexOf('  window.MinervaApp=',start),yearHelpers=source.slice(source.indexOf('  function cleanYears'),source.indexOf('  function requestedYearScope')),scopeHelpers=source.slice(source.indexOf('  function tableOwner'),source.indexOf('  function setupSupplierStatuses')),code=yearHelpers+scopeHelpers+source.slice(start,end)+'\nthis.api={sanitizeView,captureView,restoreView};';
+const source=fs.readFileSync(require.resolve('../dist/app.js'),'utf8'),start=source.indexOf('  function sanitizeView('),end=source.indexOf('  window.MinervaApp=',start),yearHelpers=source.slice(source.indexOf('  function cleanYears'),source.indexOf('  function requestedYearScope')),scopeHelpers=source.slice(source.indexOf('  function tableOwner'),source.indexOf('  function setupSupplierStatuses')),code=yearHelpers+scopeHelpers+source.slice(source.indexOf('  function currentMaterialsTab'),source.indexOf('  function renderView('))+source.slice(start,end)+'\nthis.api={sanitizeView,captureView,restoreView};';
 const plain=value=>JSON.parse(JSON.stringify(value));
 function fixture(){
  const years=[{value:'2025',checked:false},{value:'2026',checked:true}],nodes=new Map(),calls=[],renders=[],storedTables=[];
@@ -10,7 +10,7 @@ function fixture(){
  const applied={supplierSearch:'',installmentSearch:'',typeFilter:[],statusFilter:[],correctionSearch:'',analystFilter:[],correctionProgressFilter:[]},state={view:'claims',model:{meta:{},rows:[{secret:'RAW-MODEL-MARKER',amount:110}]},appliedGlobal:{years:[2026],asOf:'2026-11-06',suppliers:['Fornecedor A'],operations:['Operação A'],controlOperations:['Operação B'],correctionScenario:'original'},supplierMode:'summary',sort:'claimed',chartMonth:'2026-03'};
  let liveValue=110,claimState={claims:{country:['País A','País B'],query:'ABC'},procurement:{pending:['Aguardando']},supplier:'Fornecedor A'};
  const F={clear(){storedTables.length=0;},sanitizeState:input=>({tables:(input?.tables||[]).map(t=>({id:String(t.id),filters:(t.filters||[]).map(f=>({column:f.column,values:f.values})),sort:t.sort||null}))}),exportState:()=>({tables:[{id:'cc-claims-table',filters:[{column:1,values:['País A']}],sort:{column:6,direction:'desc'}}]}),importState:s=>storedTables.push(plain(s))};
- const c={state,applied,F,document:{querySelectorAll:()=>years},window:{MinervaClaimControl:{getViewState:()=>claimState,setViewState:v=>claimState=plain(v)},MinervaAnalysts:{getViewState:()=>({year:2026}),setViewState(){}},MinervaMeetings:{getViewState:()=>({year:2026,month:3}),setViewState(){}}},$:node,asList:value=>(Array.isArray(value)?value:value?[value]:[]).map(String),appliedGlobalValues:key=>state.appliedGlobal[key+'s'],currentScenario:()=>state.appliedGlobal.correctionScenario,Option:function(label,value){this.value=value;this.text=label;},populateOperations(){},setSelected:(id,values)=>{const el=typeof id==='string'?node(id):id;for(const o of el.options)o.selected=values.includes(o.value);},view:name=>{assert(state.restoringView);state.view=name;},async analyze(){calls.push({view:state.view,suppliers:node('supplierFilter').selectedOptions.map(x=>x.value),scenario:node('correctionScenario').value});state.model={meta:{},rows:[{amount:liveValue}]};},render:()=>renders.push(plain(state.model)),say(){}};
+ const c={state,applied,F,document:{querySelectorAll:()=>years},window:{MinervaClaimControl:{getViewState:()=>claimState,setViewState:v=>claimState=plain(v)},MinervaAnalysts:{getViewState:()=>({year:2026}),setViewState(){}},MinervaMeetings:{getViewState:()=>({year:2026,month:3}),setViewState(){}}},$:node,asList:value=>(Array.isArray(value)?value:value?[value]:[]).map(String),appliedGlobalValues:key=>state.appliedGlobal[key+'s'],currentScenario:()=>state.appliedGlobal.correctionScenario,Option:function(label,value){this.value=value;this.text=label;},populateOperations(){},setSelected:(id,values)=>{const el=typeof id==='string'?node(id):id;for(const o of el.options)o.selected=values.map(String).includes(o.value);},view:name=>{assert(state.restoringView);state.view=name;},async analyze(){calls.push({view:state.view,suppliers:node('supplierFilter').selectedOptions.map(x=>x.value),scenario:node('correctionScenario').value});state.model={meta:{},rows:[{amount:liveValue}]};},render:()=>renders.push(plain(state.model)),say(){}};
  c.document.querySelectorAll=selector=>selector.includes(':checked')?years.filter(year=>year.checked):years;c.populateClaimYears=()=>{};c.populateSupplierYears=()=>{c.supplierYearOptions=plain(state.supplierYears);};c.viewScopeMatches=()=>true;const analyze=c.analyze;c.analyze=async()=>{await analyze();return true;};
  vm.createContext(c);vm.runInContext(code,c);return{api:c.api,state,applied,calls,renders,storedTables,node,years,context:c,setLive:value=>liveValue=value,get claimState(){return claimState;}};
 }
@@ -74,6 +74,23 @@ test('overview saved views preserve explicit all-years scope instead of collapsi
  const saved=plain(f.api.captureView());assert.equal(saved.global.allYears,true);assert.deepEqual(saved.global.years,[2018,2020,2026]);
  await f.api.restoreView(saved);assert.equal(f.calls.length,1);assert.deepEqual(f.years.map(year=>year.checked),[false,false]);
  const legacy=plain(f.api.sanitizeView({global:{years:[2026]}}));assert.equal(legacy.global.allYears,false);
+});
+
+test('saved overview retains applied months, normalizes all twelve to Todos and never imports them into another page',async()=>{
+ const f=fixture();f.state.view='overview';f.state.appliedGlobal.months=[11,2];const select=f.node('globalMonthFilter');select.multiple=true;select.options=Array.from({length:12},(_,i)=>({value:String(i+1),selected:i===8}));
+ const saved=plain(f.api.captureView());assert.deepEqual(saved.global.months,[2,11],'saved views capture the applied report, not September draft');
+ await f.api.restoreView(saved);assert.deepEqual(select.selectedOptions.map(option=>option.value),['2','11']);
+ assert.deepEqual(plain(f.api.sanitizeView({...saved,global:{...saved.global,months:[0,11,13,2,2]}}).global.months),[2,11]);
+ assert.deepEqual(plain(f.api.sanitizeView({...saved,global:{...saved.global,months:Array.from({length:12},(_,i)=>i+1)}}).global.months),[]);
+ assert.deepEqual(plain(f.api.sanitizeView({...saved,view:'suppliers'}).global.months),[]);assert.deepEqual(plain(f.api.sanitizeView({view:'overview',global:{years:[2026]}}).global.months),[],'legacy view uses every month');
+});
+
+test('Materials presets restore the selected report and only sanitized configuration without changing FUP filters',async()=>{
+ const f=fixture(),calls=[];f.state.view='procurement';f.state.materialsTab='directors';f.state.model.meta={allYears:true,years:[2020,2026]};f.state.appliedGlobal.allYears=true;
+ f.context.window.MinervaMaterials={sanitizeViewState:value=>({directors:{years:Array.isArray(value?.directors?.years)?value.directors.years:[]}}),getViewState:()=>({directors:{years:[2025,2026]},data:'PRIVATE-ROW-MARKER'}),setViewState:(value,tab)=>calls.push({value:plain(value),tab})};
+ f.context.selectMaterials=tab=>{f.state.materialsTab=tab;f.context.view('procurement');};const saved=plain(f.api.captureView());assert.equal(saved.materialsTab,'directors');assert.deepEqual(saved.materials,{directors:{years:[2025,2026]}});assert(!JSON.stringify(saved).includes('PRIVATE-ROW-MARKER'));
+ saved.claims.procurement.pending=['Do not change FUP'];f.state.materialsTab='carriers';await f.api.restoreView(saved);assert.equal(f.state.materialsTab,'directors');assert.deepEqual(calls,[{value:saved.materials,tab:'directors'}]);assert.deepEqual(f.claimState.procurement.pending,['Aguardando']);
+ assert.equal(f.api.sanitizeView({view:'procurement'}).materialsTab,'fup');assert.equal(f.api.sanitizeView({view:'procurement',materialsTab:'invalid'}).materialsTab,'fup');
 });
 
 test('restoring a claim view preserves procurement choices and does not finish on a different tab',async()=>{

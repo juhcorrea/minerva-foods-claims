@@ -20,6 +20,7 @@ const files = [
   'section-collapse.css', 'section-collapse.js', 'multi-select.css', 'multi-select.js',
   'saved-views.css', 'saved-views.js',
   'receipts-executive.css', 'receipts-executive.js',
+  'materials.css', 'materials-data.js', 'materials.js',
   'meetings.js', 'engine.js', 'app.js', 'vendor/xlsx.full.min.js',
   'vendor/pptxgen.bundle.js', 'vendor/pptxgen.LICENSE.txt',
   'assets/minerva-logo.png', 'assets/minerva-monogram.svg', 'assets/minerva-cover.png',

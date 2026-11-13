@@ -1,10 +1,12 @@
 // Offline validation and controlled R2 restore. This module is not an HTTP route.
 import {CORRECTION_PROGRESS_LEGACY_KEY,CORRECTION_PROGRESS_OBJECT_BYTES,partitionCorrectionProgress} from '../worker/correction-progress.js';
+import {sanitizeMigrationMaterials} from '../worker/migration.js';
 const enc = new TextEncoder();
 const definitions = Object.freeze([
   {key:'private/report-latest-v1.json',path:'dados/bases-publicadas.json',schemaVersion:1},
   {key:'private/correction-progress-v1.json',path:'dados/acompanhamento-correcoes.json',schemaVersion:1},
   {key:'private/access-v3.json',path:'dados/cadastros-perfis.json',schemaVersion:3},
+  {key:'private/material-inputs-v1.json',path:'dados/campos-manuais-materiais.json',schemaVersion:1,optional:true},
 ]);
 const allowedPaths = new Set([...definitions.map(x=>x.path),'codigo-operacional.zip','RESTAURACAO.txt']);
 const isRecord = x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
@@ -23,6 +25,8 @@ function validateObject(value,definition){
     mapValues(value.members,(v,k)=>{const {identity,emailVerified,...labels}=v;fields(labels,['id','name','email','status','role','requestCode','requestedAt','approvedAt','approvedBy','approvedById','revokedAt','revokedBy','updatedAt'],'Cadastro');requireValue(v.id===k,'Cadastro: ID divergente.');requireValue(['pending','approved','revoked','rejected'].includes(v.status),'Cadastro: status inválido.');requireValue(v.role===undefined||['viewer','reviewer','editor','admin'].includes(v.role),'Cadastro: perfil inválido.');if(identity!==undefined){fields(identity,['provider','issuer','subject','email'],'Identidade verificada');requireValue(emailVerified===true&&identity.provider==='cloudflare-access'&&typeof identity.issuer==='string'&&/^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.cloudflareaccess\.com$/.test(identity.issuer)&&typeof identity.subject==='string'&&!!identity.subject.trim()&&typeof identity.email==='string'&&identity.email.includes('@'),'Identidade verificada: campos inválidos.');}else requireValue(emailVerified===undefined,'Cadastro: confirmação sem identidade.');},'Cadastros');
     requireValue(Array.isArray(value.audit),'Cadastros: auditoria inválida.');
     value.audit.forEach(v=>fields(v,['at','actorId','actorName','action','target','previousStatus','previousRole','role'],'Auditoria'));
+  }else if(definition.key.includes('material-inputs')){
+    sanitizeMigrationMaterials(value,{rejectUnknown:true});
   }else if(definition.key.includes('correction-progress')){
     keys(value,['schemaVersion','entries'],'Correções');
     mapValues(value.entries,(v,k)=>{requireValue(/^[a-f0-9]{64}$/.test(k),'Correções: chave inválida.');fields(v,['done','updatedAt','updatedBy','updatedByUserId','reportRevision'],'Correção');requireValue(typeof v.done==='boolean','Correções: marcação inválida.');},'Correções');
@@ -41,11 +45,15 @@ function dataBytes(value){requireValue(typeof value==='string'||value instanceof
 export async function validateMigrationBackup(manifest,files){
   requireValue(manifest?.schemaVersion===1&&manifest.kind==='minerva-claims-private-migration','Manifesto de migração inválido.');
   requireValue(Array.isArray(manifest.files)&&Array.isArray(manifest.objects),'Listas do manifesto ausentes.');
-  requireValue(manifest.objects.length===definitions.length,'O manifesto precisa descrever os três objetos privados.');
-  requireValue(manifest.files.length===allowedPaths.size,'O pacote precisa conter código, instruções e três arquivos de dados.');
+  // Older backups predate manual material inputs. They remain restorable;
+  // never invent values for a document that was not present in that version.
+  const selected=definitions.filter(item=>!item.optional||manifest.objects.some(object=>object.key===item.key));
+  const expectedPaths=new Set([...selected.map(item=>item.path),'codigo-operacional.zip','RESTAURACAO.txt']);
+  requireValue(manifest.objects.length===selected.length,'Objeto de armazenamento desconhecido, ausente ou duplicado.');
+  requireValue(manifest.files.length===expectedPaths.size,'O pacote precisa conter código, instruções e todos os arquivos de dados declarados.');
   const bytes=new Map(),seen=new Set();
   for(const file of manifest.files){
-    requireValue(allowedPaths.has(file.path)&&!seen.has(file.path),'Arquivo desconhecido ou duplicado no manifesto.');seen.add(file.path);
+    requireValue(expectedPaths.has(file.path)&&!seen.has(file.path),'Arquivo desconhecido ou duplicado no manifesto.');seen.add(file.path);
     const supplied=files instanceof Map?files.get(file.path):files?.[file.path];
     const data=dataBytes(supplied);
     requireValue(Number.isSafeInteger(file.bytes)&&data.byteLength===file.bytes,`Tamanho divergente: ${file.path}`);
@@ -54,7 +62,7 @@ export async function validateMigrationBackup(manifest,files){
   }
   requireValue(manifest.source?.sha256===manifest.files.find(x=>x.path==='codigo-operacional.zip').sha256,'Checksum do código divergente.');
   const objects=[];
-  for(const definition of definitions){
+  for(const definition of selected){
     const entries=manifest.objects.filter(x=>x.key===definition.key);
     requireValue(entries.length===1&&entries[0].path===definition.path,'Objeto de armazenamento desconhecido ou duplicado.');
     const entry=entries[0];let value;
@@ -82,7 +90,8 @@ export async function loadMigrationBackup(directory){
     return new Uint8Array(await fs.readFile(cursor));
   }
   let manifest;try{manifest=JSON.parse(new TextDecoder().decode(await read('MANIFESTO.json')));}catch{throw new Error('MANIFESTO.json ausente ou inválido.');}
-  const files=new Map();for(const name of allowedPaths)files.set(name,await read(name));
+  requireValue(Array.isArray(manifest.files),'Lista dos arquivos do manifesto ausente.');
+  const files=new Map();for(const {path:name}of manifest.files){requireValue(allowedPaths.has(name),'Arquivo desconhecido no manifesto.');files.set(name,await read(name));}
   return validateMigrationBackup(manifest,files);
 }
 

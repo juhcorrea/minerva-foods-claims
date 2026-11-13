@@ -84,7 +84,8 @@ test('admin receives a private ZIP of published state, not sessions or rates, wi
  assert.match(response.headers.get('content-disposition'),/attachment;.*Minerva-Claims-Migracao-Privada\.zip/);
  assert.match(response.headers.get('cache-control'),/no-store/);
  const entries=unzipStored(await response.arrayBuffer());
- for(const name of ['codigo-operacional.zip','dados/bases-publicadas.json','dados/acompanhamento-correcoes.json','dados/cadastros-perfis.json','MANIFESTO.json','RESTAURACAO.txt'])assert(entries.has(name),name);
+ for(const name of ['codigo-operacional.zip','dados/bases-publicadas.json','dados/acompanhamento-correcoes.json','dados/cadastros-perfis.json','dados/campos-manuais-materiais.json','MANIFESTO.json','RESTAURACAO.txt'])assert(entries.has(name),name);
+ assert.equal(JSON.parse(entries.get('dados/campos-manuais-materiais.json')),null);
  const report=JSON.parse(entries.get('dados/bases-publicadas.json'));
  assert.equal(report.revision,'report-demo');assert.equal(report.bd[1][0],'Dado publicado de exemplo');assert.equal(report.control[1][0],125);
  const progress=JSON.parse(entries.get('dados/acompanhamento-correcoes.json'));

@@ -1,4 +1,5 @@
 import {cleanup} from './client-report-cleanup.js';
+import {sanitizeMigrationMaterials} from './migration.js';
 // Small authenticated storage operations for browser-side analysis. Source
 // worksheets stay private; readers receive only the fields used by the engine.
 export const CLIENT_REPORT_PROJECTION_VERSION = 3;
@@ -210,7 +211,8 @@ export function createClientReportHandler(deps){
    const original=url.pathname.endsWith('/backup');if(original&&access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode baixar o backup privado.');
    const {value:saved}=await published(bucket),tracking=original?await readCorrectionProgress(bucket):await progress(bucket);
    if(!original)requireCurrentProjection(saved);
-   const payload={...meta(saved),schemaVersion:2,projectionVersion:saved?projectionVersion(saved):CLIENT_REPORT_PROJECTION_VERSION,parts:saved?publicParts(saved,original):[],rows:saved?.rows||{bd:0,control:0},progress:original?tracking.value:tracking,analysisMode:'browser',...(original?{capturedAt:stamp(),reportMeta:saved?{schemaVersion:1,revision:saved.revision,updatedAt:saved.updatedAt,updatedBy:saved.updatedBy,updatedByUserId:saved.updatedByUserId,asOf:saved.asOf,files:saved.files}:null,acl:(await readAcl(bucket)).value,source:migrationSource?{sha256:migrationSource.sha256,fileCount:migrationSource.fileCount,commitSha:migrationSource.commitSha,restorationInstructions:migrationSource.restorationInstructions,partCount:Math.ceil(migrationSource.base64.length/65536)}:null}:{})};
+   const materialInputs=original?(await jsonObject(bucket,'private/material-inputs-v1.json')).value:null;
+   const payload={...meta(saved),schemaVersion:2,projectionVersion:saved?projectionVersion(saved):CLIENT_REPORT_PROJECTION_VERSION,parts:saved?publicParts(saved,original):[],rows:saved?.rows||{bd:0,control:0},progress:original?tracking.value:tracking,analysisMode:'browser',...(original?{capturedAt:stamp(),reportMeta:saved?{schemaVersion:1,revision:saved.revision,updatedAt:saved.updatedAt,updatedBy:saved.updatedBy,updatedByUserId:saved.updatedByUserId,asOf:saved.asOf,files:saved.files}:null,acl:(await readAcl(bucket)).value,materialInputs:materialInputs===null?null:sanitizeMigrationMaterials(materialInputs),source:migrationSource?{sha256:migrationSource.sha256,fileCount:migrationSource.fileCount,commitSha:migrationSource.commitSha,restorationInstructions:migrationSource.restorationInstructions,partCount:Math.ceil(migrationSource.base64.length/65536)}:null}:{})};
    if(original)await confirmMutationPermission(bucket,access,['admin']);
    return response(payload);
   }

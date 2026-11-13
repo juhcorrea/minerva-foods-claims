@@ -14,6 +14,7 @@ const ADMIN_IDS = Object.freeze(['owner', 'developer']);
 const ACL_KEY = 'private/access-v3.json';
 const REPORT_KEY = 'private/report-latest-v1.json';
 const CORRECTION_PROGRESS_KEY = 'private/correction-progress-v1.json';
+const MATERIAL_INPUTS_KEY = 'private/material-inputs-v1.json';
 const COOKIE = '__Host-minerva-session';
 const SESSION_DAYS = 30;
 const SESSION_MS = SESSION_DAYS * 86400000;
@@ -74,6 +75,40 @@ function requireCurrentRole(acl,access,allowedRoles){
 async function confirmMutationPermission(bucket,access,allowedRoles=['admin','editor']){
  if(access.admin&&ADMIN_IDS.includes(access.admin.id)&&allowedRoles.includes('admin'))return;
  const{value:acl}=await readAcl(bucket);requireCurrentRole(acl,access,allowedRoles);
+}
+function materialValues(input){
+ if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['containerTotal','containerFrozen','containerChilled','containerDry','freightUsd','note','agreements'].includes(key)))fail(400,'MATERIAL_INVALID','Confira os campos manuais do material.');
+ const value={};
+ for(const key of ['containerTotal','containerFrozen','containerChilled','containerDry','freightUsd']){
+  const n=input[key];
+  if(n==null||n===''){value[key]=null;continue;}
+  if(typeof n!=='number'||!Number.isFinite(n)||n<0||n>1e15||(key!=='freightUsd'&&!Number.isSafeInteger(n)))fail(400,'MATERIAL_INVALID','Informe valores positivos; volumes devem ser inteiros.');
+  value[key]=n;
+ }
+ value.note=safeLabel(input.note,'',1000);value.agreements={};
+ if(input.agreements!==undefined){
+  if(!input.agreements||typeof input.agreements!=='object'||Array.isArray(input.agreements)||Object.keys(input.agreements).length>200)fail(400,'MATERIAL_INVALID','Confira os acordos informados.');
+  for(const [carrier,months]of Object.entries(input.agreements)){
+   if(!carrier.trim()||carrier.length>160||['__proto__','constructor','prototype'].includes(carrier)||/[\u0000-\u001f]/.test(carrier)||!months||typeof months!=='object'||Array.isArray(months)||Object.keys(months).length>12)fail(400,'MATERIAL_INVALID','Confira o armador e os meses dos acordos.');
+   const counts={};for(const [month,n]of Object.entries(months)){if(!/^(?:[1-9]|1[0-2])$/.test(month)||(n!==null&&(typeof n!=='number'||!Number.isSafeInteger(n)||n<0||n>1e9)))fail(400,'MATERIAL_INVALID','Confira a quantidade de acordos por mês.');counts[month]=n;}
+   value.agreements[carrier]=counts;
+  }
+ }
+ return value;
+}
+function materialDocument(value){
+ if(!value)return{schemaVersion:1,revision:null,periods:{},updatedAt:null,updatedBy:null};
+ if(value.schemaVersion!==1||!value.periods||typeof value.periods!=='object'||Array.isArray(value.periods)||typeof value.revision!=='string')fail(503,'MATERIAL_STORAGE_INVALID','Os materiais salvos precisam ser conferidos.');
+ return{schemaVersion:1,revision:value.revision,periods:value.periods,updatedAt:value.updatedAt,updatedBy:actorLabel(value.updatedBy,value.updatedByUserId)};
+}
+async function saveMaterialInputs(bucket,access,body){
+ if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).some(key=>!['revision','year','values'].includes(key))||!Number.isInteger(body.year)||body.year<2000||body.year>2100||(body.revision!==null&&typeof body.revision!=='string'))fail(400,'MATERIAL_INVALID','Informe o ano e a versão dos campos manuais.');
+ const values=materialValues(body.values),found=await jsonObject(bucket,MATERIAL_INPUTS_KEY),previous=materialDocument(found.value);
+ if(body.revision!==previous.revision)fail(409,'MATERIAL_CHANGED','Outra pessoa atualizou os materiais. Recarregue antes de salvar.');
+ await confirmMutationPermission(bucket,access,['admin','editor']);
+ const actor=access.admin||access.member,value={schemaVersion:1,revision:uuid(),periods:{...previous.periods,[body.year]:values},updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id};
+ if(!await putConditional(bucket,MATERIAL_INPUTS_KEY,value,found.etag))fail(409,'MATERIAL_CHANGED','Os materiais foram atualizados simultaneamente. Recarregue antes de salvar.');
+ return materialDocument(value);
 }
 async function resolveAccess(bucket,request,admins,now){
  const token=cookieValue(request);if(!token)return{authenticated:false,approved:false,role:'visitor',status:'anonymous'};
@@ -241,6 +276,11 @@ function analysisOptions(url, saved, engine) {
   const rawAllYears=url.searchParams.get('allYears');
   if(rawAllYears!==null&&!['1','0','true','false'].includes(rawAllYears))fail(400,'INVALID_YEAR_SCOPE','Informe um escopo de anos válido.');
   const allYears=rawAllYears==='1'||rawAllYears==='true';
+  const rawMonths=url.searchParams.get('months');
+  const monthValues=rawMonths===null?[]:rawMonths.split(',');
+  if(url.searchParams.getAll('months').length>1||monthValues.length>12||monthValues.some(month=>!(/^(?:[1-9]|1[0-2])$/).test(month)))fail(400,'INVALID_MONTHS','Selecione meses inteiros entre 1 e 12.');
+  const selectedMonths=[...new Set(monthValues.map(Number))].sort((a,b)=>a-b);
+  const months=selectedMonths.length===12?[]:selectedMonths;
   const asOf = url.searchParams.get('asOf') || saved.asOf || engine.today();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf) || !engine.parseDate(asOf)) fail(400, 'INVALID_DATE', 'Informe uma data da análise válida.');
   const readSelections=(key,maxLength,normalize)=>{const raw=url.searchParams.getAll(key),seen=new Set();if(raw.length>200||raw.some(value=>value.length>maxLength||/[\u0000-\u001f]/.test(value)))fail(400,'INVALID_FILTER','O filtro informado é inválido. Selecione até 200 valores por filtro.');return raw.map(value=>value.trim()).filter(value=>{const key=normalize(value);if(!key||seen.has(key))return false;seen.add(key);return true;});};
@@ -257,7 +297,7 @@ function analysisOptions(url, saved, engine) {
   if (controlOperations.some(value=>!controlOperationOptions.has(engine.normalizeStatus(value)))) fail(400, 'INVALID_OPERATION', 'Selecione operações disponíveis no Controle.');
   if (suppliers.some(value=>!supplierOptions.has(engine.normalizeSupplier(value)))) fail(400,'INVALID_SUPPLIER','Selecione fornecedores presentes nas bases.');
   if (!['original', 'corrected'].includes(correctionScenario)) fail(400, 'INVALID_CORRECTION_SCENARIO', 'Selecione Base original ou Com correções.');
-  return {years: [...new Set(years)], allYears, asOf, supplier, suppliers, operation, operations, controlOperation, controlOperations, claimStatuses, correctionScenario, lossFormula: 'subtract-negotiating'};
+  return {years: [...new Set(years)], allYears, months, asOf, supplier, suppliers, operation, operations, controlOperation, controlOperations, claimStatuses, correctionScenario, lossFormula: 'subtract-negotiating'};
 }
 
 // Manual follow-up is stored separately from the uploaded financial snapshot.
@@ -283,10 +323,11 @@ async function hydrateCorrectionProgress(bucket,model,engine,bdRows,controlRows)
 }
 function correctionOptions(value,url,saved,engine) {
  if(value==null)return analysisOptions(new URL('/api/report',url),saved,engine);
- if(typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['years','allYears','asOf','supplier','suppliers','operation','operations','controlOperation','controlOperations','correctionScenario','lossFormula'].includes(key)))fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');
+ if(typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!['years','allYears','months','asOf','supplier','suppliers','operation','operations','controlOperation','controlOperations','correctionScenario','lossFormula'].includes(key)))fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');
  const query=new URL('/api/report',url);
  if(value.years!==undefined){if(!Array.isArray(value.years)||!value.years.length||value.years.length>201||value.years.some(year=>!Number.isInteger(year)||year<1900||year>2100))fail(400,'INVALID_YEARS','Selecione anos inteiros entre 1900 e 2100.');query.searchParams.set('years',value.years.join(','));}
  if(value.allYears!==undefined){if(typeof value.allYears!=='boolean')fail(400,'INVALID_YEAR_SCOPE','Informe um escopo de anos válido.');query.searchParams.set('allYears',value.allYears?'1':'0');}
+ if(value.months!==undefined){if(!Array.isArray(value.months)||value.months.length>12||value.months.some(month=>!Number.isInteger(month)||month<1||month>12))fail(400,'INVALID_MONTHS','Selecione meses inteiros entre 1 e 12.');if(value.months.length)query.searchParams.set('months',value.months.join(','));}
  for(const [plural,singular] of [['suppliers','supplier'],['operations','operation'],['controlOperations','controlOperation']]){const input=Object.prototype.hasOwnProperty.call(value,plural)?value[plural]:value[singular];if(input===undefined)continue;const values=Array.isArray(input)?input:[input];if(values.length>200||values.some(item=>typeof item!=='string'))fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');for(const item of values)query.searchParams.append(singular,item);}
  for(const key of ['asOf','correctionScenario'])if(value[key]!==undefined){if(typeof value[key]!=='string')fail(400,'INVALID_FILTER','Os filtros da correção são inválidos.');query.searchParams.set(key,value[key]);}
  return analysisOptions(query,saved,engine);
@@ -368,7 +409,7 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
    if(!access.authenticated)fail(401,'SESSION_REQUIRED','Solicite acesso ou use seu link administrativo para continuar.');
    if(!access.approved)fail(403,access.status==='revoked'?'ACCESS_REVOKED':'ACCESS_PENDING',access.status==='revoked'?'Seu acesso foi revogado. A administração pode rever essa decisão.':'Sua solicitação aguarda aprovação da administração.');
    const modifying=!['GET','HEAD'].includes(request.method);
-   const editorMutation=access.role==='editor'&&request.method==='POST'&&(['/api/report','/api/correction-progress'].includes(url.pathname)||(clientMode&&(['/api/client-report/start','/api/client-report/cleanup'].includes(url.pathname)||/^\/api\/client-report\/[a-f0-9-]{36}\/(parts|commit)$/i.test(url.pathname))));
+   const editorMutation=access.role==='editor'&&request.method==='POST'&&(['/api/report','/api/correction-progress','/api/material-inputs'].includes(url.pathname)||(clientMode&&(['/api/client-report/start','/api/client-report/cleanup'].includes(url.pathname)||/^\/api\/client-report\/[a-f0-9-]{36}\/(parts|commit)$/i.test(url.pathname))));
    const reviewerMutation=access.role==='reviewer'&&request.method==='POST'&&url.pathname==='/api/correction-progress';
    if(modifying&&access.role!=='admin'&&!editorMutation&&!reviewerMutation)fail(403,'ADMIN_REQUIRED','Você não tem permissão para esta alteração. Apenas a administração pode gerenciar os acessos.');
    if(clientMode){const handled=await clientReports.handle({request,url,bucket:env.BUCKET,access});if(handled)return handled;}
@@ -385,6 +426,8 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
     return response({reportMeta:metadata,correctionProgressRevision:correctionProgressRevision(progress),agingDate:engine.today()});
    }
    if(url.pathname==='/api/correction-progress'&&request.method==='POST')return response(await saveCorrectionProgress(env.BUCKET,access,await readBody(request,16384),url,engine));
+   if(url.pathname==='/api/material-inputs'&&request.method==='GET')return response(materialDocument((await jsonObject(env.BUCKET,MATERIAL_INPUTS_KEY)).value));
+   if(url.pathname==='/api/material-inputs'&&request.method==='POST')return response(await saveMaterialInputs(env.BUCKET,access,await readBody(request,65536)));
    if(url.pathname==='/api/report'&&request.method==='GET'){
     const reportView=url.searchParams.get('view')??'full';
     if(!['full','suppliers'].includes(reportView)||url.searchParams.getAll('view').length>1)fail(400,'INVALID_REPORT_VIEW','Selecione uma visão válida do relatório.');

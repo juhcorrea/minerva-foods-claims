@@ -132,6 +132,22 @@ test('all-years correction follow-up keeps the effective scope and shared audit 
  assert.equal((await mark(env,admin,snapshot,group,false,{options:{...queryOptions,years:[2026],allYears:false}})).status,200,'Master-year corrections remain reviewable regardless of the financial year filter');
 });
 
+test('correction follow-up accepts canonical month options without weakening validation or changing the base',async()=>{
+ const env=environment(),admin=await login(env),snapshot=(await publish(env,admin)).body,group=snapshot.model.correctionGroups[0],seen=[];
+ const monthApi=createApiHandler({engine:{...engine,analyze:(bd,control,options)=>{seen.push({...options});return engine.analyze(bd,control,options);}}});
+ const before=env.BUCKET.objects.get('private/report-latest-v1.json').text;
+ const body={key:group.progress.key,done:true,reportRevision:snapshot.revision,options:queryOptions};
+ for(const [months,expected] of [[[],[]],[[11,2,11],[2,11]],[Array.from({length:12},(_,index)=>index+1),[]]]){
+  const result=await call(env,'/api/correction-progress',admin.cookie,{method:'POST',body:{...body,options:{...queryOptions,months}}},monthApi);
+  assert.equal(result.status,200,JSON.stringify(result.body));assert.deepEqual(seen.at(-1).months,expected);
+ }
+ for(const months of [null,11,'11',[0],[13],[2.5],['11'],[{}],Array(13).fill(2)]){
+  const count=seen.length,result=await call(env,'/api/correction-progress',admin.cookie,{method:'POST',body:{...body,options:{...queryOptions,months}}},monthApi);
+  assert.equal(result.status,400);assert.equal(result.body.code,'INVALID_MONTHS');assert.equal(seen.length,count);
+ }
+ assert.equal(env.BUCKET.objects.get('private/report-latest-v1.json').text,before);
+});
+
 test('correction progress accepts plural and legacy array filters with plural precedence',async()=>{
  const env=environment(),admin=await login(env),input=twoOrders();input.bd[2][25]='COMERCIAL';input.bd[2][28]='OUTRO FORNECEDOR FICTICIO';
  await publish(env,admin,input);const query=new URLSearchParams({allYears:'1'});for(const value of ['EXPORTAÇÃO - CARRETA','COMERCIAL'])query.append('operation',value);for(const value of ['FORNECEDOR TESTE','OUTRO FORNECEDOR FICTICIO'])query.append('supplier',value);

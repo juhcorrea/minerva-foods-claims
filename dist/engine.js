@@ -30,7 +30,12 @@
     return value;
   };
   const norm = v => {const value=text(v);return memo(analysisMemo?.norm,value,()=>value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' '));};
-  const normalizeStatus = v => {const value=norm(v);return memo(analysisMemo?.status,value,()=>value.replace(/\s*[-–—]\s*/g, ' - '));};
+  const normalizeStatus = v => {const value=norm(v);return memo(analysisMemo?.status,value,()=>{
+    const key=value.replace(/\s*[-–—]\s*/g, ' - ');
+    if(key==='EM NEGOCIACAO PROCEDENTE')return NEGOTIATING;
+    if(key==='PROCEDENTE SEGURO')return 'PROCEDENTE - SEGURO';
+    return key;
+  });};
   // Every monetary negotiation view uses the same source rule, regardless of
   // its filters or projection. Other pending values, including blank, qualify.
   const negotiatingClaim = source => normalizeStatus(source?.[6]) === NEGOTIATING && !norm(source?.[7]).includes('FUP SUPRIMENTOS');
@@ -44,9 +49,12 @@
   function normalizeFilterOptions(options) {
     const operations=filterValues(options,'operations','operation',normalizeStatus),suppliers=filterValues(options,'suppliers','supplier',norm),controlOperations=filterValues(options,'controlOperations','controlOperation',normalizeStatus);
     const claimStatuses=filterValues(options,'claimStatuses','claimStatus',normalizeStatus);
-    return {...options,operations,suppliers,controlOperations,claimStatuses,operation:operations.join(' · '),supplier:suppliers.join(' · '),controlOperation:controlOperations.join(' · ')};
+    const selectedMonths=unique((Array.isArray(options.months)?options.months:[]).filter(value=>typeof value!=='boolean').map(Number).filter(value=>Number.isInteger(value)&&value>=1&&value<=12)).sort((a,b)=>a-b);
+    const months=selectedMonths.length===12?[]:selectedMonths;
+    return {...options,months,operations,suppliers,controlOperations,claimStatuses,operation:operations.join(' · '),supplier:suppliers.join(' · '),controlOperation:controlOperations.join(' · ')};
   }
-  const globalFilterMeta=options=>({supplier:options.suppliers.join(' · '),suppliers:[...options.suppliers],operation:options.operations.join(' · '),operations:[...options.operations],claimStatus:options.claimStatuses.join(' · '),claimStatuses:[...options.claimStatuses]});
+  const globalFilterMeta=options=>({months:[...options.months],supplier:options.suppliers.join(' · '),suppliers:[...options.suppliers],operation:options.operations.join(' · '),operations:[...options.operations],claimStatus:options.claimStatuses.join(' · '),claimStatuses:[...options.claimStatuses]});
+  const dateInPeriod=(date,years,months)=>!!date&&years.has(Number(date.slice(0,4)))&&(!months.size||months.has(Number(date.slice(5,7))));
   const claimStatusKey=value=>normalizeStatus(value)||'NAO INFORMADO';
   const claimStatusMatches=(value,selected)=>!selected.size||selected.has(claimStatusKey(value));
   // Never divide a grouped installment across selected and unselected claims.
@@ -190,7 +198,7 @@
     validateHeaders(bdRows, 'BD');
     validateHeaders(controlRows, 'Controle Recebimento');
     const years = unique((options.years || [Number(today().slice(0,4))]).map(Number).filter(y => Number.isInteger(y) && y >= 1900 && y <= 2100)).sort();
-    const yearSet = new Set(years);
+    const yearSet = new Set(years),monthSet=new Set(options.months);
     const asOf = parseDate(options.asOf || today());
     if (!asOf) throw new Error('Informe uma data de análise válida.');
     const supplierFilter = new Set(options.suppliers.map(norm));
@@ -215,7 +223,7 @@
       const keys = unique([...tokenizeRefs(r[22]), ...tokenizeRefs(r[24])]);
       const claimedValue = number(r[35]);
       const otherFilters = (allOperations || OPS.has(opKey)) && !EXCLUDED_STATUSES.has(statusKey) && (!operationFilter.size || operationFilter.has(opKey)) && (!supplierFilter.size || supplierFilter.has(norm(supplier))) && claimStatusMatches(r[6],claimStatusFilter);
-      const periodEligible = !!rncDate && yearSet.has(year) && rncDate <= asOf;
+      const periodEligible = dateInPeriod(rncDate,yearSet,monthSet) && rncDate <= asOf;
       const war = norm(r[10]) === 'INTERFERENCIA EXTERNA';
       const c = {
         row: a + 1, sgr: text(r[0]), order: text(r[22]), nf: text(r[24]), supplier, analyst: analystAt(a + 1),
@@ -266,6 +274,8 @@
     Object.assign(meta, {receivedWithoutMonthlyDate: 0, confirmedReceivedWithoutMonthlyDate: 0, incompatibleStatusExcludedAmount: 0, excludedYearUnknownAmount: 0, excludedYearUnknownCount: 0});
     const receiptReport = {years: [], annual: [], analysts: [], monthly: [], rows: [], issues: [], meta: {scope: 'Controle Recebimento integral; independente dos vínculos, situações, operações, anos de RNC e filtros de fornecedor da BD.', source: 'M=Pago; R=Data compensação, fonte do ano e mês; AF=Analista; T=Valor Recebido USD positivo. AE serve somente para conferência.', analystDefinition: 'Analista do recebimento conforme AF no Controle Recebimento, distinto do analista da ocorrência em BE na BD. Nomes não são atribuídos por inferência.', receivedWithoutMonthlyDate: 0, incompatibleStatusExcludedAmount: 0, excludedYearUnknownAmount: 0, excludedYearUnknownCount: 0, invalidPaidAmountCount: 0}};
     const receiptAnnualMap = new Map(), receiptAnalystsMap = new Map(), receiptMonthlyMap = new Map();
+    receiptReport.months=[...options.months];receiptReport.meta.months=[...options.months];
+    if(monthSet.size)receiptReport.meta.scope+=' Recorte mensal pela Data de compensação nos anos e meses selecionados.';
     function recordReceipt(r, row, payment) {
       receiptReport.issues.push(...payment.issues);
       if (!payment.markedPaid && payment.validReceived) receiptReport.meta.incompatibleStatusExcludedAmount += payment.received;
@@ -274,7 +284,7 @@
         if (payment.validReceived) receiptReport.meta.excludedYearUnknownAmount += payment.received;
       }
       if (payment.markedPaid && !payment.validReceived) receiptReport.meta.invalidPaidAmountCount++;
-      if (!payment.confirmedPaid) return;
+      if (!payment.confirmedPaid || (monthSet.size&&!dateInPeriod(payment.compDate,yearSet,monthSet))) return;
       const {compensationYear: year, compensationMonth: month, received, receiptAnalyst: name} = payment;
       receiptReport.rows.push({row, reference: text(r[7]), receiptAnalyst: name, compensationYear: year, compensationMonth: month, compDate: payment.compDate, received, status: 'Pago', originalStatus: text(r[12]), originalSupplier: text(r[10]), supplier: text(r[10]), type: text(r[11]) || 'Não informado'});
       if (!receiptAnnualMap.has(year)) receiptAnnualMap.set(year, {year, received: 0, count: 0, monthlyUnallocated: 0});
@@ -328,7 +338,7 @@
       else if (!noDueDate && !dueDate) status = 'Conferir previsão';
       else status = dueDate && dueDate < asOf ? 'Vencido' : 'Dentro do Prazo';
       const expectedMissing = expectedValue == null && ['Vencido', 'Dentro do Prazo'].includes(status);
-      const inPeriod = confirmedPaid && yearSet.has(compensationYear);
+      const inPeriod = confirmedPaid && dateInPeriod(compDate,yearSet,monthSet),openInPeriod=!monthSet.size||dateInPeriod(dueDate,yearSet,monthSet);
       const linkedSupplier = supplierKeys.length === 1 ? (supplierNames.get(supplierKeys[0]) || matched[0].supplier) : '(VÍNCULO A CONFERIR)';
       const inst = {
         row: a + 1, reference: text(r[7]), supplier: linkedSupplier, originalSupplier: text(r[10]), analysts: unique(matched.map(c => c.analyst)), confession: text(r[9]), type: text(r[11]) || 'Não informado', status, originalStatus,
@@ -356,10 +366,10 @@
         matched.forEach(c => c.matchedControlRows.push(inst.row));
         const s = supplierRow(supplierKeys[0]);
         s.installments++;
-        if (expectedMissing) s.missingExpectedAmounts++;
+        if (expectedMissing&&openInPeriod) s.missingExpectedAmounts++;
         if (status === 'Pago') s.paid++;
-        if (status === 'Vencido') {s.overdue++; s.overdueBalance += expectedValue || 0; s.openBalance += expectedValue || 0;}
-        if (status === 'Dentro do Prazo') {s.onTime++; s.onTimeBalance += expectedValue || 0; s.openBalance += expectedValue || 0; if (noDueDate) s.noDueBalance += expectedValue || 0;}
+        if (status === 'Vencido'&&openInPeriod) {s.overdue++; s.overdueBalance += expectedValue || 0; s.openBalance += expectedValue || 0;}
+        if (status === 'Dentro do Prazo'&&openInPeriod) {s.onTime++; s.onTimeBalance += expectedValue || 0; s.openBalance += expectedValue || 0; if (noDueDate) s.noDueBalance += expectedValue || 0;}
         if (status === 'Prejuízo Minerva') {s.explicitLoss += expectedValue || 0; s.lossInstallments++;}
         if (inPeriod) {
           s.receivedConfirmed += receivedValue;
@@ -391,7 +401,7 @@
       if (expectedMissing) {meta.missingExpectedAmounts++; issue('MISSING_EXPECTED_AMOUNT', {...issueBase, amount: null, detail: `O${inst.row} — Valor USD está vazio ou inválido em uma parcela pendente. O saldo em aberto inclui somente valores conhecidos; completar o valor da parcela.`});}
       for (const warning of payment.issues) issue(warning.kind, {...warning, ...issueBase, detail: warning.detail});
       if (!noDueDate && !dueDate) issue('INVALID_DUE_DATE', {...issueBase, detail: 'N contém uma data inválida; não foi tratada como previsão vazia.'});
-      if (!markedPaid && validReceived && yearSet.has(compensationYear)) meta.incompatibleStatusExcludedAmount += receivedValue;
+      if (!markedPaid && validReceived && dateInPeriod(compDate,yearSet,monthSet)) meta.incompatibleStatusExcludedAmount += receivedValue;
       if (markedPaid && compensationYear == null) {meta.excludedYearUnknownCount++; if (validReceived) meta.excludedYearUnknownAmount += receivedValue;}
     }
 
@@ -586,11 +596,11 @@
     if (suppliersOnly) return analyzeSupplierView(model, bdRows, controlRows, index, labels, supplierLabels, options);
     const operationsSelected=options.controlOperations.map(value=>labels.get(normalizeStatus(value))||value),operation=operationsSelected.join(' · ');
     const operationFilter = new Set(operationsSelected.map(normalizeStatus)), supplierFilter = new Set(options.suppliers.map(norm)), claimStatusFilter=new Set(options.claimStatuses.map(claimStatusKey));
-    const yearSet = new Set(model.meta.years), asOf = model.meta.asOf;
+    const yearSet = new Set(model.meta.years),monthSet=new Set(options.months), asOf = model.meta.asOf;
     const executiveRows = new Set(model.installments.filter(i => i.includedInRealized).map(i => i.row));
     const all = [], issues = [], processMap = new Map(), impactRows = [], activeAttribution = new Map();
     const agreementSources = {integral:headerKey(controlRows[0]?.[20]) === 'VALORINTEGRALCLAIM', agreed:headerKey(controlRows[0]?.[21]) === 'VALORNEGOCIADOCLAIM'};
-    const meta = {isIntegral:true, correctionScenario, asOf, years:model.meta.years, operation, supplier:text(options.supplier), operationScope:'all', comparativeOperation:text(options.operation), totalControlRows:0, linkedControlRows:0, ambiguousControlRows:0, unmatchedControlRows:0, receivedOutsidePeriod:0, excludedYearUnknownAmount:0, excludedYearUnknownCount:0, incompatibleStatusExcludedAmount:0, receivedWithoutMonthlyDate:0, confirmedReceivedWithoutMonthlyDate:0,
+    const meta = {isIntegral:true, correctionScenario, asOf, years:model.meta.years, months:[...options.months], operation, supplier:text(options.supplier), operationScope:'all', comparativeOperation:text(options.operation), totalControlRows:0, linkedControlRows:0, ambiguousControlRows:0, unmatchedControlRows:0, receivedOutsidePeriod:0, excludedYearUnknownAmount:0, excludedYearUnknownCount:0, incompatibleStatusExcludedAmount:0, receivedWithoutMonthlyDate:0, confirmedReceivedWithoutMonthlyDate:0,
       receiptBasis:'Controle integral: M=Pago, ano de R selecionado e T positivo. Vínculo, ano Data RNC, situação e expurgo da BD não excluem o recebido. Operação e fornecedor são filtros explícitos. O recebido do comparativo conserva somente as parcelas também incluídas no comparativo executivo.',
       openBasis:'Todas as parcelas em aberto, de todos os anos, até a quitação. N define vencimento; sem previsão permanece dentro do prazo. O ano de R filtra somente pagamentos confirmados.'};
     for (let n = 1; n < controlRows.length; n++) {
@@ -615,14 +625,14 @@
       const dueDate = parseDate(row[13]), noDueDate = row[13] == null || text(row[13]) === '', expected = number(row[14]);
       const isLoss = !payment.markedPaid && (norm(row[12]) === 'PREJUIZO MINERVA' || norm(row[23]) === 'PREJUIZO MINERVA');
       const status = payment.confirmedPaid ? 'Pago' : payment.markedPaid ? 'Conferir pagamento' : isLoss ? 'Prejuízo Minerva' : !noDueDate && !dueDate ? 'Conferir previsão' : dueDate && dueDate < asOf ? 'Vencido' : 'Dentro do Prazo';
-      const inPeriod = payment.confirmedPaid && yearSet.has(payment.compensationYear);
+      const inPeriod = payment.confirmedPaid && dateInPeriod(payment.compDate,yearSet,monthSet),openInPeriod=!monthSet.size||dateInPeriod(dueDate,yearSet,monthSet);
       const inst = {row:n+1, reference:text(row[7]), supplier, originalSupplier, analysts:unique(matched.map(c => c.analyst)), confession:text(row[9]), type:text(row[11]) || 'Não informado', status, originalStatus:text(row[12]), dueDate, compDate:payment.compDate, compensationYear:payment.compensationYear, compensationMonth:payment.compensationMonth, receiptAnalyst:payment.receiptAnalyst, expected, received:payment.received, inPeriod, bdRows:matched.map(c => c.row), rejectedBdRows:rejected.map(c=>c.row), contextCollision:rejected.length>0, year:activeYear, market:activeMarket, originalYear:row[1] ?? null, originalMarket:text(row[3]), noDueDate, expectedMissing:expected == null && ['Vencido','Dentro do Prazo'].includes(status), linkState:!matched.length ? 'unmatched' : safe ? matched.length > 1 ? 'grouped' : 'matched' : 'review', includedInConfirmed:inPeriod, includedInRealized:inPeriod && executiveRows.has(n+1), grouped:matched.length > 1, claimStatus:statuses.length === 1 ? matched[0].status : matched.length ? 'Múltiplas situações' : 'Sem vínculo com a BD', operations, isControlRecord:true};
       const scoped = (!operationFilter.size || operations.some(label => operationFilter.has(normalizeStatus(label)))) && (!supplierFilter.size || supplierFilter.has(norm(supplier)) || (!useOriginal && supplierFilter.has(norm(originalSupplier))));
       if (!scoped || !linkedStatusesMatch(matched,complete,claimStatusFilter)) continue;
       if(rejected.length)issues.push(contextCollisionIssue(row,n+1,rejected));
       // Both correction views use exactly the same ledger rows and amounts.
       // Resolve each descriptive field independently, only with a complete link.
-      if (inPeriod || ['Vencido','Dentro do Prazo'].includes(status)) {
+      if (inPeriod || (openInPeriod&&['Vencido','Dentro do Prazo'].includes(status))) {
         const supplierResolved = supplierSafe && matched[0].supplier !== '(SEM NEGOCIAÇÃO)';
         const yearResolved = complete && years.length === 1 && years[0] != null;
         const marketResolved = complete && markets.length === 1 && !!markets[0];
@@ -661,7 +671,7 @@
       if (inst.includedInRealized) process.received += inst.received;
       all.push(inst);
     }
-    const installments = all.filter(i => i.status !== 'Pago' || i.inPeriod);
+    const installments = all.filter(i => i.status === 'Pago' ? i.inPeriod : !monthSet.size||dateInPeriod(i.dueDate,yearSet,monthSet));
     const visibleProcesses = new Set(installments.map(i => i.processId));
     const allInstallments = all.filter(i => visibleProcesses.has(i.processId));
     const processes = [...processMap.values()].filter(p => visibleProcesses.has(p.id)).map(p => {
@@ -705,6 +715,7 @@
     for (const installment of model.installments) { const active=activeAttribution.get(installment.row); if(useOriginal&&active)Object.assign(installment,{supplier:active.supplier,year:active.year,market:active.market}); }
     for (const receipt of model.receiptReport.rows) { const active=activeAttribution.get(receipt.row); if(active)Object.assign(receipt,{supplier:active.supplier,yearEntry:active.year,market:active.market,originalYear:active.originalYear,originalMarket:active.originalMarket}); }
     model.receiptReport.meta.correctionScenario = correctionScenario;
+    if(monthSet.size){meta.receiptBasis+=' Meses selecionados seguem R — Data compensação.';meta.openBasis+=' Com mês específico, as parcelas visíveis seguem N — Data prevista nos anos e meses selecionados; previsões ausentes ou inválidas não entram no recorte mensal.';}
     model.controlReport = {installments, allInstallments, processes, issues, meta, operationOptions:[...labels.values()].sort((a,b)=>a.localeCompare(b,'pt-BR')), supplierOptions:[...supplierLabels.values()].sort((a,b)=>a.localeCompare(b,'pt-BR'))};
     Object.assign(meta,{operations:[...operationsSelected],suppliers:[...options.suppliers],comparativeOperations:[...options.operations],filterBasis:'OU entre seleções de fornecedor ou de operação do Controle; E entre os filtros. O filtro de operações do Controle é independente do filtro global. A identificação das operações e a validação dos vínculos permanecem as mesmas.'});
     model.operationOptions=[...labels.values()].filter(label=>normalizeStatus(label)!==normalizeStatus(unknownOperation)).sort((a,b)=>a.localeCompare(b,'pt-BR'));
@@ -739,7 +750,7 @@
     model.controlReport = {installments:[], allInstallments:[], processes:[],
       supplierOptions:[...supplierLabels.values()].sort((a,b) => a.localeCompare(b,'pt-BR')),
       operationOptions:[...labels.values()].sort((a,b) => a.localeCompare(b,'pt-BR')),
-      meta:{isIntegral:true, correctionScenario:model.meta.correctionScenario, asOf:model.meta.asOf, years:model.meta.years,
+      meta:{isIntegral:true, correctionScenario:model.meta.correctionScenario, asOf:model.meta.asOf, years:model.meta.years,months:[...options.months],
         operation:operations.join(' · '), supplier:text(options.supplier), operationScope:'all', comparativeOperation:text(options.operation),
         operations, suppliers:[...options.suppliers], comparativeOperations:[...options.operations]}};
     model.operationOptions = [...labels.values()].filter(label => normalizeStatus(label) !== normalizeStatus(unknownOperation)).sort((a,b) => a.localeCompare(b,'pt-BR'));
@@ -1088,7 +1099,7 @@
   function applyReceiptCohorts(model,controlRows,index,options){
     const claimStatusFilter=new Set(options.claimStatuses.map(claimStatusKey));
     const displayYears=recentClaimYears();model.meta.claimYearDisplayYears=displayYears;
-    const years=new Set(model.meta.years),supplierFilter=new Set(options.suppliers.map(norm)),operationFilter=new Set(options.operations.map(normalizeStatus)),useOriginal=model.meta.correctionScenario==='original';
+    const years=new Set(model.meta.years),monthSet=new Set(options.months),supplierFilter=new Set(options.suppliers.map(norm)),operationFilter=new Set(options.operations.map(normalizeStatus)),useOriginal=model.meta.correctionScenario==='original';
     const rows=[],excluded=[],suppliers=new Map(),annual=new Map(),monthly=new Map(),canonicalSuppliers=new Map(model.suppliers.map(supplier=>[norm(supplier.name),supplier.name]));
     const meta={years:[...years],supplier:text(options.supplier),operation:text(options.operation),scope:'Recebimentos do Controle Claim no período de R. A BD valida a classificação; referência ausente ou incompleta não exclui o caixa. Sem filtro de operação, entram todas as operações e a operação não identificada. Com operação específica, somente a operação validada entra.',sameYearDefinition:'Ano da compensação R igual ao ano único de Data RNC validado na BD, ou ao Ano Entrada B quando não houver validação segura.',differentYearDefinition:'Ano da compensação R diferente do ano único de Data RNC validado na BD, ou do Ano Entrada B quando não houver validação segura.',unknownYearDefinition:'Não há ano de claim seguro na BD nem Ano Entrada B válido no Controle; pagamento mantido em Ano a conferir.',receivedBasis:'M = Pago; R = Data compensação válida; T = Valor Recebido USD positivo. Cada linha do Controle é contada uma vez, inclusive referências agregadas.',unresolvedCount:0,unresolvedAmount:0,outsideOperationCount:0,outsideOperationAmount:0,excludedUnknownOperationCount:0,excludedUnknownOperationAmount:0,receivedWithoutClaimDetailCount:0,receivedWithoutClaimDetail:0};
     const accum=(map,key,base,row)=>{
@@ -1100,7 +1111,7 @@
     };
     for(let n=1;n<controlRows.length;n++){
       const source=controlRows[n];if(!source)continue;
-      const payment=receiptAt(source,n+1,model.meta.asOf);if(!payment.confirmedPaid||!years.has(payment.compensationYear))continue;
+      const payment=receiptAt(source,n+1,model.meta.asOf);if(!payment.confirmedPaid||!dateInPeriod(payment.compDate,years,monthSet))continue;
       const {matched,complete,rejected}=controlMatches(source,index);
       if(!linkedStatusesMatch(matched,complete,claimStatusFilter))continue;
       const operations=unique(matched.map(claim=>normalizeStatus(claim.operation))),supplierKeys=unique(matched.map(claim=>norm(claim.supplier)));
@@ -1160,6 +1171,7 @@
     meta.comparableDefinition='receivedComparable inclui pagamentos cujo ano de compensação R e ano de origem do claim pertencem aos anos selecionados. Demais anos continua visível e participa desse total somente quando o ano de origem está selecionado. A organização das colunas não altera os filtros nem o total. received preserva todo o caixa do recorte, inclusive Ano a conferir. receivedSameYear continua como diagnóstico de igualdade entre os dois anos.';
     meta.comparableLossFormula='Reclamado − (Recebido comparável + Em negociação). Taxas e perda ficam nulas nos grupos sem denominador reclamado, como a série mensal de caixa.';
     Object.assign(meta,globalFilterMeta(options),{filterBasis:'OU entre fornecedores ou operações selecionados; E entre filtros. Uma parcela com múltiplas operações só entra se o vínculo for completo e todas as operações pertencerem ao conjunto selecionado. Cada linha entra uma vez, sem rateio.'});
+    if(monthSet.size)meta.receivedBasis+=' Recorte adicional pelos meses selecionados da Data de compensação.';
     const receiptCohorts={rows,suppliers:finish(suppliers.values()).sort((a,b)=>b.received-a.received||a.name.localeCompare(b.name,'pt-BR')),annual:finish(annual.values()).sort((a,b)=>a.year-b.year),monthly:finish(monthly.values()).sort((a,b)=>a.month.localeCompare(b.month)),excluded,meta};
     for(const key of ['unresolvedAmount','outsideOperationAmount','excludedUnknownOperationAmount','receivedWithoutClaimDetail'])meta[key]=money(meta[key]);
     model.receiptCohorts=receiptCohorts;
@@ -1222,10 +1234,11 @@
   // row once, retaining O precision for traceable detail/export calculations.
   function applySupplierOpenBalances(model, controlRows, index, options) {
     const claimStatusFilter=new Set(options.claimStatuses.map(claimStatusKey));
+    const yearSet=new Set(model.meta.years),monthSet=new Set(options.months);
     const supplierFilter=new Set(options.suppliers.map(norm)),operationFilter=new Set(options.operations.map(normalizeStatus)),useOriginal=model.meta.correctionScenario==='original';
     const supplierMap=new Map(model.suppliers.map(supplier=>[norm(supplier.name),supplier]));
     const installments=[],excluded=[];
-    const meta={supplier:text(options.supplier),operation:text(options.operation),correctionScenario:model.meta.correctionScenario,
+    const meta={supplier:text(options.supplier),operation:text(options.operation),correctionScenario:model.meta.correctionScenario,allYears:!monthSet.size,years:[...model.meta.years],excludedDueDateCount:0,excludedDueDateAmount:0,excludedDuePeriodCount:0,excludedDuePeriodAmount:0,
       basis:'Saldo de fornecedores: coluna M do Controle igual a Dentro do Prazo ou Vencido; valor previsto USD da coluna O. Total aberto = dentro do prazo + vencido. Todas as parcelas abertas, de todos os anos, contadas uma vez por linha.',
       supplierBasis:useOriginal?'Fornecedor K original do Controle.':'Fornecedor validado na BD somente com vínculo completo e único; caso contrário, K do Controle.',
       operationBasis:'Mesmo filtro global de operação dos recebimentos: todas as operações e operação não identificada na visão geral; operação específica exige vínculo completo à operação. Ano, situação e expurgo do claim não excluem parcelas abertas.',
@@ -1250,6 +1263,11 @@
       if((knownOperation&&!eligibleOperation)||(!knownOperation&&operationFilter.size)){
         excluded.push({row:n+1,reference:text(source[7]),supplier:activeSupplier,status,expected,bdRows:matched.map(claim=>claim.row),reason:knownOperation?'Operação validada fora do filtro global selecionado.':'Operação não identificada para o filtro global específico.'});continue;
       }
+      const dueDate=parseDate(source[13]);
+      if(monthSet.size&&!dateInPeriod(dueDate,yearSet,monthSet)){
+        const field=dueDate?'excludedDuePeriod':'excludedDueDate';meta[field+'Count']++;meta[field+'Amount']+=expected||0;
+        excluded.push({row:n+1,reference:text(source[7]),supplier:activeSupplier,status,expected,dueDate,bdRows:matched.map(claim=>claim.row),reason:dueDate?'Data prevista fora dos anos e meses selecionados.':'Data prevista ausente ou inválida; fora do recorte mensal específico.'});continue;
+      }
       if(!supplierMap.has(supplierKey)){
         const supplier=reset({name:activeSupplier,claimed:0,forwarded:0,negotiating:0,otherClaimed:0,received:0,receivedNegotiating:0,receivedOtherStatuses:0,receivedConfirmed:0,balance:0,recoveryRate:null,occurrences:0,recordCount:0,share:0,pareto:0,paid:0,loss:model.meta.lossFormula==='pending'?null:0,lossRate:null,explicitLoss:0,lossInstallments:0,installments:0,reviewCount:0,unmatchedClaims:0,processes:0,settledProcesses:0,receivedLinkedClaims:0,receivedSameYear:0,receivedDifferentYear:0,receivedUnknownYear:0,receivedCount:0,receivedWithoutClaimDetail:0,receivedWithoutClaimDetailCount:0,receivedComparable:0,receivedByClaimYear:emptyClaimYears(model.meta.claimYearDisplayYears),comparableRecoveryRate:null,comparableLoss:0,comparableLossRate:null});
         supplierMap.set(supplierKey,supplier);model.suppliers.push(supplier);
@@ -1258,7 +1276,7 @@
       const claimYears=unique(matched.map(claim=>claim.year)),markets=unique(matched.map(claim=>normalizeMarket(claim.market)));
       const activeYear=!useOriginal&&complete&&claimYears.length===1&&claimYears[0]!=null?claimYears[0]:source[1]??null;
       const activeMarket=!useOriginal&&complete&&markets.length===1&&markets[0]?matched[0].market:text(source[3]);
-      const inst={row:n+1,reference:text(source[7]),supplier:supplier.name,originalSupplier,supplierSource:!useOriginal&&supplierResolved?'BD AC — Negociação':'Controle K',correctionScenario:model.meta.correctionScenario,status,originalStatus:text(source[12]),expected,expectedMissing:expected==null,dueDate:parseDate(source[13]),noDueDate,year:activeYear,originalYear:source[1]??null,market:activeMarket,originalMarket:text(source[3]),type:text(source[11])||'Não informado',analysts:unique(matched.map(claim=>claim.analyst)),bdRows:matched.map(claim=>claim.row),rejectedBdRows:rejected.map(claim=>claim.row),contextCollision:rejected.length>0,operations:knownOperation?unique(matched.map(claim=>claim.operation)):[],linkState:!matched.length?'unmatched':complete&&supplierResolved?matched.length>1?'grouped':'matched':'review',isControlRecord:true,openBalanceSource:'Controle M/O'};
+      const inst={row:n+1,reference:text(source[7]),supplier:supplier.name,originalSupplier,supplierSource:!useOriginal&&supplierResolved?'BD AC — Negociação':'Controle K',correctionScenario:model.meta.correctionScenario,status,originalStatus:text(source[12]),expected,expectedMissing:expected==null,dueDate,noDueDate,year:activeYear,originalYear:source[1]??null,market:activeMarket,originalMarket:text(source[3]),type:text(source[11])||'Não informado',analysts:unique(matched.map(claim=>claim.analyst)),bdRows:matched.map(claim=>claim.row),rejectedBdRows:rejected.map(claim=>claim.row),contextCollision:rejected.length>0,operations:knownOperation?unique(matched.map(claim=>claim.operation)):[],linkState:!matched.length?'unmatched':complete&&supplierResolved?matched.length>1?'grouped':'matched':'review',isControlRecord:true,openBalanceSource:'Controle M/O'};
       installments.push(inst);supplier.openInstallments.push(inst);supplier.openCount++;
       supplier.openBalance+=expected||0;
       if(status==='Vencido'){supplier.overdue++;supplier.overdueBalance+=expected||0;}else{supplier.onTime++;supplier.onTimeBalance+=expected||0;}
@@ -1270,6 +1288,8 @@
     let cumulative=0;for(const supplier of model.suppliers){supplier.share=ratio(supplier.claimed,model.summary.claimed)||0;cumulative+=supplier.share;supplier.pareto=cumulative;}
     Object.assign(meta,{openBalance:money(sum(installments,'expected')),overdueBalance:money(sum(installments.filter(row=>row.status==='Vencido'),'expected')),onTimeBalance:money(sum(installments.filter(row=>row.status==='Dentro do Prazo'),'expected')),noDueBalance:money(sum(installments.filter(row=>row.noDueDate),'expected')),openCount:installments.length,overdue:installments.filter(row=>row.status==='Vencido').length,onTime:installments.filter(row=>row.status==='Dentro do Prazo').length,missingExpectedAmounts:installments.filter(row=>row.expectedMissing).length,openBalanceIncomplete:installments.some(row=>row.expectedMissing),excludedCount:excluded.length});
     Object.assign(meta,globalFilterMeta(options),{filterBasis:'OU entre fornecedores ou operações selecionados; E entre filtros. Operações agrupadas exigem vínculo completo e cobertura pelo conjunto selecionado, sem repetir ou ratear parcelas.'});
+    if(monthSet.size){meta.basis+=' No recorte mensal, inclui somente N — Data prevista válida nos anos e meses selecionados; parcelas sem previsão válida ficam identificadas fora do recorte.';meta.noDueBasis='Previsão ausente ou inválida não permite atribuição ao mês; valores excluídos somente deste recorte mensal.';}
+    meta.excludedDueDateAmount=money(meta.excludedDueDateAmount);meta.excludedDuePeriodAmount=money(meta.excludedDuePeriodAmount);
     model.supplierOpenReport={installments,excluded,meta};
     model.meta.supplierOpenBalanceBasis=meta.basis+' '+meta.supplierBasis+' '+meta.operationBasis+' '+meta.statusBasis;
   }
@@ -1291,11 +1311,14 @@
   // financial rules. Cash reuses the already scoped/attributed receipt cohorts.
   // Operational pipeline and SLA events have explicit, separate denominators.
   function applyExecutiveReport(model, bdRows, controlRows, options) {
-    const years=[...model.meta.years],yearSet=new Set(years),asOf=model.meta.asOf,agingDate=today();
+    const years=[...model.meta.years],yearSet=new Set(years),months=[...options.months],monthSet=new Set(months),asOf=model.meta.asOf,agingDate=today();
     const operationFilter=new Set(options.operations.map(normalizeStatus)),supplierFilter=new Set(options.suppliers.map(norm));
     const negotiating=new Map(),pipeline=new Map(),reasons=new Map(),causes=new Map(),sectors=new Map(),monthly=new Map(),sla=new Map(),claimRows=new Map(),controlClaims=[];
     const financialRows=new Set(model.claims.map(claim=>claim.row));
-    const negotiationPortfolio={amount:0,count:0,rows:[],years:[],allYears:true},portfolioYears=new Set();
+    const negotiationPortfolio={amount:0,count:0,rows:[],years:[],months:[...months],allYears:!monthSet.size},portfolioYears=new Set(),portfolioCountries=new Map();
+    const eligibleStatuses=['EM NEGOCIAÇÃO - PROCEDENTE','FINALIZADO SEM CUSTO','PREJUÍZO MINERVA','PROCEDENTE - SEGURO','RESSARCIMENTO ENCAMINHADO'];
+    const recoveryStatuses=new Set(eligibleStatuses.map(normalizeStatus)),recoveryClaimRows=new Set();
+    const recoveryComparison={claimed:0,received:0,rate:null,claimRows:[],receiptRows:[],unallocatedReceived:0,unallocatedReceiptRows:[],eligibleStatuses,years:[...years],months:[...months]};
     const optional={caseStatus:[5,'Status'],country:[19,'País'],cause:[49,'Causador'],armador:[31,'Cia Maritima'],analysis:[57,'SLA 25 Dias'],analysisDate:[9,'Data Fim Análise'],negotiation:[61,'Prazo Neg. Claims'],negotiationDate:[8,'Data ultima posição'],opening:[62,'Media Abertura Claim'],openingDate:[13,'Abertura claim'],pending:[7,'Pendência'],daysWithoutUpdate:[63,'Dias Sem Atualização']};
     const available=Object.fromEntries(Object.entries(optional).map(([key,[at,name]])=>[key,headerKey(bdRows[0]?.[at])===headerKey(name)]));
     available.sector=headerKey(controlRows[0]?.[0])==='SETOR';
@@ -1323,11 +1346,32 @@
       const row=detail(claim);remember(row);
       add(reasons,row.reason,row,row.claimed);add(causes,row.cause,row,row.claimed);
       if(negotiatingClaim(bdRows[row.row-1]))add(negotiating,row.country,row,row.claimed);
+      // Recovery has its own declared denominator. Pending FUP does not remove
+      // an otherwise procedente claim from Reclamado; only negotiation excludes it.
+      if(recoveryStatuses.has(row.statusKey)){
+        recoveryComparison.claimed+=row.claimed||0;
+        recoveryComparison.claimRows.push(row.row);recoveryClaimRows.add(row.row);
+      }
     }
+    const recoveryReceiptIds=new Set();let recoveryCash=0;
+    for(const receipt of model.receiptCohorts?.rows||[]){
+      if(recoveryReceiptIds.has(receipt.row))continue;recoveryReceiptIds.add(receipt.row);
+      recoveryCash+=receipt.received||0;
+      const complete=['matched','partial'].includes(receipt.validationState),linked=receipt.bdRows||[];
+      if(complete&&linked.length&&linked.every(id=>recoveryClaimRows.has(id))){
+        recoveryComparison.received+=receipt.received||0;recoveryComparison.receiptRows.push(receipt.row);
+      }else recoveryComparison.unallocatedReceiptRows.push(receipt.row);
+    }
+    recoveryComparison.claimed=money(recoveryComparison.claimed);
+    recoveryComparison.received=money(recoveryComparison.received);
+    // Reconcile the displayed cents to the same cash total without removing
+    // unclassified payments from any ledger, cohort, supplier or audit model.
+    recoveryComparison.unallocatedReceived=money(money(recoveryCash)-recoveryComparison.received);
+    recoveryComparison.rate=ratio(recoveryComparison.received,recoveryComparison.claimed);
     const statuses={[NEGOTIATING]:'negotiating','EM ANALISE':'inAnalysis','AGUARDANDO CUSTOS':'awaitingCosts'};
     const addSla=(row,source,key,dateKey,target)=>{
       const eventDate=parseDate(read(source,dateKey));
-      if(!eventDate||eventDate>asOf||!yearSet.has(Number(eventDate.slice(0,4))))return;
+      if(!dateInPeriod(eventDate,yearSet,monthSet)||eventDate>asOf)return;
       const value=number(read(source,key));
       if(value==null||value<0||(key==='analysis'&&value>1))return;
       const item=sla.get(eventDate.slice(0,7));if(!item)return;
@@ -1340,10 +1384,10 @@
       if((operationFilter.size&&!operationFilter.has(operation))||(supplierFilter.size&&!supplierFilter.has(norm(supplier))))continue;
       const rncDate=parseDate(source[1]),statusKey=normalizeStatus(source[6]);
       const row={row:n+1,sgr:text(source[0]),...claimDimensions(bdRows[0],source),status:text(source[6]),statusKey,supplier,claimed:number(source[35]),rncDate,operation:text(source[25])};
-      const periodEligible=rncDate&&rncDate<=asOf&&yearSet.has(Number(rncDate.slice(0,4))),war=norm(source[10])==='INTERFERENCIA EXTERNA';
+      const periodEligible=dateInPeriod(rncDate,yearSet,monthSet)&&rncDate<=asOf,war=norm(source[10])==='INTERFERENCIA EXTERNA';
       {
         const excluded=[];if(EXCLUDED_STATUSES.has(statusKey))excluded.push('Situação fora do financeiro: '+row.status);if(war)excluded.push('Motivo INTERFERÊNCIA EXTERNA');
-        if(!rncDate)excluded.push('Data RNC ausente ou inválida');else if(rncDate>asOf)excluded.push('Data RNC posterior à data da análise');else if(!yearSet.has(Number(rncDate.slice(0,4))))excluded.push('Ano da Data RNC fora do recorte financeiro');
+        if(!rncDate)excluded.push('Data RNC ausente ou inválida');else if(rncDate>asOf)excluded.push('Data RNC posterior à data da análise');else if(!yearSet.has(Number(rncDate.slice(0,4))))excluded.push('Ano da Data RNC fora do recorte financeiro');else if(monthSet.size&&!monthSet.has(Number(rncDate.slice(5,7))))excluded.push('Mês da Data RNC fora do recorte financeiro');
         const days=number(read(source,'daysWithoutUpdate'));
         const caseStatus=text(read(source,'caseStatus'))||'Não informado',caseStatusKey=norm(caseStatus)==='ABERTO'?'open':norm(caseStatus)==='FECHADO'?'closed':'unknown';
         controlClaims.push({...row,caseStatus,caseStatusKey,rncYear:rncDate?Number(rncDate.slice(0,4)):null,order:text(source[22]),...claimFollowUpFields(bdRows[0],source,agingDate),financialEligible:financialRows.has(row.row),reasonExcluded:excluded.join('; '),pending:text(read(source,'pending')),lastUpdateDate:parseDate(read(source,'negotiationDate')),daysWithoutUpdate:days!=null&&days>=0?days:null,analyst:text(source[56])||'Não informado'});
@@ -1351,9 +1395,10 @@
       if(war)continue;
       // The overview card is the historical pending portfolio. Only its year
       // scope differs from the selected-period monetary reports below.
-      if(rncDate&&rncDate<=asOf&&negotiatingClaim(source)&&(options.allOperations!==false||OPS.has(operation))){
+      if(rncDate&&rncDate<=asOf&&(!monthSet.size||dateInPeriod(rncDate,yearSet,monthSet))&&negotiatingClaim(source)&&(options.allOperations!==false||OPS.has(operation))){
         negotiationPortfolio.amount+=row.claimed||0;negotiationPortfolio.count++;
         negotiationPortfolio.rows.push(row.row);portfolioYears.add(Number(rncDate.slice(0,4)));remember(row);
+        add(portfolioCountries,row.country,row,row.claimed);
       }
       if(periodEligible&&statuses[statusKey]&&row.sgr){
         const key=norm(row.country),bucket=statuses[statusKey];
@@ -1370,14 +1415,17 @@
     const monthlyReceipts=[...monthly.values()].map(item=>({...item,received:money(item.received)}));
     negotiationPortfolio.amount=money(negotiationPortfolio.amount);
     negotiationPortfolio.years=[...portfolioYears].sort((a,b)=>a-b);
+    negotiationPortfolio.byCountry=finish(portfolioCountries).map(({name,...item})=>({country:name,...item,count:item.recordCount}));
     const negotiationByCountry=finish(negotiating).map(({name,...item})=>({country:name,...item}));
     const openByCountry=[...pipeline.values()].map(({_ids,_negotiating,_inAnalysis,_awaitingCosts,...item})=>({...item,negotiating:_negotiating.size,inAnalysis:_inAnalysis.size,awaitingCosts:_awaitingCosts.size,total:_ids.size,recordCount:item.rows.length})).sort((a,b)=>b.total-a.total||a.country.localeCompare(b.country,'pt-BR'));
     const slaByMonth=[...sla.values()].map(({_analysis,_negotiation,_opening,...item})=>({...item,analysisRate:item.analysisCount?_analysis/item.analysisCount:null,negotiationDays:item.negotiationCount?_negotiation/item.negotiationCount:null,openingDays:item.openingCount?_opening/item.openingCount:null}));
-    model.executiveReport={years,caseYears:[...model.meta.caseYears],monthlyReceipts,negotiationPortfolio,negotiationByCountry,openByCountry,reasonRanking:finish(reasons),causeRanking:finish(causes),sectorReceipts:finish(sectors),slaByMonth,claimRows:[...claimRows.values()].sort((a,b)=>a.row-b.row),receiptRows,controlClaims,
+    model.executiveReport={years,months,caseYears:[...model.meta.caseYears],monthlyReceipts,negotiationPortfolio,recoveryComparison,negotiationByCountry,openByCountry,reasonRanking:finish(reasons),causeRanking:finish(causes),sectorReceipts:finish(sectors),slaByMonth,claimRows:[...claimRows.values()].sort((a,b)=>a.row-b.row),receiptRows,controlClaims,
       meta:{asOf,correctionScenario:model.meta.correctionScenario,...globalFilterMeta(options),available,
         receiptBasis:'Caixa do recorte global: mesmos coortes existentes, M = Pago, R válida nos anos selecionados e T positivo. Cada linha do Controle entra uma vez. Setor é A do Controle; não é a operação Z da BD.',
-        financialBasis:'Motivo, causador e negociação por país usam os claims financeiros já selecionados. Causador vem de AX da BD, separado do fornecedor em AC. Valores financeiros existentes não são recalculados por este relatório.',
-        negotiationBasis:'Todo valor Em negociação soma Reclamado USD somente com Situação EM NEGOCIAÇÃO - PROCEDENTE e Pendência sem o texto FUP SUPRIMENTOS. Todas as demais pendências, inclusive vazias, são aceitas. O card da Visão geral e seu detalhe mostram todos os anos, mantendo fornecedor, operação, Data RNC válida até a análise e exclusão de INTERFERÊNCIA EXTERNA. Países, fornecedores e demais cálculos financeiros continuam no período selecionado. Cada exportação acompanha o escopo da sua visão.',
+        financialBasis:'Motivo e causador usam os claims financeiros já selecionados. Causador vem de AX da BD, separado do fornecedor em AC. negotiationByCountry preserva a projeção financeira do período; negotiationPortfolio.byCountry acompanha a carteira histórica da Visão geral. Valores financeiros existentes não são recalculados por este relatório.',
+        negotiationBasis:'Todo valor Em negociação soma Reclamado USD somente com Situação EM NEGOCIAÇÃO - PROCEDENTE e Pendência sem o texto FUP SUPRIMENTOS. Todas as demais pendências, inclusive vazias, são aceitas. Sem mês específico, card, gráfico por país e detalhes da Visão geral mostram todos os anos. Com meses selecionados, seguem os anos e meses da Data RNC escolhidos. Mantidos fornecedor, operação, Data RNC válida até a análise e exclusão de INTERFERÊNCIA EXTERNA. Fornecedores e demais cálculos financeiros seguem o período selecionado. Cada exportação acompanha o escopo da sua visão.',
+        monthBasis:'Meses vazios ou os doze meses significam Todos. Com meses específicos: Reclamado, negociação e rankings da BD seguem Data RNC; recebimentos seguem Data de compensação; saldo em aberto e vencido seguem Data prevista válida nos mesmos anos e meses selecionados. Nenhum status é reclassificado pelo filtro de mês.',
+        recoveryBasis:'Comparação exclusiva da Visão geral: Reclamado procedente soma cada linha elegível da BD nas situações EM NEGOCIAÇÃO - PROCEDENTE, FINALIZADO SEM CUSTO, PREJUÍZO MINERVA, PROCEDENTE - SEGURO e RESSARCIMENTO ENCAMINHADO, nos anos e filtros financeiros selecionados. AGUARDANDO CUSTOS não entra porque o valor é provisório; Pendência FUP SUPRIMENTOS não é exclusão do Reclamado. Recebido desta comparação usa pagamentos já confirmados no período de compensação, uma vez por linha, somente com referência completa e todos os claims vinculados dentro desse denominador. Referências mistas, incompletas ou fora desse conjunto não são rateadas. Recebido fora desta comparação permanece integralmente no caixa e nos demais relatórios. O residual de arredondamento a centavos fica nesse subtotal para conciliar os dois recebidos com o caixa do recorte. Recuperação = recebido desta comparação dividido pelo reclamado procedente; denominador zero torna o índice indisponível.',
         pipelineBasis:'BD: ano de Data RNC selecionado, Data RNC até a análise, operações e fornecedor do recorte global, sem INTERFERÊNCIA EXTERNA. Situações: EM ANÁLISE, AGUARDANDO CUSTOS e EM NEGOCIAÇÃO - PROCEDENTE. Sem listas manuais de exclusões de pendência do BI. Não representa o saldo de parcelas do Controle.',
         controlClaimBasis:'Controle operacional da BD: todos os anos, situações e motivos, inclusive Seguro, INTERFERÊNCIA EXTERNA e linhas sem Data RNC, nos filtros globais de fornecedor e operação. Aberto e Fechado seguem exclusivamente o Status F; Situação G permanece separada. F ausente, inválida ou desconhecida não é inferida por G. Cada linha com SGR preenchido conta um caso, inclusive SGR repetido; linhas sem SGR permanecem identificadas. Anos e status operacionais são filtrados na própria aba, sem alterar o financeiro. Pendência H e dias BL são preservados; financialEligible e reasonExcluded indicam a participação no recorte financeiro.',
         occurrenceBasis:'Situações por país: cada linha BD com SGR preenchido conta um caso, inclusive SGR repetido; etapas, total por país, total geral e detalhe usam as mesmas linhas. Linhas sem SGR não entram nessa contagem. Nos rankings monetários, count continua SGR distinto por grupo, com linha Excel quando ausente; valores somam linhas e recordCount mostra registros.',

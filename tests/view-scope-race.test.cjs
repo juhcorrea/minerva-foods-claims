@@ -55,6 +55,11 @@ test('local deferred analysis discards the old view result and recomputes withou
  assert.deepEqual(f.calculations.map(options=>options.allYears),[false,true]);assert.deepEqual(f.renders,[{view:'suppliers',allYears:true,claimed:100}]);assert.deepEqual(f.years.map(y=>y.checked),[false,true]);assert.equal(f.state.scopeRefreshPending,false);assert.deepEqual(f.errors,[]);
 });
 
+test('local analysis accepts explicit all years even when no year option is selected',async()=>{
+ const f=fixture({local:true});const scope=f.context.options();scope.years=[];scope.allYears=true;f.state.viewFilters.overview.desired=scope;f.state.viewFilters.overview.draft=scope;
+ assert.equal(await f.context.performAnalysis(scope),true);assert.equal(f.calculations.length,1);assert.equal(f.calculations[0].allYears,true);assert.deepEqual(f.calculations[0].years,[]);assert.deepEqual(f.errors,[]);
+});
+
 test('repeated programmatic scope changes use the final view and do not loop or retain historical results',async()=>{
  const f=fixture();f.state.claimYears=[2026];f.context.view('suppliers');f.context.view('overview');f.context.view('suppliers');f.context.view('claims');
  assert.equal(f.requests.length,4);assert(f.requests.slice(0,3).every(request=>request.options.signal.aborted));

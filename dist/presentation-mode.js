@@ -4,7 +4,7 @@
   const root = document.documentElement;
   const state = {active: false, collapsed: false, snapshot: null, nativeSeen: false, session: 0, laser: false};
   const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
-  const isProcurement = () => document.querySelector('.main-nav [data-view="procurement"]')?.classList.contains('active') === true;
+  const isProcurement = () => document.querySelector('.main-nav [data-view="procurement"]')?.classList.contains('active') === true && (!document.body.dataset.materialsTab || document.body.dataset.materialsTab === 'fup');
   const laserDot=document.createElement('div');laserDot.className='dashboard-laser-pointer';laserDot.hidden=true;laserDot.setAttribute('aria-hidden','true');document.body.append(laserDot);
   const laserButtons=[];
   function setLaser(enabled) {
@@ -101,6 +101,7 @@
   document.addEventListener('fullscreenchange', onFullscreenChange);
   document.addEventListener('webkitfullscreenchange', onFullscreenChange);
   document.addEventListener('minerva:session-updated', event => { if (global.MINERVA_HOSTED && !event.detail) leave(); });
+  document.addEventListener('minerva:materials-tab',updateTitle);
   if (global.MutationObserver && $('viewLabel')) new MutationObserver(updateTitle).observe($('viewLabel'), {childList: true, characterData: true, subtree: true});
   setFiltersCollapsed(false);
   updateTitle();

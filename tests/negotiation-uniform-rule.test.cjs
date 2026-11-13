@@ -20,8 +20,10 @@ for(const [name,scope,expectedRows]of cases)for(const correctionScenario of ['co
  const nodes={executiveDashboard:{innerHTML:'',addEventListener(){}}},document={getElementById:id=>nodes[id]},window={document};
  vm.runInNewContext(fs.readFileSync(require.resolve('../dist/executive.js'),'utf8'),{window,document});window.MinervaExecutive.render(full);
  const sheets=new Map();window.MinervaExecutive.worksheets({},(_book,name,_headers,rows)=>sheets.set(name,rows));
- const exported=sheets.get('Negociação por país');assert.equal(round(exported.reduce((n,row)=>n+row[1],0)),expected);
- assert.deepEqual(Array.from(exported).flatMap(row=>String(row[3]).split('; ').filter(Boolean).map(Number)).sort((a,b)=>a-b),expectedRows);
+ const historicalRows=[2,3,4,10,11].filter(row=>(!scope.suppliers||scope.suppliers.includes(bd[row-1][28]))&&(!scope.operations||scope.operations.includes(bd[row-1][25]))),historicalAmount=round(historicalRows.reduce((n,row)=>n+bd[row-1][35],0));
+ const exported=sheets.get('Negociação por país');assert.equal(round(exported.reduce((n,row)=>n+row[1],0)),historicalAmount);
+ assert.deepEqual(Array.from(exported).flatMap(row=>String(row[3]).split('; ').filter(Boolean).map(Number)).sort((a,b)=>a-b),historicalRows);
+ assert.equal(report.negotiationPortfolio.amount,historicalAmount);assert.match(nodes.executiveDashboard.innerHTML,/Em negociação procedente por país · Todos os anos/);
  assert.equal(JSON.stringify({bd,control}),before);
 });
 test('all other pending values and confirmed receipts survive; FUP still uses all years and legal aggregate',()=>{

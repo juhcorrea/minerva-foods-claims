@@ -62,6 +62,8 @@ function checkPortfolio(model, expectedRows, amount) {
   assert.deepEqual(details.map(item=>item.row),expectedRows,'every historical row opens in the card detail');
   assert.equal(money(details.reduce((total,item)=>total+item.claimed,0)),amount);
   assert.deepEqual(p.years,[...new Set(details.map(item=>Number(item.rncDate.slice(0,4))))].sort((a,b)=>a-b));
+  assert.deepEqual(p.byCountry.flatMap(item=>item.rows).sort((a,b)=>a-b),expectedRows,'country chart uses the historical portfolio');
+  assert.equal(p.byCountry.reduce((total,item)=>total+item.count,0),expectedRows.length,'country counts source rows, including repeated SGR');
   return p;
 }
 
@@ -146,7 +148,31 @@ function executive() {
   }};
 }
 
-test('only the overview negotiation card and its drilldown use the historical portfolio; country and export retain selected years',()=>{
+test('proceeding claims and recovery cards share their precise denominator, linked receipts, drilldowns and exports',()=>{
+  const ui=executive(),model=run({years:[2026]}),statuses=['EM NEGOCIAÇÃO - PROCEDENTE','FINALIZADO SEM CUSTO','PREJUÍZO MINERVA','PROCEDENTE - SEGURO','RESSARCIMENTO ENCAMINHADO'];
+  model.summary.claimed=90000;model.summary.receivedComparable=90000;
+  Object.assign(model.executiveReport,{
+    monthlyReceipts:[{year:2026,month:11,period:'2026-11',received:333.55,count:3,rows:[21,22,23]}],
+    claimRows:[{row:11,sgr:'QA-DENOM-FUP',supplier:'Fornecedor Alfa',status:statuses[0],pending:'FUP SUPRIMENTOS',rncDate:'2026-02-01',claimed:800.44},{row:12,sgr:'QA-DENOM-FORWARDED',supplier:'Fornecedor Alfa',status:statuses[4],rncDate:'2026-02-01',claimed:100.22},{row:13,sgr:'QA-COSTS',supplier:'Fornecedor Alfa',status:'AGUARDANDO CUSTOS',rncDate:'2026-02-01',claimed:999}],
+    receiptRows:[{row:21,reference:'QA-RECEIPT-A',supplier:'Fornecedor Alfa',compDate:'2026-11-01',received:100.11},{row:22,reference:'QA-RECEIPT-B',supplier:'Fornecedor Alfa',compDate:'2026-11-02',received:200.11},{row:23,reference:'QA-UNALLOCATED',supplier:'Fornecedor Alfa',compDate:'2026-11-03',received:33.33}],
+    recoveryComparison:{claimed:900.66,received:300.22,rate:1/3,claimRows:[11,12],receiptRows:[21,22],unallocatedReceived:33.33,unallocatedReceiptRows:[23],eligibleStatuses:statuses,years:[2026]}
+  });
+  const before=JSON.stringify(model);ui.api.render(model);
+  const card=label=>[...ui.dashboard.innerHTML.matchAll(/<article class="exec-kpi [^"]*">[\s\S]*?<\/article>/g)].map(item=>item[0]).find(item=>item.includes('<div class="exec-kpi-label">'+label));
+  const claimed=card('Reclamado procedente'),recovery=card('Recuperação');assert(claimed);assert(recovery);
+  assert.match(claimed,/>901<\/button>/);assert.match(claimed,/USD · 2026/);assert.equal(card('Recebido no mês'),undefined);
+  for(const status of statuses)assert(claimed.includes(status));assert.match(claimed,/Pendência FUP SUPRIMENTOS não é excluída/);
+  assert.match(recovery,/>33,3%<\/button>/);assert.match(recovery,/US\$ 300,22 recebido vinculado ÷ US\$ 900,66/);assert.match(recovery,/fora desta comparação: US\$ 33,33/);assert.match(recovery,/Não há rateio de referências mistas ou incompletas/);
+  ui.click(claimed.match(/data-exec-detail="([^"]+)"/)[1]);assert.match(ui.content.innerHTML,/2 de 2 linhas/);assert.match(ui.content.innerHTML,/QA-DENOM-FUP/);assert.match(ui.content.innerHTML,/QA-DENOM-FORWARDED/);assert.match(ui.content.innerHTML,/800,44/);assert.doesNotMatch(ui.content.innerHTML,/QA-COSTS/);
+  ui.click(recovery.match(/data-exec-detail="([^"]+)"/)[1]);assert.match(ui.title.textContent,/Recebimentos dos claims procedentes/);assert.match(ui.content.innerHTML,/2 de 2 linhas/);assert.match(ui.content.innerHTML,/QA-RECEIPT-A/);assert.match(ui.content.innerHTML,/200,11/);assert.doesNotMatch(ui.content.innerHTML,/QA-UNALLOCATED/);
+  const sheets=new Map();ui.api.worksheets({},(_book,name,_headers,rows)=>sheets.set(name,rows));
+  assert.deepEqual(Array.from(sheets.get('Recuperação procedentes')[0]),['2026',900.66,300.22,1/3,33.33]);
+  assert.deepEqual(Array.from(sheets.get('Reclamado procedente'),row=>row[0]),[11,12]);assert.equal(sheets.get('Reclamado procedente')[0][5],800.44);
+  assert.deepEqual(Array.from(sheets.get('Recebimentos procedentes'),row=>row[0]),[21,22]);assert.equal(sheets.get('Recebimentos procedentes')[1][4],200.11);
+  assert.equal(JSON.stringify(model),before,'render, details and export preserve unrounded calculation inputs');
+});
+
+test('overview negotiation card, country chart, drilldowns and exports share the historical portfolio across year filters',()=>{
   for(const year of [2020,2025,2026]) {
     const model = run({years:[year]});
     const before = JSON.stringify(model);
@@ -166,27 +192,36 @@ test('only the overview negotiation card and its drilldown use the historical po
     assert.match(ui.content.innerHTML,/QA-OTHER/);
     assert.match(ui.content.innerHTML,/100,13/,'detail preserves decimal values');
     assert.doesNotMatch(ui.content.innerHTML,/QA-FUP-TEXT|QA-NOT-PROCEDENT|QA-EXTERNAL|QA-FUTURE|QA-MISSING-DATE/);
-    assert.match(ui.dashboard.innerHTML,new RegExp('Em negociação procedente por país · '+year));
+    assert.match(ui.dashboard.innerHTML,/Em negociação procedente por país · Todos os anos/);
     assert.match(ui.dashboard.innerHTML,/<footer class="exec-source-foot">BASE: BD<\/footer>/);
     const country = ui.dashboard.innerHTML.match(/class="exec-country" data-exec-detail="([^"]+)"/);
     assert(country);
     ui.click(country[1]);
-    const selectedIds = model.executiveReport.negotiationByCountry.flatMap(item=>item.rows);
+    const selectedIds = model.executiveReport.negotiationPortfolio.byCountry.flatMap(item=>item.rows);
     assert.match(ui.content.innerHTML,new RegExp(selectedIds.length+' de '+selectedIds.length+' linhas'));
-    for(const id of portfolioRows) {
-      const rncDate = bd[id-1][1].split('-').reverse().join('/');
-      if(!selectedIds.includes(id))assert(!ui.content.innerHTML.includes(rncDate),'country detail retains selected claim years');
-    }
+    for(const reference of ['QA-HISTORICAL','QA-PRIOR','QA-OTHER'])assert(ui.content.innerHTML.includes(reference),'country detail retains all eligible historical claims');
+    assert.doesNotMatch(ui.content.innerHTML,/QA-FUP-TEXT|QA-NOT-PROCEDENT|QA-EXTERNAL|QA-FUTURE|QA-MISSING-DATE/);
     const sheets = new Map();
     ui.api.worksheets({},(_book,name,_headers,rows)=>sheets.set(name,rows));
     const exported = sheets.get('Negociação por país');
-    assert.equal(money(exported.reduce((total,item)=>total+item[1],0)),model.summary.negotiating);
+    assert.equal(money(exported.reduce((total,item)=>total+item[1],0)),model.executiveReport.negotiationPortfolio.amount);
     assert.deepEqual(Array.from(exported).flatMap(item=>String(item[3]).split('; ').filter(Boolean).map(Number)).sort((a,b)=>a-b),selectedIds.sort((a,b)=>a-b));
-    const historicalExport = sheets.get('Negociação todos os anos');
+    const historicalExport = sheets.get('Carteira em negociação');
     assert(historicalExport,'historical card has its own worksheet');
     assert.deepEqual(Array.from(historicalExport,item=>item[0]).sort((a,b)=>a-b),portfolioRows);
     assert.equal(money(historicalExport.reduce((total,item)=>total+item[7],0)),1060.75);
     for(const item of historicalExport)assert.equal(item[7],bd[item[0]-1][35],'Excel retains original precision before aggregation');
     assert.equal(JSON.stringify(model),before);
   }
+});
+
+test('a chosen month shows the same year-month negotiation scope in cards, country detail and Excel, with historical scope restored by Todos',()=>{
+ const ui=executive(),model=run({years:[2026],months:[2]});ui.api.render(model);
+ const html=ui.dashboard.innerHTML,card=[...html.matchAll(/<article class="exec-kpi [^"]*">[\s\S]*?<\/article>/g)].map(item=>item[0]).find(item=>item.includes('<div class="exec-kpi-label">Em negociação'));
+ assert.match(card,/>300<\/button>/);assert.match(card,/USD · 2026 · Fev/);assert.doesNotMatch(card,/Todos os anos|Carteira de todos os anos/);
+ assert.match(html,/<h3>Em negociação procedente por país · 2026 · Fev<\/h3>/);assert.match(html,/<h3>Recebimento mensal · 2026 · Fev<\/h3>/);assert.match(html,/<h3>Recebimento em aberto por fornecedor · 2026 · Fev<\/h3>/);assert.doesNotMatch(html,/data-exec-year|data-exec-month/,'overview uses only the top period controls');
+ ui.click(card.match(/data-exec-detail="([^"]+)"/)[1]);assert.match(ui.title.textContent,/2026 · Fev/);assert.match(ui.content.innerHTML,/1 de 1 linhas/);assert.match(ui.content.innerHTML,/300,13/);assert.doesNotMatch(ui.content.innerHTML,/QA-HISTORICAL|QA-PRIOR|QA-OTHER/);
+ const country=html.match(/class="exec-country" data-exec-detail="([^"]+)"/);assert(country);ui.click(country[1]);assert.match(ui.content.innerHTML,/1 de 1 linhas/);
+ const sheets=new Map();ui.api.worksheets({},(_wb,name,_headers,rows)=>sheets.set(name,rows));assert.equal(sheets.get('Negociação por país')[0][1],300.13);assert.deepEqual(Array.from(sheets.get('Carteira em negociação'),row=>row[0]),[4]);assert.equal(sheets.get('Carteira em negociação')[0][7],300.125);
+ ui.api.render(run({years:[2026],months:Array.from({length:12},(_,i)=>i+1)}));assert.match(ui.dashboard.innerHTML,/Em negociação procedente por país · Todos os anos/);assert.match(ui.dashboard.innerHTML,/>1\.061<\/button>/);
 });

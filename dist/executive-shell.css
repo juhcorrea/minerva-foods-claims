@@ -80,6 +80,25 @@ html[data-theme=light] .executive-mode :is(.table-container,.table-wrap) td{bord
 @media(max-width:1200px){.executive-mode .topbar{flex-wrap:wrap}.executive-mode .preferences-toolbar{margin-left:0}.executive-mode .page-heading{flex-wrap:wrap}.executive-mode .heading-actions{max-width:100%;width:100%;justify-content:flex-start}.executive-mode .heading-actions .period-label{margin-left:auto;order:4}.executive-mode .filter-field{min-width:140px}}
 @media(max-width:760px){.executive-mode main{padding:14px 12px 0}.executive-mode .topbar{padding:10px 12px}.executive-mode .page-heading{align-items:flex-start;flex-wrap:wrap}.executive-mode .page-heading h1{font-size:24px}.executive-mode .heading-actions{width:100%;justify-content:flex-start}.executive-mode .heading-actions .period-label{flex-basis:auto;margin-right:auto}.executive-mode .brand-lockup{padding:12px 16px}.executive-mode .product-lockup{padding-top:0}.executive-mode .filter-field{min-width:130px}.executive-mode .supplier-filter{flex-basis:100%}.executive-mode .context-help.table-help{padding-inline:12px}.executive-comparative>summary span{display:block;margin:5px 0 0}.executive-mode .panel-heading{padding:14px 12px}.executive-mode .preferences-toolbar{width:100%;justify-content:flex-end}.executive-mode .receipt-summary .mini-stat strong{font-size:20px}}
 @media print{.executive-comparative{display:none}.context-help,.executive-mode .status-message{display:none!important}.executive-mode main{padding:0}.executive-mode .filters-panel{display:none!important}}
+
+/* Compact analysis strip: each page keeps its own selection. */
+.executive-mode .filters-panel{position:relative;display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 9px;padding:12px 14px;margin-bottom:16px;background:var(--paper);border-radius:9px}
+.executive-mode .filters-panel .year-selector{flex:0 1 112px;width:112px;min-width:105px;max-width:none}
+.executive-mode .filters-panel .filter-field{flex:1 1 155px;min-width:135px}
+.executive-mode .filters-panel .month-filter{flex:0 1 132px;min-width:120px}
+.executive-mode .filters-panel .supplier-filter{flex:1.4 1 180px}
+.executive-mode .filters-panel .scenario-filter{flex:1 1 175px}
+.executive-mode .filters-panel .supplier-year-field,.executive-mode .filters-panel #claimYearField{flex:0 1 112px;min-width:105px}
+.executive-mode .filters-panel .year-selector legend,.executive-mode .filters-panel .filter-field>span{font-size:calc(9px * var(--minerva-text-scale,1));font-weight:650;letter-spacing:.2px;text-transform:none;line-height:1.35;margin-bottom:5px;max-width:none;color:var(--ink)}
+.executive-mode .filters-panel .filter-field input,.executive-mode .filters-panel .filter-field select,.executive-mode .filters-panel .multi-select-button{height:34px;min-height:34px;padding:6px 9px;border-radius:5px;font-size:calc(10px * var(--minerva-text-scale,1));line-height:1.4}
+.global-filter-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.executive-mode #applyFilters{height:34px;min-height:34px;padding:6px 14px;background:var(--navy);border-color:var(--navy);color:#fff;gap:6px;margin:0}
+.executive-mode #applyFilters:hover{background:var(--blue);border-color:var(--blue)}
+.executive-mode #applyFilters .icon{width:14px;height:14px}
+.executive-mode .filter-clear{height:34px;min-height:34px;width:34px;padding:7px;border:1px solid var(--line);border-radius:5px;color:var(--ink);background:var(--paper)}
+.executive-mode .filter-clear:hover{background:var(--pale);border-color:var(--blue)}
+.executive-mode .filters-panel .scenario-status{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0}
+@media(max-width:760px){.executive-mode .filters-panel{padding:11px;gap:10px}.executive-mode .filters-panel .year-selector,.executive-mode .filters-panel .month-filter{flex:1 1 calc(50% - 10px);width:auto;min-width:100px}.executive-mode .filters-panel .filter-field{flex:1 1 calc(50% - 10px);min-width:120px}.executive-mode .filters-panel .supplier-filter{flex-basis:100%}.global-filter-actions{margin-left:auto}}
 @media print{body.printing-calculation-rules{background:#fff!important}body.printing-calculation-rules>*:not(#calculationRulesPrint){display:none!important}body.printing-calculation-rules #calculationRulesPrint{display:block!important;margin:0;padding:0}body.printing-calculation-rules .rules-document{display:block!important;page:calculation-rules}body.printing-calculation-rules .rules-document *{color:#233b4d!important}body.printing-calculation-rules .rules-document header{display:flex!important}body.printing-calculation-rules .rules-document h2{color:#2e5372!important}@page calculation-rules{size:A4 portrait;margin:15mm}}
 /* Numeric columns share one alignment in every table and in print. */
 body.executive-mode table :is(th,td):is(.num,.numeric,.number-cell,[data-numeric],.exec-detail-number){text-align:center;vertical-align:middle;font-variant-numeric:tabular-nums}
@@ -87,3 +106,66 @@ body.executive-mode table th:is(.num,.numeric,.number-cell,[data-numeric]) .colu
 .scope-load-notice{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:20px 22px;margin:0 0 18px;border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:9px;background:var(--paper);color:var(--ink)}
 .scope-load-notice strong{font-size:calc(14px * var(--minerva-text-scale,1));font-weight:700}.scope-load-notice p{margin:5px 0 0;font-size:calc(12px * var(--minerva-text-scale,1));color:var(--muted)}.scope-load-notice .button{flex-shrink:0}
 @media(max-width:600px){.scope-load-notice{align-items:flex-start;flex-direction:column;padding:16px}}
+
+/* Capitalização apenas dos títulos, rótulos e comandos da interface.
+   Nomes vindos das bases, valores, textos explicativos e tooltips permanecem originais. */
+#appTitle,
+#viewLabel,
+#dashboardPresentationTitle,
+.main-nav .nav-item > span:not(.nav-count),
+.button,
+.navigation-menu button,
+.receipt-subnav button,
+.filter-field > span,
+.toolbar-select > span,
+.year-selector legend,
+.section-line h2,
+.panel-heading h2,
+.audit-intro h2,
+.empty-copy h2,
+#importTitle,
+.profile-panel-heading h2,
+.profile-resources a,
+.profile-resources button,
+.sv-heading h2,
+.sv-save > label,
+.exec-panel-heading h3,
+.exec-title-block h3,
+.exec-kpi-label,
+.exec-case-total > span,
+.exec-case-stage-heading > strong,
+.exec-case-stage-heading > button,
+.exec-status-legend > span,
+.exec-sla-item > div > span,
+.exec-reference > span,
+.cc-kpi > span,
+.cc-table-heading h3,
+.cc-filters label > span,
+.cc-case-countries h3,
+.cc-case-legend > span,
+.cc-editorial-strip > div > span:not(.cc-summary-icon),
+.cc-master-heading h3,
+.cc-selected-total > span,
+.cc-reason-actions button,
+.analyst-title-row h2,
+.analyst-kpi > span,
+.section-collapse-label,
+.section-collapse-button,
+.column-heading > span,
+.multi-select-footer button,
+.column-filter-footer button,
+.column-sort-disclosure > summary,
+.column-sort-options button,
+[data-clear-table],
+[data-reset-table-sort] {
+  text-transform: capitalize;
+}
+/* A transformação dos rótulos não deve alcançar explicações ou dados aninhados. */
+.exec-info,
+.exec-info::before,
+.exec-info::after,
+.exec-kpi-label small,
+.cc-editorial-strip > div > span > small,
+.column-heading .column-filter-state {
+  text-transform: none;
+}

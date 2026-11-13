@@ -69,17 +69,18 @@ function runtime(){
 }
 
 test('compiled Worker protects report assets and private APIs and keeps backup administrative',async()=>{
-  const f=runtime(),privatePaths=['/app.js','/engine.js','/team.js','/styles.css','/analysts.js','/meetings.js','/claim-control.js'];
+  const f=runtime(),privatePaths=['/app.js','/engine.js','/team.js','/styles.css','/analysts.js','/meetings.js','/claim-control.js','/materials.css','/materials.js','/materials-data.js'];
   for(const file of privatePaths)for(const method of ['GET','HEAD'])assert.equal((await f.request(file+'?v=test',null,undefined,method)).status,401);
   for(const route of ['/api/report','/api/report/meta','/api/migration/export'])assert.equal((await f.request(route)).status,401);
   assert(!f.env.BUCKET.reads.includes('private/report-latest-v1.json'));
-  for(const route of ['/worker/backend.js','/_worker.js','/.env','/.git/HEAD','/.openai/hosting.json','/dados/bases-publicadas.json','/codigo-operacional.zip'])assert.equal((await f.request(route)).status,404);
+  for(const route of ['/worker/backend.js','/_worker.js','/.env','/.git/HEAD','/.openai/hosting.json','/dados/bases-publicadas.json','/dados/campos-manuais-materiais.json','/private/material-inputs-v1.json','/codigo-operacional.zip'])assert.equal((await f.request(route)).status,404);
   const entry=await f.request('/');assert.equal(entry.status,200);assert(!(await entry.text()).includes('window.MINERVA_HOSTED=true'));
   const login=await f.request('/api/auth/exchange',null,{token:f.token});assert.equal(login.status,200);const admin=login.headers.get('set-cookie').split(';')[0];
   const pending=await f.request('/api/auth/request',null,{name:'Viewer Test',email:'viewer@example.invalid'});assert.equal(pending.status,201);const viewer=pending.headers.get('set-cookie').split(';')[0],member=(await pending.json()).userId;assert.equal((await f.request('/app.js',viewer)).status,403);
   assert.equal((await f.request('/api/members/'+member+'/approve',admin,{})).status,200);
   for(const file of privatePaths){const response=await f.request(file,viewer);assert.equal(response.status,200);assert.match(response.headers.get('cache-control'),/private, no-store/);}
-  const index=await f.request('/',viewer);assert((await index.text()).includes('window.MINERVA_HOSTED=true'));
+  const index=await f.request('/',viewer),html=await index.text();assert(html.includes('window.MINERVA_HOSTED=true'));
+  for(const name of ['materials.css','materials.js','materials-data.js'])assert.match(html,new RegExp(name.replace('.','\\.')+'\\?v=[a-f0-9]{12}'));
   assert.equal((await f.request('/api/migration/export',viewer)).status,403);const backup=await f.request('/api/migration/export',admin);assert.equal(backup.status,200);assert.match(backup.headers.get('content-type'),/application\/zip/);assert.equal(Buffer.from(await backup.arrayBuffer()).subarray(0,2).toString(),'PK');
 });
 

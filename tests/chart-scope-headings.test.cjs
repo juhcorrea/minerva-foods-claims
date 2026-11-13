@@ -28,13 +28,15 @@ test('chart titles retain the financial year and footers disclose the base witho
  assert.match(ui.claims.innerHTML,/Não usa Status F nem filtros locais da lista operacional/);
  assert.match(ui.dashboard.innerHTML,/Recebimento mensal · 2026/);
  assert.match(ui.dashboard.innerHTML,/<h3>Maiores causadores · 2026<\/h3>/);
- assert.match(ui.dashboard.innerHTML,/<h3>Recebimento em aberto por fornecedor · todos os anos<\/h3>/);
+ assert.match(ui.dashboard.innerHTML,/<h3>Recebimento em aberto por fornecedor · Todos os anos<\/h3>/);
  assert.match(ui.dashboard.innerHTML,/<h3>Recebimento por fornecedor · 2026<\/h3>/);
- assert.equal((ui.dashboard.innerHTML.match(/<footer class="exec-source-foot">BASE: (?:BD|RECEBIMENTO)<\/footer>/g)||[]).length,6);
+ assert.equal((ui.dashboard.innerHTML.match(/<footer class="exec-source-foot">BASE: (?:BD|RECEBIMENTO)<\/footer>/g)||[]).length,7);
  assert.equal((ui.claims.innerHTML.match(/<footer class="exec-source-foot">BASE: BD<\/footer>/g)||[]).length,3);
- for(const html of [ui.dashboard.innerHTML,ui.claims.innerHTML])assert.doesNotMatch([...html.matchAll(/<h3>(.*?)<\/h3>/g)].map(match=>match[1]).join(' '),/\bBD\b|\bControle\b|BASE:/);
- assert.match(ui.dashboard.innerHTML,/Exclui pendências contendo FUP SUPRIMENTOS/);
- assert.match(ui.dashboard.innerHTML,/Este gráfico segue os anos selecionados; o card Em negociação mostra todos os anos/);
+ for(const html of [ui.dashboard.innerHTML,ui.claims.innerHTML])assert.doesNotMatch([...html.matchAll(/<h3>(.*?)<\/h3>/g)].map(match=>match[1]).join(' '),/\bBD\b|(?:^| · )Controle(?: · |$)|BASE:/);
+ assert.match(ui.dashboard.innerHTML,/<h3>Controle de claim · 2026<\/h3>/,'the new case summary is a legitimate chart name, not a receipt-base label');
+ assert.match(ui.dashboard.innerHTML,/sem Pendência contendo FUP SUPRIMENTOS/);
+ assert.match(ui.dashboard.innerHTML,/<h3>Em negociação procedente por país · Todos os anos<\/h3>/);
+ assert.match(ui.dashboard.innerHTML,/Mesma carteira histórica do card Em negociação/);
  assert.doesNotMatch(visible(ui.dashboard.innerHTML),columnCodes);assert.doesNotMatch(visible(ui.claims.innerHTML),columnCodes);
  assert.match(visible(ui.dashboard.innerHTML),/Status pagamento: Pago · Data de compensação/);
  assert.equal(JSON.stringify(model),before);
@@ -109,5 +111,6 @@ test('all-year and long selected periods use short truthful labels in both chart
 });
 
 test('pipeline country bars retain labels and use only the five existing official flag assets',()=>{
- const ui=executive(),m=fixture(),countries=[['BRA','br','Brasil'],['PRY','py','Paraguai'],['URY','uy','Uruguai'],['COL','co','Colômbia'],['ARG','ar','Argentina'],['N/I',null,null]];m.executiveReport.openByCountry=countries.map(([country],i)=>({country,negotiating:1,inAnalysis:0,awaitingCosts:0,total:1,rows:[i+2]}));ui.api.render(m);ui.api.renderClaims(m,ui.claims);const labels=[...ui.claims.innerHTML.matchAll(/<span class="exec-country-name">([^]*?)<\/span>/g)].map(match=>match[1]);assert.equal(labels.length,6);for(let i=0;i<5;i++){const [code,asset,name]=countries[i];assert(labels[i].includes('src="assets/flags/'+asset+'.svg"'));assert(labels[i].includes('alt="Bandeira: '+name+'"'));assert(labels[i].endsWith(code));}assert.equal(labels[5],'N/I');
+ const ui=executive(),m=fixture(),countries=[['BRA','br','Brasil'],['PRY','py','Paraguai'],['URY','uy','Uruguai'],['COL','co','Colômbia'],['ARG','ar','Argentina'],['N/I',null,null]];m.executiveReport.openByCountry=countries.map(([country],i)=>({country,negotiating:1,inAnalysis:0,awaitingCosts:0,total:1,rows:[i+2]}));ui.api.render(m);ui.api.renderClaims(m,ui.claims);
+ for(const html of [ui.dashboard.innerHTML,ui.claims.innerHTML]){const labels=[...html.matchAll(/<span class="exec-country-name">([^]*?)<\/span>/g)].map(match=>match[1]);assert.equal(labels.length,countries.length);for(let i=0;i<5;i++){const [code,asset,name]=countries[i];assert(labels[i].includes('src="assets/flags/'+asset+'.svg"'));assert(labels[i].includes('alt="Bandeira: '+name+'"'));assert(labels[i].endsWith(code));}assert.equal(labels[5],'N/I');}
 });

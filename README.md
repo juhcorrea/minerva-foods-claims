@@ -90,8 +90,10 @@ A restauração usa um novo projeto e armazenamento vazio, com credenciais novas
 
 A demonstração pública não possui backend nem dados ou contas reais e não oferece esse download. Este repositório contém somente o código e testes fictícios da funcionalidade; backups operacionais nunca devem ser adicionados ao GitHub ou aos assets públicos.
 
-## Carteira de negociação e filtros de anos (13/11/2026)
+## Materiais, filtros e carteira histórica (13/11/2026)
 
-O card Em negociação na Visão geral e seu detalhe usam a carteira de todos os anos, mantendo fornecedor, operação, Data RNC válida até a análise e a regra EM NEGOCIAÇÃO - PROCEDENTE sem FUP SUPRIMENTOS nem INTERFERÊNCIA EXTERNA. O gráfico por país e os demais cálculos financeiros permanecem no período selecionado. A exportação separa a carteira histórica do gráfico por país.
+A demonstração usa somente dados fictícios. Materiais reúne o FUP suprimentos e os reports Diretoria e Armadores, com filtros próprios, apresentação, PDF e Excel. O ranking dos três armadores usa o maior USD em negociação e o campo Cia marítima da base; informações externas digitadas ficam separadas dos cálculos. A versão operacional usa persistência privada, revisão e permissões; a demonstração pública não oferece contas nem armazenamento remoto.
 
-O seletor de anos oferece todos os anos válidos encontrados nas bases, com busca, multisseleção, marcar/desmarcar todos e Aplicar interno. Cada aba mantém sua configuração. Fontes dos gráficos ficam em rodapés BASE: BD ou BASE: RECEBIMENTO; títulos conservam o período. Rankings exibem US$ e números inteiros completos, preservando precisão em detalhes e exportações.
+O card Em negociação e seu quadro por país usam a mesma carteira: situação Em negociação procedente, sem FUP Suprimentos e interferência externa. Todos os meses mantém todos os anos; meses específicos combinam ano e mês da Data RNC. Recebimentos usam compensação e saldo/vencido usam previsão de pagamento. Reclamado procedente e Recuperação identificam o conjunto comparável e preservam o caixa não vinculado.
+
+Todos os anos válidos da base ficam disponíveis. Filtros compactos têm busca, multisseleção, Marcar todos/Limpar e Aplicar interno; a busca pode selecionar os resultados encontrados. Cada página mantém seus filtros e visões salvas. Títulos e rodapés informam período e fonte; números dos visuais são arredondados e exportações preservam centavos.

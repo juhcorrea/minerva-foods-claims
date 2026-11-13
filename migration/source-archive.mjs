@@ -12,6 +12,8 @@ const git=promisify(execFile);
 const roots=['dist','worker','tests','migration','scripts'];
 const topFiles=['.gitignore','.openai/hosting.json','README.md','build.mjs'];
 const extensions=new Set(['.js','.mjs','.cjs','.css','.html','.md','.txt','.json','.sql','.webmanifest','.png','.woff2','.svg','.webp','.cs','.csproj']);
+const privateObjectNames=new Set(['report-latest-v1.json','correction-progress-v1.json','access-v3.json','material-inputs-v1.json']);
+const materialAssets=['dist/materials.css','dist/materials.js','dist/materials-data.js'];
 export async function buildMigrationSource(root) {
   let commitSha=null, tracked, priorHashes=null;
   if(fs.existsSync(path.join(root,'.git'))){
@@ -27,9 +29,10 @@ export async function buildMigrationSource(root) {
   }
   const paths=tracked.filter(name=>topFiles.includes(name)||(
     roots.includes(name.split('/')[0])&&extensions.has(path.extname(name))&&
-    name.split('/').every(part=>part&&!part.startsWith('.')&&!['bin','obj','server','node_modules','SOURCE.json'].includes(part))
+    !privateObjectNames.has(path.posix.basename(name).toLowerCase())&&
+    name.split('/').every(part=>part&&!part.startsWith('.')&&!['bin','obj','server','private','dados','node_modules','source.json'].includes(part.toLowerCase()))
   )).sort();
-  for(const required of [...topFiles,'migration/restore-data.mjs','migration/RESTAURACAO.txt','migration/source-archive.mjs','worker/migration.js','worker/zip.js','worker/correction-progress.js'])if(!paths.includes(required))throw new Error('Required source must be tracked before building: '+required);
+  for(const required of [...topFiles,...materialAssets,'migration/restore-data.mjs','migration/RESTAURACAO.txt','migration/source-archive.mjs','worker/migration.js','worker/zip.js','worker/correction-progress.js'])if(!paths.includes(required))throw new Error('Required source must be tracked before building: '+required);
   const fileHashes={};
   const files=paths.map(name=>{
     const absolute=path.join(root,name);

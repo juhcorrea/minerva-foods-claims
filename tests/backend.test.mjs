@@ -203,6 +203,21 @@ test('server-side filters remain constrained and non-API routing is external',as
  assert.equal(await handler(new Request(origin+'/index.html'),env),null);
 });
 
+test('month filters reach analysis canonically and malformed scopes are rejected before analysis',async()=>{
+ const seen=[],monthApi=createApiHandler({engine:{...engine,analyze:(bd,control,options)=>{seen.push({...options});return engine.analyze(bd,control,options);}}});
+ const env=environment(),admin=await login(env,'owner',monthApi);
+ assert.equal((await call(env,'/api/report',admin.cookie,{method:'POST',body:sampleInput()},monthApi)).status,200);
+ for(const [query,expected] of [['',[]],['?months=11',[11]],['?months=11,2,11',[2,11]],['?months=1,2,3,4,5,6,7,8,9,10,11,12',[]]]){
+  const result=await call(env,'/api/report'+query,admin.cookie,{},monthApi);assert.equal(result.status,200);assert.deepEqual(seen.at(-1).months,expected);
+ }
+ for(const months of ['','0','13','2.5','word','2,','1e0','1, 2',Array(13).fill(2).join(',')]){
+  const before=seen.length,result=await call(env,'/api/report?months='+encodeURIComponent(months),admin.cookie,{},monthApi);
+  assert.equal(result.status,400,months);assert.equal(result.body.code,'INVALID_MONTHS');assert.equal(seen.length,before);
+ }
+ assert.equal((await call(env,'/api/report?months=2&months=11',admin.cookie,{},monthApi)).status,400);
+ assert.equal((await call(env,'/api/report?months=11',null,{},monthApi)).status,401);
+});
+
 test('all-years requests are isolated from the current-year default and preserve old cash and claim origins',async()=>{
  const env=environment(),admin=await login(env),input=sampleInput();
  const old=[...input.bd[1]];Object.assign(old,{0:'OLD-CLAIM',1:'2018-01-01',22:'OLD/1',24:8765,35:300});input.bd.push(old);

@@ -27,12 +27,23 @@
     if (!record.popup || record.popup.hidden) return;
     const rect = record.button.getBoundingClientRect(), viewportWidth = global.innerWidth, viewportHeight = global.innerHeight;
     if (rect.bottom < 0 || rect.top > viewportHeight) { close(); return; }
-    const width = Math.min(420, Math.max(280, rect.width), viewportWidth - 16);
+    const width = Math.min(220, viewportWidth - 16);
     const below = viewportHeight - rect.bottom - 12, above = rect.top - 12, useAbove = below < 230 && above > below;
     const available = Math.max(100, Math.min(viewportHeight - 16, useAbove ? above : below));
     record.popup.style.width = width + 'px'; record.popup.style.maxHeight = available + 'px';
     record.popup.style.left = Math.max(8, Math.min(rect.left, viewportWidth - width - 8)) + 'px';
     record.popup.style.top = (useAbove ? Math.max(8, rect.top - record.popup.getBoundingClientRect().height - 6) : Math.max(8, rect.bottom + 6)) + 'px';
+  }
+  const enabled = option => !option.disabled && option.parentElement?.disabled !== true;
+  const visibleOptions = record => options(record.select).filter(option=>enabled(option)&&normalize(label(option)).includes(normalize(record.search.value.trim())));
+  function refreshActions(record) {
+    const visible=visibleOptions(record),selected=values(record.select),query=record.search.value.trim();
+    const scope=query?visible:options(record.select).filter(enabled),wanted=new Set(selected);
+    record.clearAction=scope.length>0&&scope.every(option=>wanted.has(option.value))&&selected.length===scope.length;
+    setText(record.toggle,record.clearAction?'Limpar':'Marcar todos');
+    record.toggle.disabled=!!query&&!visible.length;
+    record.done.disabled=!!query&&!visible.length||record.selectionEdited&&!selected.length&&!record.resetRequested;
+    setText(record.count,selected.length+' de '+options(record.select).length+' selecionados');
   }
   function refreshList(record) {
     if (!record.list) return;
@@ -47,7 +58,7 @@
     }
     if (!count) { const empty = document.createElement('p'); empty.className = 'multi-select-empty'; empty.textContent = 'Nenhuma opção encontrada.'; fragment.append(empty); }
     record.list.replaceChildren(fragment);
-    setText(record.count, values(record.select).length + ' de ' + all.length + ' selecionados');
+    refreshActions(record);
     position(record);
   }
   function commit(record, selected) {
@@ -55,6 +66,10 @@
     record.select.dispatchEvent(new Event('change', {bubbles: true}));
   }
   function applySelection(record) {
+    const query=record.search.value.trim();
+    if(query&&!visibleOptions(record).length)return;
+    if(query&&!record.selectionEdited)commit(record,visibleOptions(record).map(option=>option.value));
+    if(record.selectionEdited&&!values(record.select).length&&!record.resetRequested)return;
     const selector = record.select.dataset.applyTarget;
     const target = selector ? document.querySelector(selector) : null;
     const form = record.select.closest('form');
@@ -65,23 +80,28 @@
   }
   function buildPopup(record) {
     const popup = document.createElement('div'); popup.id = record.button.getAttribute('aria-controls'); popup.className = 'multi-select-popover'; popup.hidden = true; popup.setAttribute('role', 'dialog');
-    const head = document.createElement('div'); head.className = 'multi-select-heading';
-    const heading = document.createElement('strong'); heading.id = popup.id + '-title'; heading.textContent = title(record.select); popup.setAttribute('aria-labelledby', heading.id);
-    const exit = document.createElement('button'); exit.type = 'button'; exit.className = 'multi-select-close'; exit.textContent = '×'; exit.setAttribute('aria-label', 'Fechar opções'); exit.addEventListener('click', () => close(true)); head.append(heading, exit);
-    const search = document.createElement('input'); search.type = 'search'; search.className = 'multi-select-search'; search.placeholder = 'Buscar opções'; search.setAttribute('aria-label', 'Buscar em ' + title(record.select)); search.autocomplete = 'off';
-    const actions = document.createElement('div'); actions.className = 'multi-select-actions';
-    for (const [name, text] of [['all', 'Marcar todos'], ['clear', 'Desmarcar todos']]) {
-      const button = document.createElement('button'); button.type = 'button'; button.textContent = text;
-      button.addEventListener('click', () => commit(record, name === 'all' ? options(record.select).filter(option => !option.disabled && option.parentElement?.disabled !== true).map(option => option.value) : [])); actions.append(button);
-    }
+    popup.setAttribute('aria-label',title(record.select));
+    const search = document.createElement('input'); search.type = 'search'; search.className = 'multi-select-search'; search.placeholder = 'Pesquisar…'; search.setAttribute('aria-label', 'Buscar em ' + title(record.select)); search.autocomplete = 'off';
     const list = document.createElement('div'); list.className = 'multi-select-options'; list.setAttribute('role', 'group'); list.setAttribute('aria-label', 'Opções de ' + title(record.select));
-    const footer = document.createElement('div'); footer.className = 'multi-select-footer'; const count = document.createElement('span'); count.setAttribute('role', 'status'); const done = document.createElement('button'); done.type = 'button'; done.textContent = 'Aplicar'; done.addEventListener('click', () => applySelection(record)); footer.append(count, done);
-    popup.append(head, search, actions, list, footer); document.body.append(popup);
-    Object.assign(record, {popup, search, list, count});
+    const footer = document.createElement('div'); footer.className = 'multi-select-footer'; const count = document.createElement('span'); count.className='multi-select-count';count.setAttribute('role', 'status');
+    const toggle=document.createElement('button');toggle.type='button';toggle.setAttribute('data-multi-action','toggle');
+    toggle.addEventListener('click',()=>{
+      if(toggle.disabled)return;record.selectionEdited=true;
+      if(record.clearAction){search.value='';record.resetRequested=true;commit(record,[]);}
+      else{record.resetRequested=false;commit(record,(search.value.trim()?visibleOptions(record):options(record.select).filter(enabled)).map(option=>option.value));}
+      refreshList(record);
+    });
+    const done = document.createElement('button'); done.type = 'button';done.setAttribute('data-multi-action','apply'); done.textContent = 'Aplicar'; done.addEventListener('click', () => applySelection(record)); footer.append(toggle, done);
+    popup.append(search, list, count, footer); document.body.append(popup);
+    Object.assign(record, {popup, search, list, count,toggle,done});
     search.addEventListener('input', () => refreshList(record));
     list.addEventListener('change', event => {
       const checkbox = event.target.closest('input[data-multi-value]'); if (!checkbox) return;
-      const selected = new Set(values(record.select)); checkbox.checked ? selected.add(checkbox.value) : selected.delete(checkbox.value); commit(record, [...selected]);
+      let selected = new Set(values(record.select));
+      const allEnabled=options(record.select).filter(enabled);
+      if(record.search.value.trim()&&!record.selectionEdited&&selected.size===allEnabled.length&&allEnabled.every(option=>selected.has(option.value)))selected=new Set(visibleOptions(record).map(option=>option.value));
+      record.selectionEdited=true;record.resetRequested=false;
+      checkbox.checked ? selected.add(checkbox.value) : selected.delete(checkbox.value); commit(record, [...selected]);
     });
     popup.addEventListener('keydown', event => {
       if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || event.target === search) return;
@@ -93,7 +113,7 @@
     if (record.select.disabled) return;
     if (active === record) { close(true); return; }
     close(); if (!record.popup) buildPopup(record); active = record;
-    record.popup.hidden = false; record.button.setAttribute('aria-expanded', 'true'); sync(record); refreshList(record); record.search.focus();
+    record.selectionEdited=false;record.resetRequested=false;record.search.value='';record.popup.hidden = false; record.button.setAttribute('aria-expanded', 'true'); sync(record); refreshList(record); record.search.focus();
   }
   function sync(record) {
     const selected = options(record.select).filter(option => option.selected), count = selected.length;
@@ -107,7 +127,7 @@
     if (record.signature !== signature) { record.signature = signature; refreshList(record); }
     else {
       const wanted = new Set(values(record.select)); for (const checkbox of record.list.querySelectorAll('input')) checkbox.checked = wanted.has(checkbox.value);
-      setText(record.count, count + ' de ' + options(record.select).length + ' selecionados');
+      refreshActions(record);
     }
   }
   function mount(select) {

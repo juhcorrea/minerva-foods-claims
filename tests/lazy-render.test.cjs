@@ -2,11 +2,11 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync(require.resolve('../dist/app.js'),'utf8');
 const between=(start,end)=>{const a=source.indexOf(start),b=source.indexOf(end,a+start.length);assert(a>=0&&b>a,start);return source.slice(a,b);};
-const renderCode=[between('  function renderView(','  function viewScopeMatches'),between('  function render(force','  function renderOverview'),between('  function prepareExportViews','  function makeWorkbook'),between('  function handleTableChange','  F.onChange(handleTableChange)')].join('\n');
+const renderCode=[between('  function currentMaterialsTab','  function renderView('),between('  function renderView(','  function viewScopeMatches'),between('  function render(force','  function renderOverview'),between('  function prepareExportViews','  function makeWorkbook'),between('  function handleTableChange','  F.onChange(handleTableChange)')].join('\n');
 function fixture(){
  const calls=[],models={},badge={hidden:true,setAttribute(name,value){this[name]=value;}},state={view:'suppliers',model:{meta:{allYears:true,years:[2025,2026],asOf:'2026-11-06'},summary:{reviewCount:0}},chartMonth:''};
  const record=name=>()=>{calls.push(name);models[name]=state.model;};
- const context={state,window:{MinervaExecutive:{renderClaims:record('executive-claims')},MinervaClaimControl:{render:record('claim-control')},MinervaCorrectionImpact:{render:record('impact')},MinervaAnalysts:{render:record('analysts')},MinervaMeetings:{render:record('meeting')},MinervaPortfolio:{render:record('portfolio')}},renderOverview:record('overview'),renderSuppliers:record('suppliers'),renderInstallments:record('installments'),renderCorrections:record('corrections'),renderMethodExtra:record('method'),renderScenarioStatus(){},populateOperations(){},setText(){},receiptScopeNote:()=>'',date:String,integer:String,correctionGroups:()=>[],refreshViewScope:()=>!state.scopeRenderPending,activeDetail:null};
+ const context={state,document:{body:{dataset:{},classList:{toggle(){}}},querySelectorAll:()=>[]},window:{MinervaExecutive:{renderClaims:record('executive-claims')},MinervaClaimControl:{render:record('claim-control')},MinervaCorrectionImpact:{render:record('impact')},MinervaAnalysts:{render:record('analysts')},MinervaMeetings:{render:record('meeting')},MinervaPortfolio:{render:record('portfolio')}},renderOverview:record('overview'),renderSuppliers:record('suppliers'),renderInstallments:record('installments'),renderCorrections:record('corrections'),renderMethodExtra:record('method'),renderScenarioStatus(){},populateOperations(){},setText(){},receiptScopeNote:()=>'',date:String,integer:String,correctionGroups:()=>[],refreshViewScope:()=>!state.scopeRenderPending,activeDetail:null};
  for(const name of ['MinervaClaimControl','MinervaCorrectionImpact','MinervaAnalysts','MinervaMeetings'])context.window[name].handlesTable=()=>false;
  context.$=id=>id==='correctionBadge'?badge:null;context.reviewQueue=()=>[{},{}];context.populateGlobalYears=()=>{};context.populateClaimYears=()=>{};context.populateSupplierYears=()=>{};context.populateSupplierStatuses=()=>{};
  vm.createContext(context);vm.runInContext(renderCode,context);return{context,state,calls,models,badge};
@@ -23,6 +23,13 @@ test('visiting an untouched pane renders once and local table changes affect onl
 test('shared executive and claim modules are refreshed before old cached panes can be used',()=>{
  const f=fixture(),a=f.state.model,b={...a,summary:{reviewCount:2}};f.context.renderView('overview');f.state.model=b;f.context.renderView('claims');f.state.model=a;f.context.renderView('overview');assert.deepEqual(f.calls,['overview','executive-claims','claim-control','overview']);
  f.context.renderView('procurement');f.state.model=b;f.context.renderView('claims');f.state.model=a;f.context.renderView('procurement');assert.equal(f.models['claim-control'],a);assert.equal(f.calls.at(-1),'claim-control');
+});
+
+test('Materials renders only the selected report and refreshes shared report state when moving between cached subtabs',()=>{
+ const f=fixture();f.context.window.MinervaMaterials={render:(model,tab)=>{f.calls.push('materials-'+tab);f.models.materials=model;}};
+ f.context.renderView('procurement');assert.deepEqual(f.calls,['claim-control']);f.state.materialsTab='directors';f.context.renderView('procurement');f.context.renderView('procurement');assert.deepEqual(f.calls,['claim-control','materials-directors']);
+ f.state.materialsTab='carriers';f.context.renderView('procurement');f.state.materialsTab='directors';f.context.renderView('procurement');assert.deepEqual(f.calls.slice(-2),['materials-carriers','materials-directors']);assert.equal(f.models.materials,f.state.model);
+ f.state.materialsTab='fup';f.context.renderView('procurement');assert.equal(f.calls.at(-1),'materials-directors','previous FUP remains cached and untouched');
 });
 test('complete export prepares every dependent module with the current model while scoped export stays scoped',()=>{
  const f=fixture();f.context.render();f.context.prepareExportViews(false);assert.deepEqual(f.calls,['suppliers','overview','executive-claims','claim-control','impact','corrections','installments','analysts','meeting']);

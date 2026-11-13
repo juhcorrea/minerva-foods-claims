@@ -160,6 +160,16 @@ test('invalid chunks, unsafe cells, CSRF and missing expected counts fail before
  assert.equal((await f.part(id,'__proto__',data.bd)).status,400);
  assert.equal((await f.call('/api/client-report',{cookie:f.admin})).body.parts.length,0);
 });
+test('private browser backup preserves manual materials while the ordinary report omits that object',async()=>{
+ const f=await fixture();await f.publish();
+ assert.equal((await f.call('/api/client-report/backup',{cookie:f.admin})).body.materialInputs,null);
+ const saved=await f.call('/api/material-inputs',{cookie:f.admin,method:'POST',body:{revision:null,year:2026,values:{containerTotal:10,containerFrozen:6,containerChilled:3,containerDry:1,freightUsd:123.45,note:'Fictício',agreements:{'ARMADOR TESTE':{'1':2,'11':null}}}}});assert.equal(saved.status,200);
+ const key='private/material-inputs-v1.json',stored=JSON.parse(f.env.BUCKET.objects.get(key).text);stored.unknown='SECRET_MATERIAL_ROOT';stored.periods[2026].unknown='SECRET_MATERIAL_VALUE';await f.env.BUCKET.put(key,JSON.stringify(stored));
+ const backup=await f.call('/api/client-report/backup',{cookie:f.admin});assert.equal(backup.status,200);assert.equal(backup.body.materialInputs.revision,saved.body.revision);assert.equal(backup.body.materialInputs.periods[2026].freightUsd,123.45);assert.equal(backup.body.materialInputs.updatedByUserId,'owner');assert.doesNotMatch(backup.text,/SECRET_MATERIAL/);
+ const ordinary=await f.call('/api/client-report',{cookie:f.admin});assert.equal(Object.hasOwn(ordinary.body,'materialInputs'),false);assert.equal(f.analyses(),0);
+ stored.periods[2026].freightUsd=-1;await f.env.BUCKET.put(key,JSON.stringify(stored));assert.equal((await f.call('/api/client-report/backup',{cookie:f.admin})).status,503);
+});
+
 test('admin backup contains originals and source, revision-bound progress never changes amounts',async()=>{
  const f=await fixture(),published=await f.publish(),key='c'.repeat(64);
  const saved=await f.call('/api/correction-progress',{cookie:f.admin,method:'POST',body:{key,done:true,reportRevision:published.revision}});assert.equal(saved.status,200);

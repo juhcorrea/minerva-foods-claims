@@ -45,6 +45,38 @@ test('historical year dropdown drafts and all-years scopes stay isolated between
  f.context.view('installments');assert.deepEqual(f.values('globalYearFilter'),['2018']);f.context.view('overview');assert.deepEqual(f.values('globalYearFilter'),[]);assert.equal(f.context.options().allYears,true);
 });
 
+test('month selection is canonical, applies only in overview and restores its unfinished draft without leaking to other tabs',async()=>{
+ const f=fixture(),months=f.node('globalMonthFilter');months.multiple=true;months.options=Array.from({length:12},(_,i)=>({value:String(i+1),selected:false}));
+ assert.deepEqual(clone(f.context.options().months),[]);f.set('globalMonthFilter',['11','2']);assert.deepEqual(clone(f.context.options().months),[2,11]);await f.context.analyze();
+ f.context.view('installments');assert.deepEqual(f.calls.at(-1).months,[]);assert.equal(f.node('globalMonthField').hidden,true);assert.equal(f.node('asOf').hidden,false);assert.deepEqual(f.values('globalMonthFilter'),[]);
+ f.context.view('overview');assert.deepEqual(f.values('globalMonthFilter'),['2','11']);assert.equal(f.node('globalMonthField').hidden,false);assert.equal(f.node('asOf').hidden,true);
+ f.set('globalMonthFilter',['3']);f.context.view('claims');assert.deepEqual(f.calls.at(-1).months,[]);f.context.view('overview');assert.deepEqual(f.values('globalMonthFilter'),['3']);assert.deepEqual(f.calls.at(-1).months,[2,11],'navigation restores the previously applied scope, not the unfinished month');
+ f.set('globalMonthFilter',Array.from({length:12},(_,i)=>String(i+1)));assert.deepEqual(clone(f.context.options().months),[],'marking all months retains the historical negotiation default');
+ assert.deepEqual(clone(f.context.cleanMonths([0,13,'bad','11',2,2,1.5])),[2,11]);
+});
+
+test('month scope matching distinguishes applied months, chart refinement preserves them and overview uses today internally',async()=>{
+ const f=fixture(),months=f.node('globalMonthFilter');months.multiple=true;months.options=Array.from({length:12},(_,i)=>({value:String(i+1),selected:false}));
+ f.context.window.ClaimsEngine={today:()=> '2026-11-13'};f.state.model.meta.asOf='2026-11-13';f.state.model.meta.months=[2,11];f.context.options();
+ f.set('globalMonthFilter',['9']);assert.equal(f.context.options().asOf,'2026-11-13');await f.context.selectChartSupplier(A);assert.deepEqual(f.calls.at(-1).months,[2,11],'chart click does not apply September draft');
+ const scope=clone(f.context.options());assert(f.context.sameReportScope({...scope,months:[11,2]},scope));assert(!f.context.sameReportScope({...scope,months:[11]},scope));assert(!f.context.sameReportScope({...scope,months:[]},scope));
+ assert.deepEqual(clone(f.context.appliedReportOptions().months),[2,11]);f.state.view='suppliers';assert.deepEqual(clone(f.context.appliedReportOptions().months),[]);assert.deepEqual(clone(f.context.options().months),[]);
+});
+
+test('clear on the analysis strip removes only this page global restrictions and applies once',async()=>{
+ const f=fixture(),years=f.node('globalYearFilter'),months=f.node('globalMonthFilter');years.multiple=months.multiple=true;years.options=[{value:'2026',selected:true}];months.options=[{value:'11',selected:true}];f.set('supplierFilter',[A]);f.set('operationFilter',[EX]);f.context.options();
+ f.context.filterScope('installments').draft.suppliers=[B];f.context.filterScope('installments').desired.suppliers=[B];f.node('correctionScenario').value='original';await f.context.clearAnalysisFilters();
+ assert.equal(f.calls.length,1);assert.equal(f.calls[0].allYears,true);assert.deepEqual(f.calls[0].years,[]);assert.deepEqual(f.calls[0].months,[]);assert.deepEqual(f.calls[0].suppliers,[]);assert.deepEqual(f.calls[0].operations,[]);assert.equal(f.calls[0].correctionScenario,'original');assert.deepEqual(clone(f.context.filterScope('installments').desired.suppliers),[B]);
+});
+
+test('Materials keeps the existing FUP and isolates each report global filter scope and unfinished edits',async()=>{
+ const f=fixture();f.context.selectMaterials('fup');f.set('supplierFilter',[A]);await f.context.analyze();f.set('operationFilter',[EX]);
+ f.context.selectMaterials('directors');assert.equal(f.state.view,'procurement');assert.equal(f.state.materialsTab,'directors');assert.deepEqual(f.values('supplierFilter'),[]);assert.deepEqual(f.values('operationFilter'),[]);assert.equal(f.node('procurementContent').hidden,true);assert.equal(f.node('materialsDirectors').hidden,false);assert.equal(f.node('materialsCarriers').hidden,true);assert.equal(f.node('appTitle').textContent,'Materiais');
+ f.set('supplierFilter',[B]);await f.context.analyze();f.context.selectMaterials('carriers');assert.deepEqual(f.values('supplierFilter'),[]);assert.equal(f.node('materialsCarriers').hidden,false);assert.equal(f.node('materialsDirectors').hidden,true);
+ f.context.selectMaterials('fup');assert.deepEqual(f.values('supplierFilter'),[A]);assert.deepEqual(f.values('operationFilter'),[EX],'unfinished FUP selection is retained');assert.deepEqual(f.calls.at(-1).operations,[],'unfinished filter remains unapplied');assert.deepEqual(f.calls.at(-1).suppliers,[A]);assert.equal(f.node('procurementContent').hidden,false);
+ assert.equal(f.context.selectMaterials('invalid'),false);assert.equal(f.state.materialsTab,'fup');assert.deepEqual(f.calls.at(-1).months,[]);
+});
+
 test('chart supplier refinement restores applied operation sets and does not apply unrelated draft selections',async()=>{
  const f=fixture();Object.assign(f.state.model.meta,{operations:[EX,MI],controlOperations:[MI,IM],suppliers:[],operation:EX+' · '+MI,supplier:''});f.state.model.controlReport.meta.operations=[MI,IM];
  f.set('operationFilter',[IM]);f.set('supplierFilter',[B]);f.years[0].checked=true;

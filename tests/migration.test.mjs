@@ -7,6 +7,7 @@ import {CORRECTION_PROGRESS_KEYS} from '../worker/correction-progress.js';
 const reportKey='private/report-latest-v1.json';
 const progressKey='private/correction-progress-v1.json';
 const aclKey='private/access-v3.json';
+const materialsKey='private/material-inputs-v1.json';
 const stamp='2026-01-15T12:00:00.000Z';
 const correctionKey='ab'.repeat(32);
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -18,6 +19,7 @@ function seed() {
   return {
     [reportKey]:{schemaVersion:1,revision:'report-one',updatedAt:stamp,updatedBy:'Admin Exemplo',updatedByUserId:'owner',files:{bd:'Base.xlsx',control:'Controle.xlsx',secret:'secret-file-extra'},asOf:'2026-01-15',bd:[['Referência','Valor'],['DEMO-001',200]],control:[['Referência','Recebido'],['DEMO-001',50],['DEMO-001',0]],unknown:'secret-report-extra'},
     [progressKey]:{schemaVersion:1,entries:{[correctionKey]:{done:true,updatedAt:stamp,updatedBy:'Admin Exemplo',updatedByUserId:'owner',reportRevision:'older-report',tokenHash:'secret-progress-extra'}},sessions:'secret-progress-root'},
+    [materialsKey]:{schemaVersion:1,revision:'materials-one',updatedAt:stamp,updatedBy:'Admin Exemplo',updatedByUserId:'owner',periods:{2026:{containerTotal:10,containerFrozen:6,containerChilled:3,containerDry:1,freightUsd:100.125,note:'Conferido',agreements:{'ARMADOR DEMO':{1:3,11:null}},token:'secret-material-value'}},token:'secret-material-root'},
     [aclKey]:{schemaVersion:3,revision:'access-one',updatedAt:stamp,admins:{owner:{id:'owner',name:'Old label',email:'old@example.test',activatedAt:stamp,tokenHash:'secret-stored-admin'}},members:{'member-1':{id:'member-1',name:'Pessoa Exemplo',email:'person@example.test',status:'approved',role:'editor',requestCode:'DEMO-1234',requestedAt:stamp,approvedAt:stamp,approvedBy:'Admin Exemplo',approvedById:'owner',revokedAt:null,revokedBy:null,updatedAt:stamp,session:'secret-member-session'}},audit:[{at:stamp,actorId:'owner',actorName:'Admin Exemplo',action:'access_approved',target:'member-1',previousStatus:'pending',previousRole:'viewer',role:'editor',token:'secret-audit-token'}],tokenHashes:['secret-root-hash']},
     'private/sessions/do-not-export.json':{session:'secret-session-object'},
     'private/rates/do-not-export.json':{ipHash:'secret-ip-hash'},
@@ -38,16 +40,17 @@ const jsonFile=(files,name)=>JSON.parse(new TextDecoder().decode(files.find(file
 test('private snapshot preserves authoritative data, correction identifiers and profiles; excludes credential fields',async()=>{
   const bucket=new ReadOnlyR2();const before=JSON.stringify([...bucket.values]);
   const {files,manifest}=await run(bucket);
-  assert.deepEqual(files.map(file=>file.name),['dados/bases-publicadas.json','dados/acompanhamento-correcoes.json','dados/cadastros-perfis.json','codigo-operacional.zip','RESTAURACAO.txt','MANIFESTO.json']);
+  assert.deepEqual(files.map(file=>file.name),['dados/bases-publicadas.json','dados/acompanhamento-correcoes.json','dados/cadastros-perfis.json','dados/campos-manuais-materiais.json','codigo-operacional.zip','RESTAURACAO.txt','MANIFESTO.json']);
   const report=jsonFile(files,'dados/bases-publicadas.json');assert.deepEqual(report.bd,seed()[reportKey].bd);assert.deepEqual(report.control,seed()[reportKey].control);assert.equal(report.revision,'report-one');
   const progress=jsonFile(files,'dados/acompanhamento-correcoes.json');assert.equal(progress.entries[correctionKey].done,true);assert.equal(progress.entries[correctionKey].reportRevision,'older-report','Earlier correction report revisions remain useful history');
   const acl=jsonFile(files,'dados/cadastros-perfis.json');assert.equal(acl.members['member-1'].role,'editor');assert.equal(acl.members['member-1'].status,'approved');assert.equal(acl.members['member-1'].requestCode,'DEMO-1234');assert.equal(acl.admins.owner.name,'Admin Exemplo');assert.equal(acl.admins.owner.activatedAt,stamp);assert.equal(acl.audit[0].previousRole,'viewer');
   const allData=files.map(file=>new TextDecoder().decode(file.data)).join('\n');assert.doesNotMatch(allData,/secret-/);assert.doesNotMatch(allData,/tokenHash|tokenHashes|adminHash|ipHash/);
   assert.equal(bucket.writes,0);assert.equal(JSON.stringify([...bucket.values]),before);
-  assert.deepEqual(new Set(bucket.reads),new Set([reportKey,...CORRECTION_PROGRESS_KEYS,aclKey]));
+  const materials=jsonFile(files,'dados/campos-manuais-materiais.json');assert.equal(materials.revision,'materials-one');assert.equal(materials.periods[2026].freightUsd,100.125);assert.equal(materials.periods[2026].agreements['ARMADOR DEMO'][11],null);assert.equal(materials.updatedByUserId,'owner');
+  assert.deepEqual(new Set(bucket.reads),new Set([reportKey,...CORRECTION_PROGRESS_KEYS,aclKey,materialsKey]));
   assert.equal(manifest.capturedAt,stamp);assert.equal(manifest.source.commitSha,source.commitSha);
-  assert.deepEqual(manifest.counts,{bdRows:1,controlRows:2,correctionEntries:1,admins:1,members:1,auditEvents:1});
-  assert.deepEqual(manifest.objects.map(item=>item.schemaVersion),[1,1,3]);
+  assert.deepEqual(manifest.counts,{bdRows:1,controlRows:2,correctionEntries:1,admins:1,members:1,auditEvents:1,materialPeriods:1});
+  assert.deepEqual(manifest.objects.map(item=>item.schemaVersion),[1,1,3,1]);
   for(const item of manifest.files){const file=files.find(file=>file.name===item.path);assert.equal(item.bytes,file.data.byteLength);assert.equal(item.sha256,sha(file.data));}
   assert.deepEqual(jsonFile(files,'MANIFESTO.json'),manifest);
 });
@@ -55,25 +58,25 @@ test('private snapshot preserves authoritative data, correction identifiers and 
 test('absent state is explicit and does not invent a report, corrections or ACL',async()=>{
   const {files,manifest}=await run(new ReadOnlyR2({}));
   for(const item of manifest.objects){assert.equal(item.present,false);assert.equal(item.etag,null);assert.equal(item.schemaVersion,null);assert.equal(jsonFile(files,item.path),null);}
-  assert.deepEqual(manifest.counts,{bdRows:0,controlRows:0,correctionEntries:0,admins:0,members:0,auditEvents:0});
+  assert.deepEqual(manifest.counts,{bdRows:0,controlRows:0,correctionEntries:0,admins:0,members:0,auditEvents:0,materialPeriods:0});
 });
 
 test('publication during snapshot retries and returns the coherent updated revision',async()=>{
   const bucket=new ReadOnlyR2();const head=bucket.head.bind(bucket);let changed=false;
   bucket.head=async key=>{if(!changed){changed=true;const report=bucket.values.get(reportKey);report.value={...report.value,revision:'report-two',control:[['Ref','Amount'],['DEMO-002',75]]};report.etag='new-report-etag';}return head(key);};
-  const {files,manifest}=await run(bucket);assert.equal(jsonFile(files,'dados/bases-publicadas.json').revision,'report-two');assert.equal(manifest.objects[0].etag,'new-report-etag');assert.equal(bucket.reads.length,2*(CORRECTION_PROGRESS_KEYS.length+2));assert.equal(bucket.writes,0);
+  const {files,manifest}=await run(bucket);assert.equal(jsonFile(files,'dados/bases-publicadas.json').revision,'report-two');assert.equal(manifest.objects[0].etag,'new-report-etag');assert.equal(bucket.reads.length,2*(CORRECTION_PROGRESS_KEYS.length+3));assert.equal(bucket.writes,0);
 });
 
 test('continually changing state returns a bounded conflict rather than an inconsistent archive',async()=>{
   const bucket=new ReadOnlyR2();let serial=0;
   bucket.head=async key=>bucket.values.has(key)?({etag:bucket.values.get(key).etag+'-'+(++serial)}):null;
   await assert.rejects(run(bucket),error=>error instanceof MigrationExportError&&error.status===409&&error.code==='MIGRATION_CHANGED');
-  assert.equal(bucket.reads.length,3*(CORRECTION_PROGRESS_KEYS.length+2));assert.equal(bucket.writes,0);
+  assert.equal(bucket.reads.length,3*(CORRECTION_PROGRESS_KEYS.length+3));assert.equal(bucket.writes,0);
 });
 
 test('snapshot can verify etags with get when a storage adapter has no head',async()=>{
   const bucket=new ReadOnlyR2();bucket.head=undefined;
-  const {manifest}=await run(bucket);assert.equal(manifest.counts.members,1);assert.equal(bucket.reads.length,2*(CORRECTION_PROGRESS_KEYS.length+2));
+  const {manifest}=await run(bucket);assert.equal(manifest.counts.members,1);assert.equal(bucket.reads.length,2*(CORRECTION_PROGRESS_KEYS.length+3));
 });
 
 test('malformed known objects and non-scalar allowlisted data fail instead of exporting hidden objects',async()=>{
@@ -94,6 +97,25 @@ test('missing or tampered source package fails before private storage reads',asy
     await assert.rejects(run(bucket,{source:bad}),error=>error.status===503&&error.code==='MIGRATION_SOURCE_UNAVAILABLE');
   }
   assert.equal(bucket.reads.length,0);
+});
+
+test('manual material values reject malformed periods, unsafe maps and invalid financial or count values',async()=>{
+ const mutations=[
+  value=>value.revision='',value=>value.periods={'1900':value.periods[2026]},
+  value=>value.periods[2026].freightUsd=-1,value=>value.periods[2026].freightUsd='12.00',
+  value=>value.periods[2026].containerTotal=1.5,value=>value.periods[2026].note='a'.repeat(1001),
+  value=>value.periods[2026].agreements={'BAD':{'13':1}},
+  value=>value.periods[2026].agreements={'BAD':{'1':-1}},
+  value=>value.periods[2026].agreements=JSON.parse('{"__proto__":{"1":1}}'),
+  value=>value.periods[2026].agreements={'BAD':{'1':{token:'hidden'}}},
+ ];
+ for(const mutate of mutations){const values=seed();mutate(values[materialsKey]);await assert.rejects(run(new ReadOnlyR2(values)),{code:'MIGRATION_INVALID_STORAGE'});}
+});
+
+test('material edits during export trigger a complete snapshot retry',async()=>{
+ const bucket=new ReadOnlyR2(),head=bucket.head.bind(bucket);let changed=false;
+ bucket.head=async key=>{if(key===materialsKey&&!changed){changed=true;const object=bucket.values.get(key);object.value.revision='materials-two';object.value.periods[2026].freightUsd=321.45;object.etag='new-materials-etag';}return head(key);};
+ const {files}=await run(bucket);assert.equal(jsonFile(files,'dados/campos-manuais-materiais.json').periods[2026].freightUsd,321.45);assert.equal(bucket.reads.length,2*(CORRECTION_PROGRESS_KEYS.length+3));
 });
 
 test('lazy source archive is decoded only once for each backup',async()=>{
