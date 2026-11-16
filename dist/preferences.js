@@ -137,7 +137,7 @@
     }
     syncOperationalNotice();
   }
-  function closeProfile(restoreFocus) {const panel=$('profilePanel');if (!panel) return;panel.hidden=true;$('profileButton').setAttribute('aria-expanded','false');syncOperationalNotice();if (restoreFocus && !$('profileButton').hidden) $('profileButton').focus();}
+  function closeProfile(restoreFocus) {const panel=$('profilePanel');if (!panel) return;panel.hidden=true;global.MinervaProfile?.close();$('profileButton').setAttribute('aria-expanded','false');syncOperationalNotice();if (restoreFocus && !$('profileButton').hidden) $('profileButton').focus();}
   function updateProfile() {
     if (!mounted) return;
     currentProfile=global.MinervaTeam?.getProfile?.() || null;
@@ -153,6 +153,7 @@
       $('profilePanelNote').textContent='';
       for (const id of ['profileName','profileRole','profileAvatar','profilePanelName','profilePanelContact','profilePanelRole']) $(id).textContent='';
       $('profileSignout').hidden=true;
+      global.MinervaProfile?.sync(null);
       return;
     }
     const name=hosted?currentProfile.name:'Prévia local',role=hosted?currentProfile.role==='admin'?(name==='Desenvolvimento'?'Acesso administrativo':'Administradora'):currentProfile.role==='editor'?'Atualizar bases':currentProfile.role==='reviewer'?'Conferente':'Consulta':'Sem perfil conectado';
@@ -168,10 +169,12 @@
     $('profilePanelNote').textContent=hosted?(currentProfile.role==='admin'?'Este acesso pode publicar atualizações e gerenciar usuários e seus perfis.':currentProfile.role==='editor'?'Este acesso pode importar e publicar as bases e marcar correções. A gestão de acessos continua com a administração.':currentProfile.role==='reviewer'?'Este acesso permite consultar o relatório e marcar ou desmarcar os ajustes na Correção de base.':'Este acesso permite consultar o relatório publicado.'):'Esta é uma prévia local. Nenhum acesso de administradora foi ativado.';
     $('profileSignout').hidden=!hosted;
     $('profileSignout').disabled=false;
+    global.MinervaProfile?.sync(currentProfile);
   }
   function openProfile() {
     updateProfile();if ($('profileButton').hidden) return;
     const panel=$('profilePanel');if (!panel.hidden) {closeProfile(true);return;}
+    if(global.MinervaProfile){global.MinervaProfile.open();syncOperationalNotice();$('profileButton').setAttribute('aria-expanded','true');$('closeProfile').focus();return;}
     const rect=$('profileButton').getBoundingClientRect();
     panel.hidden=false;
     syncOperationalNotice();
@@ -206,6 +209,7 @@
     document.body.append(panel);
     const rules=$('exportRules'),resources=$('profileResources');
     if(rules&&resources){resources.append(rules);rules.textContent='Critérios e regras de cálculo (PDF)';resources.hidden=false;}
+    global.MinervaProfile?.mount({close:closeProfile});
     const activity=document.createElement('div');activity.id='profileActivityStatus';activity.className='profile-activity-status';activity.hidden=true;activity.setAttribute('role','status');activity.setAttribute('aria-live','polite');
     activity.innerHTML='<span id="profileActivityMessage"></span><button id="profileActivityOpen" type="button">Ver no perfil</button>';document.body.append(activity);
     const status=document.createElement('div');status.id='preferencesStatus';status.className='preferences-status';status.hidden=true;status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.setAttribute('aria-atomic','true');document.body.append(status);
@@ -229,12 +233,12 @@
     document.addEventListener('minerva:session-updated',updateProfile);
     document.addEventListener('minerva:model-updated',syncProfileControls);
     if(global.MINERVA_HOSTED===true&&global.MutationObserver){toolbarFinder=new global.MutationObserver(()=>{if($('teamToolbar'))syncProfileControls();});toolbarFinder.observe(document.querySelector('main')||document.body,{childList:true,subtree:true});}
-    document.addEventListener('pointerdown',event=>{if (!$('navigationMenu').hidden&&!$('navigationMenu').contains(event.target)&&!$('menuToggle').contains(event.target))closeNavigation(false);if (!panel.hidden&&!panel.contains(event.target)&&!profile.contains(event.target)) closeProfile(false);});
+    document.addEventListener('pointerdown',event=>{if (!$('navigationMenu').hidden&&!$('navigationMenu').contains(event.target)&&!$('menuToggle').contains(event.target))closeNavigation(false);if (!panel.hidden&&!panel.contains(event.target)&&!profile.contains(event.target)&&(!global.MinervaProfile||event.target?.closest?.('.nav-item'))) closeProfile(false);});
     document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('navigationMenu').hidden){event.preventDefault();closeNavigation(true);return;}if (event.key==='Escape'&&!panel.hidden) {event.preventDefault();closeProfile(true);}});
-    panel.addEventListener('focusout',event=>{if (event.relatedTarget&&!panel.contains(event.relatedTarget)&&event.relatedTarget!==profile) closeProfile(false);});
+    panel.addEventListener('focusout',event=>{if (!global.MinervaProfile&&event.relatedTarget&&!panel.contains(event.relatedTarget)&&event.relatedTarget!==profile) closeProfile(false);});
     document.addEventListener('fullscreenchange',()=>{closeNavigation(false);closeProfile(false);updateFullscreen(true);});
     document.addEventListener('webkitfullscreenchange',()=>updateFullscreen(true));
-    global.addEventListener('resize',()=>{closeNavigation(false);closeProfile(false);});
+    global.addEventListener('resize',()=>{closeNavigation(false);if(!global.MinervaProfile)closeProfile(false);});
     global.addEventListener('beforeprint',()=>{closeNavigation(false);closeProfile(false);});
     const onMedia=(media,fn)=>media.addEventListener?media.addEventListener('change',fn):media.addListener(fn);
     onMedia(darkMedia,()=>{if (preferences.theme==='system') applyPreferences();});

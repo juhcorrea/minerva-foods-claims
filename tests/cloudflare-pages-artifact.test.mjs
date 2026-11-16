@@ -69,9 +69,9 @@ function runtime(){
 }
 
 test('compiled Worker protects report assets and private APIs and keeps backup administrative',async()=>{
-  const f=runtime(),privatePaths=['/app.js','/engine.js','/team.js','/styles.css','/analysts.js','/meetings.js','/claim-control.js','/materials.css','/materials.js','/materials-data.js'];
+  const f=runtime(),privatePaths=['/app.js','/engine.js','/team.js','/styles.css','/analysts.js','/meetings.js','/claim-control.js','/materials.css','/materials.js','/materials-data.js','/profile.js','/profile.css'];
   for(const file of privatePaths)for(const method of ['GET','HEAD'])assert.equal((await f.request(file+'?v=test',null,undefined,method)).status,401);
-  for(const route of ['/api/report','/api/report/meta','/api/migration/export'])assert.equal((await f.request(route)).status,401);
+  for(const route of ['/api/report','/api/report/meta','/api/migration/export','/api/profile/self'])assert.equal((await f.request(route)).status,401);
   assert(!f.env.BUCKET.reads.includes('private/report-latest-v1.json'));
   for(const route of ['/worker/backend.js','/_worker.js','/.env','/.git/HEAD','/.openai/hosting.json','/dados/bases-publicadas.json','/dados/campos-manuais-materiais.json','/private/material-inputs-v1.json','/codigo-operacional.zip'])assert.equal((await f.request(route)).status,404);
   const entry=await f.request('/');assert.equal(entry.status,200);assert(!(await entry.text()).includes('window.MINERVA_HOSTED=true'));
@@ -82,6 +82,21 @@ test('compiled Worker protects report assets and private APIs and keeps backup a
   const index=await f.request('/',viewer),html=await index.text();assert(html.includes('window.MINERVA_HOSTED=true'));
   for(const name of ['materials.css','materials.js','materials-data.js'])assert.match(html,new RegExp(name.replace('.','\\.')+'\\?v=[a-f0-9]{12}'));
   assert.equal((await f.request('/api/migration/export',viewer)).status,403);const backup=await f.request('/api/migration/export',admin);assert.equal(backup.status,200);assert.match(backup.headers.get('content-type'),/application\/zip/);assert.equal(Buffer.from(await backup.arrayBuffer()).subarray(0,2).toString(),'PK');
+});
+
+test('compiled Worker saves self profiles with independent revision and fixed authenticated identity',async()=>{
+  const f=runtime(),login=await f.request('/api/auth/exchange',null,{token:f.token});
+  const admin=login.headers.get('set-cookie').split(';')[0];
+  const initialResponse=await f.request('/api/profile/self',admin),initial=await initialResponse.json();
+  assert.equal(initialResponse.status,200);assert.match(initialResponse.headers.get('cache-control'),/private, no-store/);
+  assert.equal(initial.revision,null);assert.equal(initial.profile.name,'Admin Test One');assert.equal(initial.profile.keepMenuOpen,true);
+  const profile={...initial.profile,name:'Profile Test Name',employeeId:'TEST-001',keepMenuOpen:false};
+  const save=await f.request('/api/profile/self',admin,{revision:null,profile},'PUT'),saved=await save.json();
+  assert.equal(save.status,200);assert.equal(typeof saved.revision,'string');assert.deepEqual(saved.profile,profile);assert.deepEqual(saved.identity,initial.identity);
+  const read=await f.request('/api/profile/self',admin);assert.deepEqual(await read.json(),saved);
+  assert.equal((await f.request('/api/profile/self',admin,{revision:null,profile},'PUT')).status,409);
+  assert.equal((await f.request('/api/profile/self',admin,{revision:saved.revision,profile:{...profile,role:'admin'}},'PUT')).status,400);
+  assert.equal((await(await f.request('/api/session',admin)).json()).name,'Admin Test One');
 });
 
 test('compiled Access mode fails closed when destination credentials are not configured',async()=>{

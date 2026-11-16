@@ -3,6 +3,7 @@ import {migrationZipResponse} from './zip.js';
 import {createClientReportHandler} from './client-report.js';
 import {CorrectionProgressError,readCorrectionProgress,readCorrectionProgressMetadata,correctionProgressRevision,saveProgressEntry} from './correction-progress.js';
 import {CloudflareAccessError, cloudflareAccessConfig, createCloudflareAccessVerifier} from './cloudflare-access.js';
+import {UserProfileError,USER_PROFILE_BODY_BYTES,readUserProfile,saveUserProfile} from './user-profile.js';
 
 /* Minerva Claims shared API — capability links and per-browser approvals.
  * Admin activation links carry 256-bit secrets, supplied only as hashes in env.
@@ -408,6 +409,11 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
    }
    if(!access.authenticated)fail(401,'SESSION_REQUIRED','Solicite acesso ou use seu link administrativo para continuar.');
    if(!access.approved)fail(403,access.status==='revoked'?'ACCESS_REVOKED':'ACCESS_PENDING',access.status==='revoked'?'Seu acesso foi revogado. A administração pode rever essa decisão.':'Sua solicitação aguarda aprovação da administração.');
+   if(url.pathname==='/api/profile/self'){
+    if(request.method==='GET')return response(await readUserProfile(env.BUCKET,access,{displayName:publicSession(access).name}));
+    if(request.method==='PUT')return response(await saveUserProfile(env.BUCKET,access,await readBody(request,USER_PROFILE_BODY_BYTES),{now,validate:()=>confirmMutationPermission(env.BUCKET,access,['admin','editor','reviewer','viewer'])}));
+    fail(405,'METHOD_NOT_ALLOWED','Use a consulta ou o salvamento do seu perfil.');
+   }
    const modifying=!['GET','HEAD'].includes(request.method);
    const editorMutation=access.role==='editor'&&request.method==='POST'&&(['/api/report','/api/correction-progress','/api/material-inputs'].includes(url.pathname)||(clientMode&&(['/api/client-report/start','/api/client-report/cleanup'].includes(url.pathname)||/^\/api\/client-report\/[a-f0-9-]{36}\/(parts|commit)$/i.test(url.pathname))));
    const reviewerMutation=access.role==='reviewer'&&request.method==='POST'&&url.pathname==='/api/correction-progress';
@@ -473,7 +479,7 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
     const result=await changeApproval(env.BUCKET,access,revokePath[1],false);return response(result);
    }
    fail(404,'NOT_FOUND','Esta operação não existe.');
-  }catch(err){const extra=shouldClear?{'set-cookie':clearCookie()}:{};if(err instanceof ApiError||err instanceof CorrectionProgressError||err instanceof MigrationExportError||err instanceof CloudflareAccessError)return response({error:err.message,code:err.code},err.status,extra);return response({error:'Não foi possível concluir a operação. Tente novamente.',code:'SERVER_ERROR'},500,extra);}
+  }catch(err){const extra=shouldClear?{'set-cookie':clearCookie()}:{};if(err instanceof ApiError||err instanceof CorrectionProgressError||err instanceof MigrationExportError||err instanceof CloudflareAccessError||err instanceof UserProfileError)return response({error:err.message,code:err.code},err.status,extra);return response({error:'Não foi possível concluir a operação. Tente novamente.',code:'SERVER_ERROR'},500,extra);}
  };
 }
 export const apiConstants=Object.freeze({adminIds:ADMIN_IDS,cookieName:COOKIE,sessionDays:SESSION_DAYS,maxBodyBytes:MAX_BODY});

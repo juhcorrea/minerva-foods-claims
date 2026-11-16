@@ -31,7 +31,7 @@ O painel tem seis áreas:
 - **Controle de claim:** SLAs, situações operacionais e registros da BD, com pesquisa, filtros e detalhes.
 - **FUP Suprimentos:** carteira aberta de todos os anos; seleção de fornecedor à esquerda e detalhe por motivo na mesma tela, com subtotais e controles para expandir ou recolher todos os motivos.
 
-Filtros pesquisáveis com múltipla seleção, ordenação, ajuste de colunas, modo noturno, tamanho de fonte e modo de apresentação estão disponíveis. Vários valores do mesmo campo são combinados por OU; campos diferentes, por E. A ordenação inicial prioriza os maiores valores, preservando a ordenação escolhida pelo usuário. Bases, tabelas e filtros têm controles próprios de recolher e expandir. No comparativo de correções, os critérios ficam recolhidos e continuam disponíveis na impressão. Visões salvas pessoais reutilizam os filtros aplicados neste navegador e recalculam as bases atuais; não guardam planilhas, resultados ou credenciais. As exportações incluem Excel, PDF e PowerPoint, além do PDF das regras de cálculo.
+Filtros pesquisáveis com múltipla seleção, ordenação, ajuste de colunas, modo noturno, tamanho de fonte e modo de apresentação estão disponíveis. Vários valores do mesmo campo são combinados por OU; campos diferentes, por E. A ordenação inicial prioriza os maiores valores, preservando a ordenação escolhida pelo usuário. Bases, tabelas e filtros têm controles próprios de recolher e expandir. Os critérios ficam somente no PDF acessível pelo perfil. Visões salvas pessoais reutilizam os filtros aplicados neste navegador e recalculam as bases atuais; não guardam planilhas, resultados ou credenciais. As exportações incluem Excel, PDF e PowerPoint, além do PDF das regras de cálculo.
 
 O backend de referência também oferece:
 
@@ -105,3 +105,13 @@ Gráficos por país, mês e setor e rankings exibem Total geral clicável do con
 Todas as abas usam Ano e Mês, com Janeiro a Dezembro por extenso e Todos os meses como padrão. A Data da análise permanece interna. Seleções e visões salvas continuam isoladas entre páginas e materiais. Critérios ficam somente no PDF do perfil; os visuais mantêm os rótulos essenciais de fonte e período. Fornecedores mantém os filtros superiores e das colunas, sem uma faixa intermediária duplicada.
 
 A troca de páginas e o retorno a Materiais preservam a navegação, sem interceptar cliques fora dos botões das subabas. A demonstração continua apenas com dados fictícios e importação desativada.
+
+## Meu Perfil e administração (16/11/2026)
+
+O perfil passa a usar uma página com identificação e foto à esquerda, dados pessoais e local de trabalho à direita, preferência de navegação e ações Salvar/Cancelar. E-mail e permissões continuam vinculados à identidade autenticada; editar o perfil não altera a autorização nem o nome usado na auditoria.
+
+A instalação hospedada pode salvar os dados pessoais em um objeto privado individual, com controle de revisão para evitar sobrescritas concorrentes. A foto é ajustada no navegador; o servidor aceita somente JPEG, PNG ou WebP limitados. O backup administrativo existente ainda não inclui esses objetos de perfil individuais.
+
+Usuários E Solicitações fica disponível somente à administração. Aprovar, revogar e gerenciar perfis continua usando os controles autorizados existentes. O PDF de critérios permanece no perfil, fora dos dashboards.
+
+A demonstração pública mantém exclusivamente exemplos fictícios, sem backend, contas reais ou importação de planilhas. Os campos do perfil são ilustrativos nesse ambiente; não há persistência compartilhada nem gestão de usuários de produção.

@@ -104,6 +104,21 @@ const environment=()=>({...configuration(),BUCKET:new MemoryBucket()});
 function backendFixture(){const handler=createApiHandler({engine,now:()=>epoch,accessFetch:async()=>keyResponse([firstJwk])});return async(env,path,{method='GET',body,token,csrf=true,headers={}}={})=>{const h=new Headers(headers);if(token)h.set('Cf-Access-Jwt-Assertion',token);if(!['GET','HEAD'].includes(method)){h.set('Content-Type','application/json');if(csrf){h.set('Origin',origin);h.set('X-Minerva-Request','1');}}const response=await handler(new Request(origin+path,{method,headers:h,body:body===undefined?undefined:JSON.stringify(body)}),env);return {status:response.status,body:await response.json(),headers:response.headers};};}
 const adminToken=()=>signed({email:'admin-a@'+domain,sub:'qa-admin-a'});
 
+test('self profile uses the verified Access identity without changing role, email or audit labels',async()=>{
+ const env=environment(),call=backendFixture(),admin=await signed({email:'admin-b@'+domain,sub:'qa-admin-b'}),employee=await signed();
+ const defaults=await call(env,'/api/profile/self',{token:admin});assert.equal(defaults.status,200);assert.equal(defaults.body.identity.email,'admin-b@'+domain);assert.equal(defaults.body.identity.userId,'developer');assert.equal(defaults.body.profile.name,'Desenvolvimento');
+ const profile={name:'Personal Display',employeeId:'EX-1',jobTitle:'Analista',department:'Operações',unit:'Unidade Exemplo',avatarDataUrl:'',keepMenuOpen:false};
+ const saved=await call(env,'/api/profile/self',{method:'PUT',token:admin,body:{revision:null,profile}});assert.equal(saved.status,200);
+ const unchanged=await call(env,'/api/session',{token:admin});assert.equal(unchanged.body.name,'Desenvolvimento');assert.equal(unchanged.body.role,'admin');assert.equal(unchanged.body.verifiedEmail,'admin-b@'+domain);
+ assert.equal((await call(env,'/api/profile/self',{token:employee})).status,403);
+ const asked=await call(env,'/api/auth/request',{method:'POST',token:employee,body:{name:'Employee'}});await call(env,'/api/members/'+asked.body.userId+'/approve',{method:'POST',token:admin,body:{}});
+ const own=await call(env,'/api/profile/self',{token:employee});assert.equal(own.body.profile.name,'Employee');assert.equal(own.body.identity.email,'employee@'+domain);assert.equal(own.body.identity.role,'viewer');
+ assert.equal((await call(env,'/api/profile/self',{method:'PUT',token:employee,body:{revision:null,profile:{...profile,name:'Employee Display'}}})).status,200);
+ assert.equal((await call(env,'/api/profile/self',{token:admin})).body.profile.name,'Personal Display');
+ const spoof=await call(env,'/api/profile/self',{headers:{'Cf-Access-Authenticated-User-Email':'admin-b@'+domain}});assert.equal(spoof.status,401);
+ const altered=await signed({email:'employee@'+domain,sub:'different-subject'});assert.equal((await call(env,'/api/profile/self',{token:altered})).status,403);
+});
+
 test('Access requires JWT independently of legacy cookies and only bootstraps the two configured admins',async()=>{
  const env=environment(),call=backendFixture(),token=await adminToken();
  const forged={'Cf-Access-Authenticated-User-Email':'admin-a@'+domain,'oai-authenticated-user-email':'admin-a@'+domain,cookie:'__Host-minerva-session='+'A'.repeat(43)};
