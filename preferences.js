@@ -124,6 +124,7 @@
     if(!host)return;
     const allowed=global.MINERVA_HOSTED===true&&Boolean(currentProfile);
     host.hidden=!allowed||!toolbar;
+    if($('profilePublishing'))$('profilePublishing').hidden=host.hidden;
     if(allowed&&toolbar){
       if(toolbar.parentElement!==host)host.append(toolbar);
       const imports=$('openImports'),actions=toolbar.querySelector('.team-actions');
