@@ -4,13 +4,29 @@
   const text=value=>typeof value==='string'?value.trim():'';
   const fold=value=>text(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('pt-BR').replace(/\s+/g,' ');
   const compare=(a,b)=>a.name.localeCompare(b.name,'pt-BR',{sensitivity:'base'})||a.key.localeCompare(b.key);
+  function initials(name){
+    const words=text(name).split(/\s+/).filter(Boolean);
+    if(!words.length)return '—';
+    return (Array.from(words[0])[0]+(words.length>1?Array.from(words.at(-1))[0]:'')).toLocaleUpperCase('pt-BR');
+  }
+  function rasterAvatar(value){
+    const url=text(value);if(!url||url.length>700000)return '';
+    const match=/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(url);if(!match)return '';
+    const encoded=match[2],bytes=encoded.length*3/4-(encoded.endsWith('==')?2:encoded.endsWith('=')?1:0);
+    if(encoded.length%4||bytes>512*1024)return '';
+    const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/',prefix=[];let bits=0,buffer=0;
+    for(const character of encoded.slice(0,16)){if(character==='=')break;buffer=(buffer<<6)|alphabet.indexOf(character);bits+=6;if(bits>=8){bits-=8;prefix.push((buffer>>>bits)&255);}}
+    const starts=signature=>signature.every((byte,index)=>prefix[index]===byte);
+    const valid=match[1]==='jpeg'?starts([255,216,255]):match[1]==='png'?starts([137,80,78,71,13,10,26,10]):starts([82,73,70,70])&&prefix[8]===87&&prefix[9]===69&&prefix[10]===66&&prefix[11]===80;
+    return valid?url:'';
+  }
 
   // Build a forest without inventing a reporting relationship for missing data.
   function buildOrganization(people){
     if(!Array.isArray(people))throw new Error('Resposta do organograma inválida.');
     const ids=new Map(),nodes=people.map((person,index)=>{
       const source=person&&typeof person==='object'?person:{};
-      const node={kind:'person',key:'person:'+index,id:text(source.id),name:text(source.name)||'Nome Não Informado',jobTitle:text(source.jobTitle),department:text(source.department),unit:text(source.unit),managerId:text(source.managerId),managerName:text(source.managerName),children:[],issues:[],parent:null,linkedManager:null,groupKey:''};
+      const node={kind:'person',key:'person:'+index,id:text(source.id),name:text(source.name)||'Nome Não Informado',initials:initials(source.name),avatarDataUrl:rasterAvatar(source.avatarDataUrl),jobTitle:text(source.jobTitle),department:text(source.department),unit:text(source.unit),managerId:text(source.managerId),managerName:text(source.managerName),children:[],issues:[],parent:null,linkedManager:null,groupKey:''};
       if(node.id){if(!ids.has(node.id))ids.set(node.id,[]);ids.get(node.id).push(node);}
       else node.issues.push('Identificação Não Informada');
       return node;
@@ -79,6 +95,15 @@
 
     function setStatus(message,error=false){status.textContent=message;status.classList.toggle('is-error',error);}
     function empty(message){content.replaceChildren(make('p','org-empty',message));}
+    function avatar(name,avatarDataUrl,letters){
+      const circle=make('span','org-avatar'),fallback=make('span','org-avatar-initials',letters===undefined?initials(name):letters);circle.setAttribute('aria-hidden','true');circle.append(fallback);
+      if(avatarDataUrl){
+        const image=make('img','org-avatar-image');image.alt='';image.decoding='async';image.loading='lazy';
+        image.addEventListener('error',()=>{image.remove();circle.classList.remove('has-photo');});
+        image.src=avatarDataUrl;circle.classList.add('has-photo');circle.append(image);
+      }
+      return circle;
+    }
     function renderPerson(node,selection){
       const item=make('li','org-node'),card=make('article','org-person');item.dataset.personId=node.id;
       if(node.issues.length)card.classList.add('has-issue');
@@ -86,6 +111,7 @@
       const childNodes=node.children.filter(child=>selection.visible.has(child));let toggle;
       if(childNodes.length){toggle=button('org-toggle','−');toggle.setAttribute('aria-label','Recolher Equipe De '+node.name);card.append(toggle);}
       else card.append(make('span','org-node-dot'));
+      card.append(avatar(node.name,node.avatarDataUrl,node.initials));
       const info=make('div','org-person-info'),name=make('strong','org-person-name',node.name),job=make('span','org-person-job',node.jobTitle||'Cargo Não Informado');info.append(name,job);
       const meta=[node.department,node.unit].filter(Boolean);if(meta.length)info.append(make('span','org-person-meta',meta.join(' · ')));
       if(node.issues.length){const warnings=make('div','org-person-warnings');for(const issue of node.issues)warnings.append(make('span','org-warning',issue));info.append(warnings);if(node.managerName)info.append(make('span','org-person-meta','Gestor Informado: '+node.managerName));}
@@ -110,7 +136,7 @@
       content.replaceChildren();
       for(const group of model.groups){
         const roots=group.children.filter(node=>selection.visible.has(node));if(!roots.length)continue;
-        const section=make('section','org-group'),groupToggle=button('org-group-heading',''),symbol=make('span','org-group-symbol','−'),label=make('strong','',group.name);symbol.setAttribute('aria-hidden','true');groupToggle.append(symbol,label);
+        const section=make('section','org-group'),groupToggle=button('org-group-heading',''),symbol=make('span','org-group-symbol','−'),label=make('strong','',group.name);symbol.setAttribute('aria-hidden','true');groupToggle.append(symbol);if(group.external)groupToggle.append(avatar(group.name));groupToggle.append(label);
         if(group.external)groupToggle.append(make('span','org-external','Gestor Externo'));
         groupToggle.append(make('span','org-group-count',group.count.toLocaleString('pt-BR')+' '+(group.count===1?'Pessoa':'Pessoas')));
         const list=make('ul','org-tree');list.setAttribute('aria-label',group.name);list.hidden=!selection.searching&&collapsed.has(group.key);groupToggle.setAttribute('aria-expanded',String(!list.hidden));symbol.textContent=list.hidden?'+':'−';
@@ -138,5 +164,5 @@
   function reset(){for(const controller of instances)controller.reset();}
   const api={mount,reset};
   if(global)global.MinervaOrganization=api;
-  if(typeof module==='object'&&module.exports)module.exports={buildOrganization,selectOrganization,...api};
+  if(typeof module==='object'&&module.exports)module.exports={buildOrganization,selectOrganization,initials,rasterAvatar,...api};
 })(typeof window==='undefined'?null:window);
