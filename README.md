@@ -126,8 +126,16 @@ A demonstração pública continua usando dados fictícios e não exibe o organo
 
 ## Edição administrativa de perfis e fotos no organograma (16/11/2026)
 
-Na instalação hospedada, a administração pode editar os dados pessoais, cargo, setor, unidade e gestor das pessoas aprovadas em Usuários E Solicitações. O salvamento preserva foto e preferência de navegação, não aceita alterações de identidade ou permissão e confere a revisão para evitar sobrescritas concorrentes.
+Na instalação hospedada, a administração pode editar os dados pessoais, cargo, setor, unidade e gestor das pessoas aprovadas em Usuários E Solicitações. O salvamento preserva a preferência de navegação e a foto quando ela não é alterada explicitamente, não aceita alterações de identidade ou permissão e confere a revisão para evitar sobrescritas concorrentes.
 
 O organograma administrativo mostra a foto do perfil, quando disponível e válida, ou as iniciais do primeiro e último nome. A seleção de gestores continua sem foto, e-mail ou matrícula. Todas as consultas e alterações administrativas revalidam a autorização atual e o acesso da pessoa selecionada.
 
 A demonstração pública continua sem contas reais ou backend e mantém as ações administrativas ocultas. Nenhum perfil pessoal ou foto real integra este repositório.
+
+## Foto do perfil pela administração (16/11/2026)
+
+Na instalação hospedada, a administração pode adicionar, substituir ou remover a foto das pessoas aprovadas em Usuários E Solicitações. A imagem usa os mesmos formatos JPEG, PNG e WebP e os limites de validação do perfil pessoal.
+
+A foto é opcional no salvamento administrativo: quando o cliente não envia esse campo, a imagem existente permanece; uma imagem vazia remove a foto. Preferência de navegação, identidade e permissões não são alteradas. A revisão e a autorização atual continuam sendo conferidas antes de gravar.
+
+A demonstração pública permanece fictícia, sem contas de produção, fotos reais ou administração ativa.

@@ -128,9 +128,9 @@ export async function saveUserProfile(bucket,access,input,options={}){
 }
 export async function saveMemberProfile(bucket,target,input,options={}){
  profileValidateEnvelope(input);
- if(!profilePlain(input.profile)||Object.keys(input.profile).length!==profileAdministrativeFields.length||profileAdministrativeFields.some(field=>!profileOwn(input.profile,field))||Object.keys(input.profile).some(field=>!profileAdministrativeFields.includes(field)))profileFail(400,'PROFILE_ADMIN_FIELDS_INVALID','Edite somente os dados pessoais, o local de trabalho e o gestor.');
+ if(!profilePlain(input.profile)||profileAdministrativeFields.some(field=>!profileOwn(input.profile,field))||Object.keys(input.profile).some(field=>!profileAdministrativeFields.includes(field)&&field!=='avatarDataUrl'))profileFail(400,'PROFILE_ADMIN_FIELDS_INVALID','Edite somente os dados pessoais, a foto, o local de trabalho e o gestor.');
  const hash=await profilePrincipalHash(target),found=await profileReadStored(bucket,hash);
  if(input.revision!==(found?.value.revision||null))profileChanged();
- const profile=profileNormalize({...input.profile,avatarDataUrl:found?.value.profile.avatarDataUrl||'',keepMenuOpen:found?.value.profile.keepMenuOpen??true});
+ const profile=profileNormalize({...input.profile,avatarDataUrl:profileOwn(input.profile,'avatarDataUrl')?input.profile.avatarDataUrl:found?.value.profile.avatarDataUrl||'',keepMenuOpen:found?.value.profile.keepMenuOpen??true});
  return profileWriteStored(bucket,target,profile,hash,found,options);
 }

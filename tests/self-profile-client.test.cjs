@@ -86,7 +86,7 @@ for(const role of ['editor','reviewer','viewer'])test('member profile blocked be
 });
 test('admin member edit transmits only editable data and preserves target encoding',async()=>{
  const h=harness({role:'admin'}),identity=copy(h.context.session);await h.member('other/person');await h.saveMember('other/person',{revision:'r1',profile:{...fields,role:'admin',email:'forged@example.test'}});
- assert.equal(h.requests[0].path,'/api/profile/member?userId=other%2Fperson');const expected=copy(fields);delete expected.avatarDataUrl;delete expected.keepMenuOpen;
+ assert.equal(h.requests[0].path,'/api/profile/member?userId=other%2Fperson');const expected=copy(fields);delete expected.keepMenuOpen;
  assert.deepEqual(JSON.parse(h.requests[1].options.body),{revision:'r1',profile:expected});assert.deepEqual(copy(h.context.session),identity);
 });
 for(const operation of ['member','saveMember'])test('late admin '+operation+' response is discarded on access change',async()=>{
@@ -95,4 +95,12 @@ for(const operation of ['member','saveMember'])test('late admin '+operation+' re
 test('member editor rejects empty target and remains separate from permissions',async()=>{
  const h=harness({role:'admin'});await assert.rejects(h.member(''),/Selecione/);assert.equal(h.requests.length,0);
  assert.match(source,/data-edit-member-profile/);assert.match(source,/memberProfileView\?\.reset\(\)/);assert.match(source,/getProfile:getMemberProfile,saveProfile:saveMemberProfile/);
+});
+
+test('admin photo payload supports replace and remove without transmitting navigation preference',async()=>{
+ const h=harness({role:'admin'});for(const avatarDataUrl of ['data:image/jpeg;base64,/9j/2Q==',''])await h.saveMember('other',{revision:'r-photo',profile:{...fields,avatarDataUrl,keepMenuOpen:false}});
+ assert.equal(JSON.parse(h.requests[0].options.body).profile.avatarDataUrl,'data:image/jpeg;base64,/9j/2Q==');assert.equal(JSON.parse(h.requests[1].options.body).profile.avatarDataUrl,'');assert(!Object.hasOwn(JSON.parse(h.requests[0].options.body).profile,'keepMenuOpen'));
+});
+test('old admin payload does not introduce an empty photo when omitted',async()=>{
+ const h=harness({role:'admin'}),profile={...fields};delete profile.avatarDataUrl;await h.saveMember('other',{revision:'r-photo',profile});assert(!Object.hasOwn(JSON.parse(h.requests[0].options.body).profile,'avatarDataUrl'));
 });

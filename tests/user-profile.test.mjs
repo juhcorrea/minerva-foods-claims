@@ -238,7 +238,7 @@ test('member profile route is administrative and targets only approved or config
 test('administrative edits require exact editable fields CSRF and the target revision',async()=>{
  const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),id=viewer.body.userId;
  const first=await putMember(env,admin.cookie,id);assert.equal(first.status,200);assert.equal(first.body.profile.avatarDataUrl,'');assert.equal(first.body.profile.keepMenuOpen,true);
- for(const field of ['id','userId','email','role','identity','avatarDataUrl','keepMenuOpen']){
+ for(const field of ['id','userId','email','role','identity','keepMenuOpen']){
   const result=await putMember(env,admin.cookie,id,{...administrativeValues(),[field]:'injected'},first.body.revision);assert.equal(result.status,400);assert.equal(result.body.code,'PROFILE_ADMIN_FIELDS_INVALID');
  }
  const missing=administrativeValues();delete missing.managerId;assert.equal((await putMember(env,admin.cookie,id,missing,first.body.revision)).status,400);
@@ -246,7 +246,7 @@ test('administrative edits require exact editable fields CSRF and the target rev
  env.BUCKET.conflict=true;assert.equal((await putMember(env,admin.cookie,id,administrativeValues({name:'Conflict'}),first.body.revision)).status,409);
  const route='/api/profile/member?userId='+id,body={revision:first.body.revision,profile:administrativeValues()};
  assert.equal((await call(env,route,admin.cookie,{method:'PUT',body,csrf:false})).status,403);
- assert.equal((await call(env,route,admin.cookie,{method:'PUT',body:' '.repeat(16385)})).status,413);
+ assert.equal((await call(env,route,admin.cookie,{method:'PUT',body:' '.repeat(USER_PROFILE_BODY_BYTES+1)})).status,413);
  assert.deepEqual((await call(env,route,admin.cookie)).body,first.body);
 });
 
@@ -266,4 +266,31 @@ test('administrative reads and writes recheck both administrator and target afte
   const result=method==='GET'?await call(env,'/api/profile/member?userId='+target.body.userId,actor.cookie):await putMember(env,actor.cookie,target.body.userId);
   assert.equal(result.status,change==='demote-actor'?403:change==='revoke-target'?404:409,method+' '+change);assert.equal(profileKeys(env).length,0);
  }
+});
+
+test('administrators add replace and remove target photos without changing navigation preference',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),id=viewer.body.userId;
+ const own=await put(env,viewer.cookie,values({keepMenuOpen:false}));let revision=own.body.revision;
+ for(const avatarDataUrl of [png,jpeg,webp,'']){
+  const saved=await putMember(env,admin.cookie,id,{...administrativeValues(),avatarDataUrl},revision);assert.equal(saved.status,200);assert.equal(saved.body.profile.avatarDataUrl,avatarDataUrl);assert.equal(saved.body.profile.keepMenuOpen,false);revision=saved.body.revision;
+  assert.equal((await call(env,'/api/profile/self',viewer.cookie)).body.profile.avatarDataUrl,avatarDataUrl);
+  assert.equal((await call(env,'/api/organization',admin.cookie)).body.people.find(person=>person.id===id).avatarDataUrl,avatarDataUrl);
+ }
+ const withPhoto=await putMember(env,admin.cookie,id,{...administrativeValues(),avatarDataUrl:png},revision);assert.equal(withPhoto.status,200);
+ const omitted=await putMember(env,admin.cookie,id,administrativeValues({jobTitle:'Novo Cargo'}),withPhoto.body.revision);assert.equal(omitted.status,200);assert.equal(omitted.body.profile.avatarDataUrl,png);assert.equal(omitted.body.profile.keepMenuOpen,false);
+ assert.equal((await putMember(env,admin.cookie,id,{...administrativeValues(),avatarDataUrl:''},withPhoto.body.revision)).status,409);
+ assert.equal((await call(env,'/api/profile/self',viewer.cookie)).body.profile.avatarDataUrl,png);
+});
+
+test('administrative photo uploads use the shared raster limit and reject invalid payloads atomically',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),id=viewer.body.userId;
+ const atLimit=Buffer.alloc(USER_PROFILE_AVATAR_BYTES);atLimit.set([255,216,255]);atLimit.set([255,217],atLimit.length-2);
+ const largeJpeg='data:image/jpeg;base64,'+atLimit.toString('base64');
+ const first=await putMember(env,admin.cookie,id,{...administrativeValues(),avatarDataUrl:largeJpeg});assert.equal(first.status,200);assert.equal(first.body.profile.avatarDataUrl,largeJpeg);
+ const overLimit=Buffer.alloc(USER_PROFILE_AVATAR_BYTES+1);overLimit.set([255,216,255]);overLimit.set([255,217],overLimit.length-2);
+ for(const avatarDataUrl of [null,17,'https://example.test/photo.png','data:image/svg+xml;base64,'+Buffer.from('<svg/>').toString('base64'),png.replace('image/png','image/webp'),'data:image/png;base64,AAAA','data:image/jpeg;base64,'+overLimit.toString('base64')]){
+  const result=await putMember(env,admin.cookie,id,{...administrativeValues(),avatarDataUrl},first.body.revision);assert.equal(result.status,400);assert.equal(result.body.code,'PROFILE_AVATAR_INVALID');
+ }
+ assert.equal((await putMember(env,admin.cookie,id,{...administrativeValues(),avatarDataUrl:png,keepMenuOpen:false},first.body.revision)).status,400);
+ assert.deepEqual((await call(env,'/api/profile/self',viewer.cookie)).body,first.body);
 });

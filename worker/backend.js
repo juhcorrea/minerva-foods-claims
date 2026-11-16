@@ -447,7 +447,7 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
     if(request.method==='GET'){
      const document=await readUserProfile(env.BUCKET,target,{displayName:publicSession(target).name});await validateTarget();return response(document);
     }
-    return response(await saveMemberProfile(env.BUCKET,target,await readBody(request,16384),{now,validate:async profile=>{
+    return response(await saveMemberProfile(env.BUCKET,target,await readBody(request,USER_PROFILE_BODY_BYTES),{now,validate:async profile=>{
      if(profile.managerId){const {people}=await profileCheckedDirectory(env.BUCKET,access,admins,accessConfig,{organization:true,allowedRoles:['admin']});validateProfileManager(profile,userId,people);}
      await validateTarget();
     }}));

@@ -737,7 +737,7 @@
   function getMemberProfile(userId){return memberProfileRequest(userId);}
   function saveMemberProfile(userId,payload){
     const editable=payload?.profile||{},profile={};
-    for(const field of ['name','employeeId','jobTitle','department','unit','managerId','managerName'])if(Object.prototype.hasOwnProperty.call(editable,field))profile[field]=editable[field];
+    for(const field of ['name','employeeId','jobTitle','department','unit','managerId','managerName','avatarDataUrl'])if(Object.prototype.hasOwnProperty.call(editable,field))profile[field]=editable[field];
     return memberProfileRequest(userId,{method:'PUT',body:JSON.stringify({revision:payload?.revision??null,profile})});
   }
   function saveSelfProfile(payload){
