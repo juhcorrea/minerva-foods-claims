@@ -23,6 +23,8 @@ async function call(env,path,cookie,options={},api=handler){const response=await
 const login=(env,id='owner')=>call(env,'/api/auth/exchange',null,{method:'POST',body:{token:tokens[id]}});
 const values=(changes={})=>({name:'Pessoa Exemplo',employeeId:'EX-123',jobTitle:'Analista',department:'Logística',unit:'Unidade Exemplo',avatarDataUrl:'',keepMenuOpen:false,managerId:'',managerName:'',...changes});
 const put=(env,cookie,profile=values(),revision=null)=>call(env,'/api/profile/self',cookie,{method:'PUT',body:{revision,profile}});
+const administrativeValues=(changes={})=>{const profile=values(changes);delete profile.avatarDataUrl;delete profile.keepMenuOpen;return profile;};
+const putMember=(env,cookie,userId,profile=administrativeValues(),revision=null)=>call(env,'/api/profile/member?userId='+encodeURIComponent(userId),cookie,{method:'PUT',body:{revision,profile}});
 const profileKeys=env=>[...env.BUCKET.objects.keys()].filter(key=>key.startsWith(USER_PROFILE_PREFIX));
 async function member(env,admin,role='viewer'){
  const asked=await call(env,'/api/auth/request',null,{method:'POST',body:{name:'Pessoa '+role,email:role+'@example.test'}});
@@ -140,8 +142,10 @@ test('manager directory shares only workplace labels and organization is restric
  assert(!JSON.stringify(directory.body).includes('PRIVATE-EMPLOYEE'));assert(!JSON.stringify(directory.body).includes('example.test'));assert(!JSON.stringify(directory.body).includes('base64'));
  for(const cookie of [viewer.cookie,editor.cookie])assert.equal((await call(env,'/api/organization',cookie)).status,403);
  const organization=await call(env,'/api/organization',admin.cookie);assert.equal(organization.status,200);
- for(const person of organization.body.people)assert.deepEqual(Object.keys(person).sort(),['id','name','jobTitle','department','unit','managerId','managerName'].sort());
+ for(const person of organization.body.people)assert.deepEqual(Object.keys(person).sort(),['id','name','jobTitle','department','unit','managerId','managerName','avatarDataUrl'].sort());
  assert.equal(organization.body.people.find(person=>person.id===viewer.body.userId).managerId,'owner');
+ assert.equal(organization.body.people.find(person=>person.id===viewer.body.userId).avatarDataUrl,png);
+ assert.equal(organization.body.people.find(person=>person.id==='owner').avatarDataUrl,'');
  await call(env,'/api/members/'+editor.body.userId+'/role',admin.cookie,{method:'POST',body:{role:'admin'}});
  assert.equal((await call(env,'/api/organization',editor.cookie)).status,200);
  await call(env,'/api/members/'+editor.body.userId+'/role',admin.cookie,{method:'POST',body:{role:'viewer'}});
@@ -197,4 +201,69 @@ test('profile GET cannot finish after the requester is revoked during its storag
  const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie);
  env.BUCKET.beforeGet=async key=>{if(!key.startsWith(USER_PROFILE_PREFIX))return;env.BUCKET.beforeGet=null;const item=env.BUCKET.objects.get('private/access-v3.json'),acl=JSON.parse(item.text);acl.members[viewer.body.userId].status='revoked';item.text=JSON.stringify(acl);};
  assert.equal((await call(env,'/api/profile/self',viewer.cookie)).status,403);
+});
+
+test('administration edits target workplace fields while preserving photo preferences identity and ACL',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),id=viewer.body.userId;
+ const original=await put(env,viewer.cookie,values({name:'Original Pessoa',avatarDataUrl:png,keepMenuOpen:false}));assert.equal(original.status,200);
+ const aclBefore=env.BUCKET.objects.get('private/access-v3.json').text;
+ const read=await call(env,'/api/profile/member?userId='+id,admin.cookie);assert.equal(read.status,200);assert.deepEqual(read.body,original.body);assert.match(read.headers.get('cache-control'),/private, no-store/);
+ const edited=await putMember(env,admin.cookie,id,administrativeValues({name:'Nome Editado',employeeId:'NEW-001',managerId:'owner'}),read.body.revision);assert.equal(edited.status,200);
+ assert.equal(edited.body.profile.avatarDataUrl,png);assert.equal(edited.body.profile.keepMenuOpen,false);assert.equal(edited.body.profile.name,'Nome Editado');assert.equal(edited.body.profile.managerId,'owner');assert.deepEqual(edited.body.identity,original.body.identity);
+ assert.deepEqual((await call(env,'/api/profile/self',viewer.cookie)).body,edited.body);
+ assert.equal((await call(env,'/api/profile/self',admin.cookie)).body.profile.name,'Admin Example');
+ assert.equal(env.BUCKET.objects.get('private/access-v3.json').text,aclBefore);
+ assert.equal((await call(env,'/api/session',viewer.cookie)).body.name,'Pessoa viewer');assert.equal((await call(env,'/api/session',viewer.cookie)).body.role,'viewer');
+});
+
+test('member profile route is administrative and targets only approved or configured identities',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),id=viewer.body.userId;
+ const route='/api/profile/member?userId='+id;
+ for(const method of ['GET','PUT'])assert.equal((await call(env,route,null,{method,...(method==='PUT'?{body:{revision:null,profile:administrativeValues()}}:{})})).status,401);
+ for(const role of ['viewer','reviewer','editor']){
+  const person=role==='viewer'?viewer:await member(env,admin.cookie,role);
+  assert.equal((await call(env,route,person.cookie)).status,403);assert.equal((await putMember(env,person.cookie,id)).status,403);
+ }
+ const pending=await call(env,'/api/auth/request',null,{method:'POST',body:{name:'Pending Target'}});
+ for(const unknown of ['unknown',pending.body.userId]){assert.equal((await call(env,'/api/profile/member?userId='+unknown,admin.cookie)).status,404);assert.equal((await putMember(env,admin.cookie,unknown)).status,404);}
+ assert.equal((await call(env,'/api/profile/member?userId=developer',admin.cookie)).body.profile.name,'Desenvolvimento');
+ assert.equal((await putMember(env,admin.cookie,'developer',administrativeValues({name:'Configured Admin'}))).status,200);
+ const technical=await login(env,'developer');assert.equal((await call(env,'/api/profile/self',technical.cookie)).body.profile.name,'Configured Admin');assert.equal((await call(env,'/api/session',technical.cookie)).body.role,'admin');
+ await call(env,'/api/members/'+id,admin.cookie,{method:'DELETE',body:{}});
+ assert.equal((await call(env,route,admin.cookie)).status,404);assert.equal((await putMember(env,admin.cookie,id)).status,404);
+ for(const query of ['', '?userId=', '?userId='+id+'&userId=owner','?userId='+id+'&role=admin','?userId=../private'])assert.equal((await call(env,'/api/profile/member'+query,admin.cookie)).status,400);
+ for(const method of ['POST','PATCH','DELETE'])assert.equal((await call(env,'/api/profile/member?userId=owner',admin.cookie,{method,body:{}})).status,405);
+});
+
+test('administrative edits require exact editable fields CSRF and the target revision',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),id=viewer.body.userId;
+ const first=await putMember(env,admin.cookie,id);assert.equal(first.status,200);assert.equal(first.body.profile.avatarDataUrl,'');assert.equal(first.body.profile.keepMenuOpen,true);
+ for(const field of ['id','userId','email','role','identity','avatarDataUrl','keepMenuOpen']){
+  const result=await putMember(env,admin.cookie,id,{...administrativeValues(),[field]:'injected'},first.body.revision);assert.equal(result.status,400);assert.equal(result.body.code,'PROFILE_ADMIN_FIELDS_INVALID');
+ }
+ const missing=administrativeValues();delete missing.managerId;assert.equal((await putMember(env,admin.cookie,id,missing,first.body.revision)).status,400);
+ assert.equal((await putMember(env,admin.cookie,id,administrativeValues(),null)).status,409);
+ env.BUCKET.conflict=true;assert.equal((await putMember(env,admin.cookie,id,administrativeValues({name:'Conflict'}),first.body.revision)).status,409);
+ const route='/api/profile/member?userId='+id,body={revision:first.body.revision,profile:administrativeValues()};
+ assert.equal((await call(env,route,admin.cookie,{method:'PUT',body,csrf:false})).status,403);
+ assert.equal((await call(env,route,admin.cookie,{method:'PUT',body:' '.repeat(16385)})).status,413);
+ assert.deepEqual((await call(env,route,admin.cookie)).body,first.body);
+});
+
+test('administrative manager validation uses target identity and does not grant authority',async()=>{
+ const env=environment(),admin=await login(env),one=await member(env,admin.cookie),two=await member(env,admin.cookie,'editor');
+ assert.equal((await putMember(env,admin.cookie,one.body.userId,administrativeValues({managerId:one.body.userId}))).status,400);
+ const first=await putMember(env,admin.cookie,one.body.userId,administrativeValues({managerId:two.body.userId}));assert.equal(first.status,200);
+ const cycle=await putMember(env,admin.cookie,two.body.userId,administrativeValues({managerId:one.body.userId}));assert.equal(cycle.status,400);assert.equal(cycle.body.code,'PROFILE_MANAGER_CYCLE');
+ assert.equal((await call(env,'/api/session',two.cookie)).body.role,'editor');assert.equal((await call(env,'/api/organization',two.cookie)).status,403);
+ const external=await putMember(env,admin.cookie,two.body.userId,administrativeValues({managerName:'Gestor Externo'}));assert.equal(external.status,200);assert.equal(external.body.profile.managerName,'Gestor Externo');
+});
+
+test('administrative reads and writes recheck both administrator and target after loading the profile',async()=>{
+ for(const method of ['GET','PUT'])for(const change of ['demote-actor','revoke-target','change-target-role']){
+  const env=environment(),bootstrap=await login(env),actor=await member(env,bootstrap.cookie,'admin'),target=await member(env,bootstrap.cookie);
+  env.BUCKET.beforeGet=async key=>{if(!key.startsWith(USER_PROFILE_PREFIX))return;env.BUCKET.beforeGet=null;const item=env.BUCKET.objects.get('private/access-v3.json'),acl=JSON.parse(item.text);if(change==='demote-actor')acl.members[actor.body.userId].role='viewer';else if(change==='revoke-target')acl.members[target.body.userId].status='revoked';else acl.members[target.body.userId].role='reviewer';acl.revision='changed';item.text=JSON.stringify(acl);};
+  const result=method==='GET'?await call(env,'/api/profile/member?userId='+target.body.userId,actor.cookie):await putMember(env,actor.cookie,target.body.userId);
+  assert.equal(result.status,change==='demote-actor'?403:change==='revoke-target'?404:409,method+' '+change);assert.equal(profileKeys(env).length,0);
+ }
 });

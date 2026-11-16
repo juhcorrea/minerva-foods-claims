@@ -1,8 +1,9 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-const {buildOrganization,selectOrganization}=require('../dist/organization.js');
+const {buildOrganization,selectOrganization,initials,rasterAvatar}=require('../dist/organization.js');
 const {createDOM}=require('./dom-fixture.cjs');
 const source=fs.readFileSync(require.resolve('../dist/organization.js'),'utf8');
+const pngAvatar='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const person=(id,name,extra={})=>({id,name,jobTitle:'Analista',department:'Logística',unit:'Unidade Exemplo',managerId:'',managerName:'',...extra});
 const sample=()=>[person('a','Gestora Exemplo',{jobTitle:'Gestora'}),person('b','Analista Exemplo',{managerId:'a'}),person('c','Assistente Exemplo',{managerId:'b'}),person('d','Pessoa Externa',{managerName:'Gestor Externo Exemplo'})];
 function allPeople(model){const found=[],stack=[...model.groups];while(stack.length){const node=stack.pop();if(node.kind==='person')found.push(node);stack.push(...node.children);assert(found.length<=model.total,'tree must not repeat people or loop');}return found;}
@@ -54,4 +55,24 @@ test('refresh only accepts the latest response and failure never leaves stale pe
 
 test('global reset clears a loaded directory and aborted access does not display an old error',async()=>{
  let revoked=false;const h=harness(async()=>{if(revoked)throw Object.assign(Error('old account'),{name:'AbortError'});return{people:sample()};});await h.controller.refresh();h.window.MinervaOrganization.reset();assert.equal(h.host.querySelectorAll('.org-person').length,0);revoked=true;assert.equal(await h.controller.refresh(),false);assert.equal(h.host.querySelector('.org-status').textContent,'');
+});
+
+test('initials use only the first and last names, or one initial for a single name',()=>{
+ assert.equal(initials('Maria De Souza'),'MS');assert.equal(initials('  ána   última  '),'ÁÚ');assert.equal(initials('Pessoa'),'P');assert.equal(initials(''),'—');assert.equal(initials(null),'—');
+});
+
+test('avatars accept bounded embedded raster data and reject remote, SVG, mismatched and oversized input',()=>{
+ assert.equal(rasterAvatar(pngAvatar),pngAvatar);
+ for(const [mime,bytes] of [['jpeg',[255,216,255,224,0,0,0,0,0,0,0,0]],['webp',[82,73,70,70,0,0,0,0,87,69,66,80]]]){const url='data:image/'+mime+';base64,'+Buffer.from(bytes).toString('base64');assert.equal(rasterAvatar(url),url);}
+ const wrongMime=pngAvatar.replace('image/png','image/jpeg'),oversized=Buffer.alloc(512*1024+1);Buffer.from([137,80,78,71,13,10,26,10]).copy(oversized);
+ for(const url of ['https://example.test/photo.png','javascript:alert(1)','data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=','data:image/png;base64,AAAA','data:image/png;base64,iVBORw0KGgo',wrongMime,'data:image/png;base64,'+oversized.toString('base64')])assert.equal(rasterAvatar(url),'');
+});
+
+test('each person renders a photo or first-last initials and external managers get initials only',async()=>{
+ const people=[person('a','Gestora De Exemplo',{avatarDataUrl:pngAvatar}),person('b','Analista',{managerId:'a'}),person('c','Pessoa Da Equipe',{managerName:'Gestor De Fora',avatarDataUrl:'https://example.test/photo.png'})],h=harness(async()=>({people}));await h.controller.refresh();
+ const a=h.host.querySelector('[data-person-id="a"] .org-person .org-avatar'),b=h.host.querySelector('[data-person-id="b"] .org-person .org-avatar'),c=h.host.querySelector('[data-person-id="c"] .org-person .org-avatar');assert.equal(a.querySelector('img').src,pngAvatar);assert.equal(a.querySelector('img').alt,'');assert.equal(a.getAttribute('aria-hidden'),'true');assert.equal(b.textContent,'A');assert.equal(b.querySelector('img'),null);assert.equal(c.textContent,'PE');assert.equal(c.querySelector('img'),null);const external=h.host.querySelector('.org-group-heading .org-avatar');assert.equal(external.textContent,'GF');assert.equal(external.querySelector('img'),null);assert.equal(h.host.querySelector('.org-count').textContent,'3');
+});
+
+test('an image loading error falls back to initials and reset removes all avatar data',async()=>{
+ const h=harness(async()=>({people:[person('a','Gestora De Exemplo',{avatarDataUrl:pngAvatar})]}));await h.controller.refresh();const avatar=h.host.querySelector('.org-avatar'),image=avatar.querySelector('img');image.dispatchEvent({type:'error'});assert.equal(avatar.querySelector('img'),null);assert.equal(avatar.textContent,'GE');assert.equal(avatar.classList.contains('has-photo'),false);await h.controller.refresh();assert(h.host.querySelector('img'));h.controller.reset();assert.equal(h.host.querySelector('img'),null);assert.equal(h.host.querySelector('.org-avatar'),null);
 });

@@ -120,6 +120,14 @@ A demonstração pública mantém exclusivamente exemplos fictícios, sem backen
 
 Meu Perfil permite selecionar um gestor entre as pessoas com acesso aprovado ou informar um gestor externo. O vínculo usa um identificador estável e não altera permissões. Perfis anteriores continuam válidos; clientes antigos não apagam um gestor já informado.
 
-Na instalação hospedada, a administração pode consultar o organograma pelo perfil. A visão preserva pessoas sem gestor cadastrado e sinaliza relações sem correspondência ou ciclos. O diretório compartilha somente nome, cargo, setor e unidade; e-mail, matrícula e foto continuam fora dessa consulta.
+Na instalação hospedada, a administração pode consultar o organograma pelo perfil. A visão preserva pessoas sem gestor cadastrado e sinaliza relações sem correspondência ou ciclos. A seleção de gestores compartilha somente nome, cargo, setor e unidade. O organograma administrativo pode apresentar a foto do perfil; e-mail e matrícula ficam fora do organograma.
 
 A demonstração pública continua usando dados fictícios e não exibe o organograma administrativo nem conecta a contas de produção.
+
+## Edição administrativa de perfis e fotos no organograma (16/11/2026)
+
+Na instalação hospedada, a administração pode editar os dados pessoais, cargo, setor, unidade e gestor das pessoas aprovadas em Usuários E Solicitações. O salvamento preserva foto e preferência de navegação, não aceita alterações de identidade ou permissão e confere a revisão para evitar sobrescritas concorrentes.
+
+O organograma administrativo mostra a foto do perfil, quando disponível e válida, ou as iniciais do primeiro e último nome. A seleção de gestores continua sem foto, e-mail ou matrícula. Todas as consultas e alterações administrativas revalidam a autorização atual e o acesso da pessoa selecionada.
+
+A demonstração pública continua sem contas reais ou backend e mantém as ações administrativas ocultas. Nenhum perfil pessoal ou foto real integra este repositório.

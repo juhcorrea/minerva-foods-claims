@@ -67,13 +67,13 @@
   let sessionWatchTimer = null;
   let sessionCheckInFlight = false;
   let lastSessionCheckAt = 0;
-  let organizationView=null,organizationScope='';
+  let organizationView=null,organizationScope='',memberProfileView=null;
   const body = document.body;
   body.classList.add('team-hosted', 'team-session-pending');
 
   function updateProfile() {
     const profile = publicProfile(session);
-    const scope=profile?session.userId+':'+session.role:'';if(scope!==organizationScope){organizationScope=scope;organizationView?.reset();}
+    const scope=profile?session.userId+':'+session.role:'';if(scope!==organizationScope){organizationScope=scope;organizationView?.reset();memberProfileView?.reset();}
     if ($('teamEmail')) $('teamEmail').textContent = profile ? profile.name : '';
     if ($('teamRole')) $('teamRole').textContent = profile ? roleLabel(profile.role) + ' · ' + ({admin:'bases, correções e acessos',editor:'publica bases e marca correções',reviewer:'marca e desmarca correções',viewer:'relatório compartilhado'})[profile.role] : '';
     document.dispatchEvent(new CustomEvent('minerva:session-updated', {detail:profile}));
@@ -132,11 +132,13 @@
     const tabs=document.createElement('div');tabs.className='team-admin-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Administração');tabs.innerHTML='<button id="teamAccessTab" type="button" role="tab" aria-selected="true" aria-controls="teamAccessPanel">Usuários E Solicitações</button><button id="teamOrganizationTab" type="button" role="tab" aria-selected="false" aria-controls="teamOrganizationPanel" tabindex="-1">Organograma</button>';
     const orgPanel=document.createElement('section');orgPanel.id='teamOrganizationPanel';orgPanel.hidden=true;orgPanel.setAttribute('role','tabpanel');orgPanel.setAttribute('aria-labelledby','teamOrganizationTab');members.append(tabs,accessPanel,orgPanel);
     organizationView=global.MinervaOrganization?.mount(orgPanel,getOrganization);
+    memberProfileView=global.MinervaMemberProfile?.mount({getProfile:getMemberProfile,saveProfile:saveMemberProfile,getManagers:getProfileManagers,onSaved:result=>{global.MinervaProfile?.applyExternalUpdate?.(result);organizationView?.reset();memberMessage('Perfil atualizado. O organograma já considera o gestor informado.');}});
     $('teamAccessTab').addEventListener('click',()=>selectAdminTab(false));$('teamOrganizationTab').addEventListener('click',()=>selectAdminTab(true));
     tabs.addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const org=event.key==='End'||event.key!=='Home'&&document.activeElement===$('teamAccessTab');selectAdminTab(org);$(org?'teamOrganizationTab':'teamAccessTab').focus();}});
-    members.addEventListener('close',()=>{organizationView?.reset();selectAdminTab(false);});
+    members.addEventListener('close',()=>{organizationView?.reset();memberProfileView?.reset();selectAdminTab(false);});
     $('teamCloseMembers').addEventListener('click', () => members.close());
     $('teamMembersList').addEventListener('click', changeMemberAccess);
+    members.addEventListener('click',event=>{const button=event.target.closest('[data-edit-member-profile]');if(!button||!isApprovedSession(session)||session.role!=='admin')return;void memberProfileView?.open({id:button.dataset.editMemberProfile,name:button.dataset.memberName});});
     $('teamRefreshMembers').addEventListener('click', refreshMemberList);
     $('teamDownloadMigration').addEventListener('click', downloadMigration);
     $('teamSignout').addEventListener('click', logout);
@@ -493,13 +495,14 @@
     if (id && ['pending','revoked','rejected'].includes(status)) {
       actions += '<button class="button team-delete-request" type="button" data-member-action="delete"' + attrs + ' aria-label="Excluir solicitação de ' + escapeHTML(name) + '">Excluir solicitação</button>';
     }
+    if(id&&status==='approved')actions='<button class="button button-outline" type="button" data-edit-member-profile="'+escapeHTML(id)+'" data-member-name="'+escapeHTML(name)+'" aria-label="Editar Perfil De '+escapeHTML(name)+'">Editar Perfil</button>'+actions;
     return '<div class="team-member-row' + (['revoked','rejected'].includes(status) ? ' is-revoked' : '') + '"><div><strong>' + escapeHTML(name) + '</strong><span>' + escapeHTML(detail.join(' · ')) + '</span></div><div class="team-member-actions">' + actions + '</div></div>';
   }
   function renderMembers(payload) {
     const members = Array.isArray(payload.members) ? payload.members : [];
     const admins = Array.isArray(payload.admins) ? payload.admins : [];
     const historyOpen = $('teamMembersList').querySelector('.team-closed-accesses')?.open === true;
-    $('teamAdminsList').innerHTML = admins.map(admin => '<div class="team-admin-fixed"><div><strong>' + escapeHTML(displayName(admin)) + '</strong><span>' + (admin.id === 'developer' ? 'Acesso administrativo · apoio técnico' : 'Administradora · responsável pelo setor') + '</span></div><span class="badge">Administração</span></div>').join('');
+    $('teamAdminsList').innerHTML = admins.map(admin => '<div class="team-admin-fixed"><div><strong>' + escapeHTML(displayName(admin)) + '</strong><span>' + (admin.id === 'developer' ? 'Acesso administrativo · apoio técnico' : 'Administradora · responsável pelo setor') + '</span></div><div class="team-member-actions"><span class="badge">Administração</span><button class="button button-outline" type="button" data-edit-member-profile="'+escapeHTML(admin.id)+'" data-member-name="'+escapeHTML(displayName(admin))+'" aria-label="Editar Perfil De '+escapeHTML(displayName(admin))+'">Editar Perfil</button></div></div>').join('');
     const lists = {pending:[], approved:[], closed:[]};
     for (const member of members) {
       if (admins.some(admin=>String(admin.id)===String(member.id))) continue;
@@ -726,6 +729,17 @@
   function getSelfProfile(){return selfProfileRequest();}
   function getProfileManagers(){return selfProfileRequest(undefined,'/api/profile/managers');}
   function getOrganization(){if(session?.role!=='admin')return Promise.reject(new Error('Apenas administradores podem consultar o organograma.'));return selfProfileRequest(undefined,'/api/organization');}
+  function memberProfileRequest(userId,options){
+    if(session?.role!=='admin')return Promise.reject(new Error('Apenas administradores podem editar os dados da equipe.'));
+    if(typeof userId!=='string'||!userId.trim())return Promise.reject(new Error('Selecione a pessoa para editar.'));
+    return selfProfileRequest(options,'/api/profile/member?userId='+encodeURIComponent(userId));
+  }
+  function getMemberProfile(userId){return memberProfileRequest(userId);}
+  function saveMemberProfile(userId,payload){
+    const editable=payload?.profile||{},profile={};
+    for(const field of ['name','employeeId','jobTitle','department','unit','managerId','managerName'])if(Object.prototype.hasOwnProperty.call(editable,field))profile[field]=editable[field];
+    return memberProfileRequest(userId,{method:'PUT',body:JSON.stringify({revision:payload?.revision??null,profile})});
+  }
   function saveSelfProfile(payload){
     const editable=payload?.profile||{},profile={};
     for(const field of ['name','employeeId','jobTitle','department','unit','avatarDataUrl','keepMenuOpen','managerId','managerName']){
@@ -734,6 +748,6 @@
     return selfProfileRequest({method:'PUT',body:JSON.stringify({revision:payload?.revision??null,profile})});
   }
   createUI();
-  global.MinervaTeam = {refresh:() => {reportCache.clear();return loadReport(app.getOptions());}, setCorrectionProgress, getMaterialInputs, saveMaterialInputs, getSelfProfile, saveSelfProfile, getProfileManagers, getOrganization, openMembers, copyLink, logout, getProfile:() => {const profile=publicProfile(session);return profile?{...profile,id:session.userId||''}:null;}};
+  global.MinervaTeam = {refresh:() => {reportCache.clear();return loadReport(app.getOptions());}, setCorrectionProgress, getMaterialInputs, saveMaterialInputs, getSelfProfile, saveSelfProfile, getProfileManagers, getOrganization, openMembers, getMemberProfile, saveMemberProfile, copyLink, logout, getProfile:() => {const profile=publicProfile(session);return profile?{...profile,id:session.userId||''}:null;}};
   boot();
 })(typeof window !== 'undefined' ? window : globalThis);

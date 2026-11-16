@@ -11,7 +11,7 @@ const copy=value=>JSON.parse(JSON.stringify(value));
 function harness({role='viewer',respond=async()=>({profile:fields,revision:'r1'})}={}){
  const requests=[],context={session:approved(role),sessionVersion:1,isApprovedSession,api:async(path,options)=>{requests.push({path,options:copy(options||{})});return respond(path,options);}};
  vm.runInNewContext(code,context);
- return{context,requests,get:()=>context.getSelfProfile(),save:payload=>context.saveSelfProfile(payload),managers:()=>context.getProfileManagers(),organization:()=>context.getOrganization()};
+ return{context,requests,get:()=>context.getSelfProfile(),save:payload=>context.saveSelfProfile(payload),managers:()=>context.getProfileManagers(),organization:()=>context.getOrganization(),member:id=>context.getMemberProfile(id),saveMember:(id,payload)=>context.saveMemberProfile(id,payload)};
 }
 for(const role of ['admin','editor','reviewer','viewer'])test('self profile '+role+' loads and saves without changing access identity',async()=>{
  const h=harness({role}),identity=copy(h.context.session);
@@ -79,4 +79,20 @@ for(const operation of ['managers','organization'])for(const [name,change] of [
 test('manager save permits an external name and an explicit cleared link without accepting access fields',async()=>{
  const h=harness();await h.save({revision:'r1',profile:{managerId:'',managerName:'Gestor Externo',role:'admin',email:'forged@example.test'}});await h.save({revision:'r2',profile:{managerId:'',managerName:''}});
  assert.deepEqual(JSON.parse(h.requests[0].options.body),{revision:'r1',profile:{managerId:'',managerName:'Gestor Externo'}});assert.deepEqual(JSON.parse(h.requests[1].options.body),{revision:'r2',profile:{managerId:'',managerName:''}});
+});
+
+for(const role of ['editor','reviewer','viewer'])test('member profile blocked before request for '+role,async()=>{
+ const h=harness({role});await assert.rejects(h.member('other'),/Apenas administradores/);await assert.rejects(h.saveMember('other',{profile:fields}));assert.equal(h.requests.length,0);
+});
+test('admin member edit transmits only editable data and preserves target encoding',async()=>{
+ const h=harness({role:'admin'}),identity=copy(h.context.session);await h.member('other/person');await h.saveMember('other/person',{revision:'r1',profile:{...fields,role:'admin',email:'forged@example.test'}});
+ assert.equal(h.requests[0].path,'/api/profile/member?userId=other%2Fperson');const expected=copy(fields);delete expected.avatarDataUrl;delete expected.keepMenuOpen;
+ assert.deepEqual(JSON.parse(h.requests[1].options.body),{revision:'r1',profile:expected});assert.deepEqual(copy(h.context.session),identity);
+});
+for(const operation of ['member','saveMember'])test('late admin '+operation+' response is discarded on access change',async()=>{
+ let finish;const h=harness({role:'admin',respond:()=>new Promise(resolve=>{finish=resolve;})}),pending=operation==='member'?h.member('other'):h.saveMember('other',{profile:fields});h.context.session={...h.context.session,role:'viewer'};finish({profile:fields,revision:'r2'});await assert.rejects(pending,error=>error.name==='AbortError');
+});
+test('member editor rejects empty target and remains separate from permissions',async()=>{
+ const h=harness({role:'admin'});await assert.rejects(h.member(''),/Selecione/);assert.equal(h.requests.length,0);
+ assert.match(source,/data-edit-member-profile/);assert.match(source,/memberProfileView\?\.reset\(\)/);assert.match(source,/getProfile:getMemberProfile,saveProfile:saveMemberProfile/);
 });

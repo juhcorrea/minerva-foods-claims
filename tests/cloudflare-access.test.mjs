@@ -150,8 +150,15 @@ test('Access workplace directory includes only approved verified identities and 
  const initial=await call(env,'/api/profile/self',{token}),profile={...initial.body.profile,managerId:'owner'};
  assert.equal((await call(env,'/api/profile/self',{token,method:'PUT',body:{revision:null,profile}})).status,200);
  assert.equal((await call(env,'/api/organization',{token:admin})).body.people.find(person=>person.id===id).managerId,'owner');
+ assert.equal((await call(env,'/api/profile/member?userId='+id,{token})).status,403);
+ for(const unavailable of [legacy,outside])assert.equal((await call(env,'/api/profile/member?userId='+unavailable,{token:admin})).status,404);
+ const administrativeRead=await call(env,'/api/profile/member?userId='+id,{token:admin});assert.equal(administrativeRead.status,200);assert.equal(administrativeRead.body.identity.email,'employee@'+domain);
+ const editable=Object.fromEntries(['name','employeeId','jobTitle','department','unit','managerId','managerName'].map(field=>[field,administrativeRead.body.profile[field]]));editable.name='Administrative Display';
+ const administrativeSave=await call(env,'/api/profile/member?userId='+id,{token:admin,method:'PUT',body:{revision:administrativeRead.body.revision,profile:editable}});assert.equal(administrativeSave.status,200);assert.equal(administrativeSave.body.identity.role,'viewer');
+ assert.equal((await call(env,'/api/profile/self',{token})).body.profile.name,'Administrative Display');assert.equal((await call(env,'/api/session',{token})).body.name,'Directory Employee');
  await call(env,'/api/members/'+id,{method:'DELETE',token:admin,body:{}});
  assert.equal((await call(env,'/api/profile/managers',{token})).status,403);assert.equal((await call(env,'/api/organization',{token:admin})).body.people.length,2);
+ assert.equal((await call(env,'/api/profile/member?userId='+id,{token:admin})).status,404);
 });
 
 test('verified identity requests use signed email, remain pending and respect live approval/editor/revocation ACL',async()=>{

@@ -5,6 +5,7 @@ export const USER_PROFILE_AVATAR_BYTES=512*1024;
 export const USER_PROFILE_BODY_BYTES=720000;
 const profileFields=Object.freeze(['name','employeeId','jobTitle','department','unit','avatarDataUrl','keepMenuOpen']);
 const profileManagerFields=Object.freeze(['managerId','managerName']);
+const profileAdministrativeFields=Object.freeze(['name','employeeId','jobTitle','department','unit','managerId','managerName']);
 const profileTextLimits=Object.freeze({name:160,employeeId:80,jobTitle:120,department:120,unit:120});
 const profilePlain=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const profileOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
@@ -79,14 +80,15 @@ export async function readUserProfile(bucket,access,{displayName}={}){
  return profilePublicDocument(access,found?.value,displayName);
 }
 // Principals are supplied by the backend after checking the current ACL. The
-// directory exposes only workplace labels; full profiles remain self-only.
+// Manager selection exposes workplace labels only. The administrative
+// organization view may also display the already validated profile photo.
 export async function readProfileDirectory(bucket,principals,{organization=false}={}){
  const people=[];
  for(let offset=0;offset<principals.length;offset+=8){
   const batch=await Promise.all(principals.slice(offset,offset+8).map(async person=>{
    const found=await profileReadStored(bucket,await profileHashId(person.id,person.admin===true));
    const value=found?.value.profile;
-   return {id:person.id,name:value?.name||person.name,jobTitle:value?.jobTitle||'',department:value?.department||'',unit:value?.unit||'',...(organization?{managerId:value?.managerId||'',managerName:value?.managerName||''}:{})};
+   return {id:person.id,name:value?.name||person.name,jobTitle:value?.jobTitle||'',department:value?.department||'',unit:value?.unit||'',...(organization?{managerId:value?.managerId||'',managerName:value?.managerName||'',avatarDataUrl:value?.avatarDataUrl||''}:{})};
   }));people.push(...batch);
  }
  people.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR')||a.id.localeCompare(b.id));
@@ -105,16 +107,30 @@ export function validateProfileManager(profile,userId,people){
   visited.add(manager);manager=directory.get(manager)?.managerId||'';
  }
 }
-export async function saveUserProfile(bucket,access,input,{validate=async()=>{},now=()=>Date.now()}={}){
+function profileValidateEnvelope(input){
  if(!profilePlain(input)||Object.keys(input).length!==2||!profileOwn(input,'revision')||!profileOwn(input,'profile')||!(input.revision===null||(typeof input.revision==='string'&&input.revision.length>0&&input.revision.length<=100)))profileInvalid();
- const profile=profileNormalize(input.profile),hash=await profilePrincipalHash(access),found=await profileReadStored(bucket,hash);
- if(input.revision!==(found?.value.revision||null))profileChanged();
- // An older client that sends only the original fields must not erase a link.
- if(!profileManagerFields.some(field=>profileOwn(input.profile,field)))for(const field of profileManagerFields)profile[field]=found?.value.profile[field]||'';
+}
+async function profileWriteStored(bucket,access,profile,hash,found,{validate=async()=>{},now=()=>Date.now()}={}){
  if(profile.managerId===(access.admin||access.member).id)profileFail(400,'PROFILE_MANAGER_INVALID','Você não pode ser seu próprio gestor.');
  await validate(profile);
  const value={schemaVersion:1,principalHash:hash,revision:crypto.randomUUID(),updatedAt:new Date(now()).toISOString(),profile};
  const written=await bucket.put(USER_PROFILE_PREFIX+hash+'.json',JSON.stringify(value),{httpMetadata:{contentType:'application/json; charset=utf-8'},onlyIf:found?{etagMatches:found.etag}:{etagDoesNotMatch:'*'}});
  if(!written)profileChanged();
  return profilePublicDocument(access,value);
+}
+export async function saveUserProfile(bucket,access,input,options={}){
+ profileValidateEnvelope(input);
+ const profile=profileNormalize(input.profile),hash=await profilePrincipalHash(access),found=await profileReadStored(bucket,hash);
+ if(input.revision!==(found?.value.revision||null))profileChanged();
+ // An older client that sends only the original fields must not erase a link.
+ if(!profileManagerFields.some(field=>profileOwn(input.profile,field)))for(const field of profileManagerFields)profile[field]=found?.value.profile[field]||'';
+ return profileWriteStored(bucket,access,profile,hash,found,options);
+}
+export async function saveMemberProfile(bucket,target,input,options={}){
+ profileValidateEnvelope(input);
+ if(!profilePlain(input.profile)||Object.keys(input.profile).length!==profileAdministrativeFields.length||profileAdministrativeFields.some(field=>!profileOwn(input.profile,field))||Object.keys(input.profile).some(field=>!profileAdministrativeFields.includes(field)))profileFail(400,'PROFILE_ADMIN_FIELDS_INVALID','Edite somente os dados pessoais, o local de trabalho e o gestor.');
+ const hash=await profilePrincipalHash(target),found=await profileReadStored(bucket,hash);
+ if(input.revision!==(found?.value.revision||null))profileChanged();
+ const profile=profileNormalize({...input.profile,avatarDataUrl:found?.value.profile.avatarDataUrl||'',keepMenuOpen:found?.value.profile.keepMenuOpen??true});
+ return profileWriteStored(bucket,target,profile,hash,found,options);
 }

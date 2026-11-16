@@ -125,3 +125,33 @@ test('a failed directory lookup can retry and does not prevent saving an externa
  typeManager(h,'Gestor Externo');await h.submit();assert.equal(h.requests.findLast(r=>r.method==='PUT').payload.profile.managerName,'Gestor Externo');
  h.$('profileManagerSearch').dispatchEvent({type:'focus'});await h.settle();typeManager(h,'');assert.equal(h.$('profileManagerOptions').querySelectorAll('button').length,2);assert.equal(h.requests.filter(r=>r.method==='DIRECTORY').length,2);
 });
+
+test('an administrative update to the current profile refreshes saved fields and revision without changing access or navigation',async()=>{
+ const h=harness({role:'admin'});await h.settle();const accountBefore=copy(h.account),menuBefore=h.document.documentElement.dataset.menuCollapsed;
+ const result={profile:sample({name:'Nome Atualizado',jobTitle:'Cargo Atualizado',managerName:'Gestor Externo Atualizado',keepMenuOpen:false}),revision:'r-admin',identity:{userId:'person-a',email:'person-a@example.test',role:'admin'}};
+ assert.equal(h.window.MinervaProfile.applyExternalUpdate(result),true);h.open();assert.equal(h.$('profileField_name').value,'Nome Atualizado');assert.equal(h.$('profileField_jobTitle').value,'Cargo Atualizado');assert.equal(h.$('profileManagerSearch').value,'Gestor Externo Atualizado');assert.equal(h.$('profileName').textContent,'Nome Atualizado');assert.equal(h.$('profileEmail').value,'person-a@example.test');assert.equal(h.$('profileReload').hidden,true);assert.equal(h.document.documentElement.dataset.menuCollapsed,menuBefore);assert.deepEqual(copy(h.account),accountBefore);
+ h.input('unit','Unidade Ajustada');await h.submit();assert.equal(h.requests.findLast(request=>request.method==='PUT').payload.revision,'r-admin');
+});
+
+test('an administrative update preserves a dirty draft and photo until an explicit cancel or reload',async()=>{
+ const h=harness({role:'admin'});await h.settle();h.open();h.input('name','Meu Rascunho');typeManager(h,'Meu Gestor Em Rascunho');await h.photo({type:'image/png',size:1000});const draftPhoto=h.$('profilePhoto').querySelector('img').src;
+ const result={profile:sample({name:'Nome Salvo Pela Administração',managerName:'Gestor Salvo'}),revision:'r-admin',identity:{userId:'person-a',email:'person-a@example.test',role:'admin'}};
+ assert.equal(h.window.MinervaProfile.applyExternalUpdate(result),true);assert.equal(h.$('profileField_name').value,'Meu Rascunho');assert.equal(h.$('profileManagerSearch').value,'Meu Gestor Em Rascunho');assert.equal(h.$('profilePhoto').querySelector('img').src,draftPhoto);assert.equal(h.$('profileName').textContent,'Nome Salvo Pela Administração');assert.equal(h.$('profileReload').hidden,false);assert.equal(h.$('profileSave').disabled,true);assert.match(h.$('profileSaveStatus').textContent,/rascunho foi mantido/);await h.submit();assert.equal(h.requests.some(request=>request.method==='PUT'),false);
+ h.close();h.open();h.input('jobTitle','Mais Um Rascunho');assert.equal(h.$('profileField_name').value,'Meu Rascunho');assert.match(h.$('profileSaveStatus').textContent,/rascunho foi mantido/);
+ h.$('profileCancel').click();h.open();assert.equal(h.$('profileField_name').value,'Nome Salvo Pela Administração');assert.equal(h.$('profileManagerSearch').value,'Gestor Salvo');assert.equal(h.$('profilePhoto').querySelector('img'),null);assert.equal(h.$('profileSave').disabled,false);assert.equal(h.$('profileReload').hidden,true);
+});
+
+test('an update for another account or with incomplete identity does not touch the current draft',async()=>{
+ const h=harness({role:'admin'});await h.settle();h.open();h.input('name','Rascunho Da Minha Conta');const statusBefore=h.$('profileSaveStatus').textContent;
+ for(const identity of [{userId:'person-b',email:'person-b@example.test'},{}])assert.equal(h.window.MinervaProfile.applyExternalUpdate({profile:sample({name:'Outra Pessoa'}),revision:'r-other',identity}),false);
+ assert.equal(h.$('profileField_name').value,'Rascunho Da Minha Conta');assert.equal(h.$('profileSaveStatus').textContent,statusBefore);assert.equal(h.$('profileReload').hidden,true);assert.equal(h.$('profileSave').disabled,false);await h.submit();assert.equal(h.requests.findLast(request=>request.method==='PUT').payload.revision,'r1');
+});
+
+test('explicit reload after an administrative update replaces the draft and restores saving with the latest revision',async()=>{
+ let saved={profile:sample(),revision:'r1',identity:{userId:'person-a',email:'person-a@example.test',role:'admin'}};const h=harness({role:'admin',load:()=>copy(saved)});await h.settle();h.open();h.input('name','Rascunho Local');saved={...saved,profile:sample({name:'Versão Administrativa'}),revision:'r-admin'};h.window.MinervaProfile.applyExternalUpdate(saved);h.$('profileReload').click();await h.settle();assert.equal(h.$('profileField_name').value,'Versão Administrativa');assert.equal(h.$('profileReload').hidden,true);assert.equal(h.$('profileSave').disabled,false);h.input('unit','Unidade Ajustada');await h.submit();assert.equal(h.requests.findLast(request=>request.method==='PUT').payload.revision,'r-admin');
+});
+
+test('a late initial fetch cannot overwrite an administrative update to the current account',async()=>{
+ let finish;const h=harness({role:'admin',load:()=>new Promise(resolve=>{finish=resolve;})});
+ const result={profile:sample({name:'Versão Administrativa'}),revision:'r-admin',identity:{userId:'person-a',email:'person-a@example.test',role:'admin'}};assert.equal(h.window.MinervaProfile.applyExternalUpdate(result),true);finish({...result,profile:sample({name:'Versão Anterior'}),revision:'r-old'});await h.settle();h.open();assert.equal(h.$('profileField_name').value,'Versão Administrativa');assert.equal(h.$('profileSave').disabled,false);
+});

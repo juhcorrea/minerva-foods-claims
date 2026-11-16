@@ -8,7 +8,7 @@
   function validPhoto(file) {return Boolean(file && TYPES.includes(file.type) && file.size>0 && file.size<=MAX_FILE);}
   if (typeof module!=='undefined'&&module.exports) {module.exports={profileValues,initialLetters,validPhoto,MAX_FILE,MAX_AVATAR};return;}
   const $=id=>document.getElementById(id);
-  let hooks={},mounted=false,account=null,accountKey='',documentValue=null,draft=null,dirty=false,loading=false,saving=false,loadVersion=0,photoVersion=0,returnScroll=0;
+  let hooks={},mounted=false,account=null,accountKey='',documentValue=null,draft=null,dirty=false,loading=false,saving=false,loadVersion=0,photoVersion=0,returnScroll=0,externalChange=false;
   let managers=[],managerVersion=0,managerLoaded=false,managerBusy=false;
   const normalizeManager=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('pt-BR');
   function managerLabel(){return draft?.managerId?(managers.find(person=>person.id===draft.managerId)?.name||'Gestor Cadastrado'):draft?.managerName||'';}
@@ -34,8 +34,9 @@
   const menuIcon=icon('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18m-3-14v1m0 4v1m6-6h6m-6 4h6"/>');
   const cameraIcon=icon('<path d="m8 5 2-2h4l2 2h4v15H4V5Z"/><circle cx="12" cy="12" r="4"/>');
   const field=(id,label,placeholder,max,wide=false)=>'<div class="profile-field'+(wide?' profile-field-wide':'')+'"><label for="profileField_'+id+'">'+label+'</label><input id="profileField_'+id+'" name="'+id+'" maxlength="'+max+'" placeholder="'+placeholder+'" autocomplete="'+(id==='name'?'name':'off')+'"'+(id==='name'?' required minlength="2"':'')+'></div>';
-  function status(text,error=false) {const el=$('profileSaveStatus');if(!el)return;el.textContent=text;el.classList.toggle('is-error',error);el.hidden=!text;}
-  function disabled() {const form=$('selfProfileForm');if(!form)return;for(const el of form.querySelectorAll('input,button'))el.disabled=loading||saving;for(const id of ['profileChangePhoto','profileRemovePhoto','profilePhotoFile','profileCamera'])$(id).disabled=loading||saving||!documentValue; if($('profileRemovePhoto'))$('profileRemovePhoto').disabled=loading||saving||!documentValue||!draft?.avatarDataUrl;$('profileSave').disabled=loading||saving||!documentValue;}
+  const externalChangeMessage='Seu perfil foi atualizado pela administração. Seu rascunho foi mantido. Clique em Recarregar Perfil para usar os dados salvos ou em Cancelar para descartar o rascunho.';
+  function status(text,error=false) {const el=$('profileSaveStatus');if(!el)return;if(externalChange&&!loading&&!error&&text){text=externalChangeMessage;error=true;}el.textContent=text;el.classList.toggle('is-error',error);el.hidden=!text;}
+  function disabled() {const form=$('selfProfileForm');if(!form)return;for(const el of form.querySelectorAll('input,button'))el.disabled=loading||saving;for(const id of ['profileChangePhoto','profileRemovePhoto','profilePhotoFile','profileCamera'])$(id).disabled=loading||saving||!documentValue; if($('profileRemovePhoto'))$('profileRemovePhoto').disabled=loading||saving||!documentValue||!draft?.avatarDataUrl;$('profileSave').disabled=loading||saving||!documentValue||externalChange;}
   function photo(el,url,name){if(!el)return;el.replaceChildren();if(url){const img=document.createElement('img');img.src=url;img.alt='Foto do perfil';el.append(img);}else el.textContent=initialLetters(name)||'P';}
   function paintIdentity(value,identity) {
     const name=value?.name||account?.name||'Meu Perfil';
@@ -60,7 +61,7 @@
       if(global.MINERVA_HOSTED===true) result=await global.MinervaTeam.getSelfProfile();
       else {let saved;try{saved=JSON.parse(global.localStorage.getItem('minerva.claims.demo-profile.v1')||'null');}catch{}result=saved||{profile:profileValues({name:'Pessoa Exemplo',keepMenuOpen:!global.MinervaPreferences?.get().menuCollapsed}),revision:null,identity:{email:'',role:'viewer'}};}
       if(version!==loadVersion||key!==currentKey())return;
-      documentValue={...result,profile:profileValues(result.profile)};draft=profileValues(result.profile);dirty=false;populate();$('profileReload').hidden=true;
+      documentValue={...result,profile:profileValues(result.profile)};draft=profileValues(result.profile);dirty=false;externalChange=false;populate();$('profileReload').hidden=true;
       status(global.MINERVA_HOSTED===true?'':'Prévia: as alterações ficam somente neste navegador.');
       if(result.revision)global.MinervaPreferences?.setMenuMode(draft.keepMenuOpen?'expanded':'compact');
     }catch(error){if(version===loadVersion){status(error.message||'Não foi possível carregar o perfil. Tente novamente.',true);documentValue=null;$('profileReload').hidden=false;}}
@@ -70,14 +71,25 @@
     if(!mounted)return;account=profile;
     const next=currentKey();
     for(const id of ['profileUsersNav','profileUsersLink'])if($(id))$(id).hidden=global.MINERVA_HOSTED!==true||profile?.role!=='admin';
-    if(next!==accountKey){accountKey=next;loadVersion++;photoVersion++;managerVersion++;managers=[];managerLoaded=false;managerBusy=false;documentValue=null;draft=profileValues({name:profile?.name||'Pessoa Exemplo'});dirty=false;loading=false;saving=false;populate();if(global.MINERVA_HOSTED===true&&!profile){hooks.close?.(false);status('');return;}void load();}
+    if(next!==accountKey){accountKey=next;loadVersion++;photoVersion++;managerVersion++;managers=[];managerLoaded=false;managerBusy=false;documentValue=null;draft=profileValues({name:profile?.name||'Pessoa Exemplo'});dirty=false;externalChange=false;loading=false;saving=false;populate();if(global.MINERVA_HOSTED===true&&!profile){hooks.close?.(false);status('');return;}void load();}
     else if(documentValue)paintIdentity(dirty?readDraft():documentValue.profile,documentValue.identity);
   }
   function open(){returnScroll=global.scrollY||0;document.body.classList.add('profile-page-open');$('profilePanel').style.cssText='';$('profilePanel').hidden=false;$('mainContent')?.setAttribute('inert','');if(!dirty&&documentValue){draft=profileValues(documentValue.profile);populate();}void load();void loadManagers();global.scrollTo?.({top:0,behavior:'instant'});}
   function close(){document.body.classList.remove('profile-page-open');$('mainContent')?.removeAttribute('inert');if(returnScroll)global.scrollTo?.({top:returnScroll,behavior:'instant'});}
-  function cancel(){if(saving)return;draft=profileValues(documentValue?.profile||{name:account?.name});dirty=false;photoVersion++;populate();status('');hooks.close?.(true);}
+  function applyExternalUpdate(result){
+    if(!mounted||global.MINERVA_HOSTED!==true||!account?.id||result?.identity?.userId!==account.id||!result.profile||typeof result.profile!=='object'||Array.isArray(result.profile)||typeof result.revision!=='string'||!result.revision)return false;
+    if(documentValue?.revision===result.revision)return true;
+    if(dirty)readDraft();
+    loadVersion++;photoVersion++;loading=false;saving=false;
+    documentValue={...result,profile:profileValues(result.profile)};
+    externalChange=dirty;
+    if(dirty){paintIdentity(draft,documentValue.identity);$('profileReload').hidden=false;disabled();status(externalChangeMessage,true);}
+    else{draft=profileValues(documentValue.profile);populate();$('profileReload').hidden=true;status('Seu perfil foi atualizado.');}
+    return true;
+  }
+  function cancel(){if(saving)return;draft=profileValues(documentValue?.profile||{name:account?.name});dirty=false;externalChange=false;photoVersion++;populate();$('profileReload').hidden=true;status('');hooks.close?.(true);}
   async function save(event){
-    event.preventDefault();if(loading||saving||!documentValue)return;
+    event.preventDefault();if(loading||saving||!documentValue||externalChange)return;
     readDraft();const value=profileValues(draft);value.name=value.name.trim();if(value.name.length<2){status('Informe seu nome completo.',true);$('profileField_name').focus();return;}
     const key=currentKey(),version=loadVersion;saving=true;disabled();status('Salvando alterações…');
     try{
@@ -85,7 +97,7 @@
       if(global.MINERVA_HOSTED===true)result=await global.MinervaTeam.saveSelfProfile({revision:documentValue.revision,profile:value});
       else {result={...documentValue,profile:value,revision:String(Date.now())};global.localStorage.setItem('minerva.claims.demo-profile.v1',JSON.stringify(result));}
       if(key!==currentKey()||version!==loadVersion)return;
-      documentValue={...result,profile:profileValues(result.profile)};draft=profileValues(result.profile);dirty=false;populate();
+      documentValue={...result,profile:profileValues(result.profile)};draft=profileValues(result.profile);dirty=false;externalChange=false;populate();
       global.MinervaPreferences?.setMenuMode(draft.keepMenuOpen?'expanded':'compact');status('Alterações salvas.');
     }catch(error){if(key===currentKey()&&version===loadVersion){status(error.status===409?'Seu perfil foi alterado em outra sessão. Clique em Recarregar Perfil antes de editar novamente.':error.message||'Não foi possível salvar. Tente novamente.',true);$('profileReload').hidden=false;}}
     finally{if(key===currentKey()&&version===loadVersion){saving=false;disabled();}}
@@ -123,5 +135,5 @@
     $('profileRemovePhoto').addEventListener('click',()=>{photoVersion++;readDraft();draft.avatarDataUrl='';dirty=true;paintIdentity(draft,documentValue?.identity);disabled();status('Foto removida. Clique em Salvar Alterações para confirmar.');});
     mounted=true;
   }
-  global.MinervaProfile={mount,sync,open,close};
+  global.MinervaProfile={mount,sync,open,close,applyExternalUpdate};
 })(typeof window!=='undefined'?window:globalThis);

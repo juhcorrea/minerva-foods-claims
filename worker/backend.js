@@ -3,7 +3,7 @@ import {migrationZipResponse} from './zip.js';
 import {createClientReportHandler} from './client-report.js';
 import {CorrectionProgressError,readCorrectionProgress,readCorrectionProgressMetadata,correctionProgressRevision,saveProgressEntry} from './correction-progress.js';
 import {CloudflareAccessError, cloudflareAccessConfig, createCloudflareAccessVerifier} from './cloudflare-access.js';
-import {UserProfileError,USER_PROFILE_BODY_BYTES,readUserProfile,saveUserProfile,readProfileDirectory,validateProfileManager} from './user-profile.js';
+import {UserProfileError,USER_PROFILE_BODY_BYTES,readUserProfile,saveUserProfile,saveMemberProfile,readProfileDirectory,validateProfileManager} from './user-profile.js';
 
 /* Minerva Claims shared API — capability links and per-browser approvals.
  * Admin activation links carry 256-bit secrets, supplied only as hashes in env.
@@ -77,12 +77,27 @@ async function confirmMutationPermission(bucket,access,allowedRoles=['admin','ed
  if(access.admin&&ADMIN_IDS.includes(access.admin.id)&&allowedRoles.includes('admin'))return;
  const{value:acl}=await readAcl(bucket);requireCurrentRole(acl,access,allowedRoles);
 }
+function profileEligibleMember(person,accessConfig){
+ if(person?.status!=='approved'||typeof person.id!=='string'||ADMIN_IDS.includes(person.id))return false;
+ return !accessConfig||(person.emailVerified===true&&person.identity?.provider==='cloudflare-access'&&person.identity.issuer===accessConfig.issuer&&person.identity.email===person.email&&typeof person.identity.subject==='string'&&!!person.identity.subject&&person.email?.split('@')[1]===accessConfig.domain);
+}
+async function profileMemberTarget(bucket,access,admins,accessConfig,id){
+ const {value:acl}=await readAcl(bucket);requireCurrentRole(acl,access,['admin']);
+ const admin=admins.find(person=>person.id===id);
+ if(admin)return {authenticated:true,approved:true,role:'admin',admin};
+ const member=acl?.members[id];
+ if(!profileEligibleMember(member,accessConfig)||member.id!==id)fail(404,'PROFILE_MEMBER_UNAVAILABLE','Selecione uma pessoa com acesso aprovado ao painel.');
+ return {authenticated:true,approved:true,role:memberRole(member),member};
+}
+function profileSameTarget(previous,current){
+ const old=previous.admin||previous.member,next=current.admin||current.member;
+ if(previous.role!==current.role||old.email!==next.email||old.name!==next.name)fail(409,'PROFILE_MEMBER_CHANGED','O cadastro dessa pessoa foi atualizado. Carregue os dados novamente.');
+}
 async function profileCheckedDirectory(bucket,access,admins,accessConfig,{organization=false,allowedRoles=['admin','editor','reviewer','viewer']}={}){
  const {value:acl}=await readAcl(bucket);requireCurrentRole(acl,access,allowedRoles);
  const principals=admins.map(person=>({id:person.id,name:actorLabel(person.name,person.id),admin:true}));
  for(const person of Object.values(acl?.members||{})){
-  if(person?.status!=='approved'||typeof person.id!=='string'||ADMIN_IDS.includes(person.id))continue;
-  if(accessConfig&&(person.emailVerified!==true||person.identity?.provider!=='cloudflare-access'||person.identity.issuer!==accessConfig.issuer||person.identity.email!==person.email||typeof person.identity.subject!=='string'||!person.identity.subject||person.email?.split('@')[1]!==accessConfig.domain))continue;
+  if(!profileEligibleMember(person,accessConfig))continue;
   principals.push({id:person.id,name:person.name||'Pessoa sem nome',admin:false});
  }
  const directory=await readProfileDirectory(bucket,principals,{organization});
@@ -422,6 +437,21 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
    }
    if(!access.authenticated)fail(401,'SESSION_REQUIRED','Solicite acesso ou use seu link administrativo para continuar.');
    if(!access.approved)fail(403,access.status==='revoked'?'ACCESS_REVOKED':'ACCESS_PENDING',access.status==='revoked'?'Seu acesso foi revogado. A administração pode rever essa decisão.':'Sua solicitação aguarda aprovação da administração.');
+   if(url.pathname==='/api/profile/member'){
+    if(access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode editar o cadastro de outra pessoa.');
+    if(!['GET','PUT'].includes(request.method))fail(405,'METHOD_NOT_ALLOWED','Use a consulta ou o salvamento do cadastro.');
+    const userIds=url.searchParams.getAll('userId'),userId=userIds[0];
+    if(userIds.length!==1||[...url.searchParams.keys()].some(key=>key!=='userId')||typeof userId!=='string'||!(/^[A-Za-z0-9_-]{1,100}$/).test(userId))fail(400,'PROFILE_MEMBER_REQUIRED','Selecione a pessoa que deseja consultar.');
+    const target=await profileMemberTarget(env.BUCKET,access,admins,accessConfig,userId);
+    const validateTarget=async()=>profileSameTarget(target,await profileMemberTarget(env.BUCKET,access,admins,accessConfig,userId));
+    if(request.method==='GET'){
+     const document=await readUserProfile(env.BUCKET,target,{displayName:publicSession(target).name});await validateTarget();return response(document);
+    }
+    return response(await saveMemberProfile(env.BUCKET,target,await readBody(request,16384),{now,validate:async profile=>{
+     if(profile.managerId){const {people}=await profileCheckedDirectory(env.BUCKET,access,admins,accessConfig,{organization:true,allowedRoles:['admin']});validateProfileManager(profile,userId,people);}
+     await validateTarget();
+    }}));
+   }
    if(url.pathname==='/api/profile/managers'||url.pathname==='/api/organization'){
     const organization=url.pathname==='/api/organization';
     if(organization&&access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode consultar o organograma.');
