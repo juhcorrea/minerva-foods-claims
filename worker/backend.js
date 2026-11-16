@@ -3,7 +3,7 @@ import {migrationZipResponse} from './zip.js';
 import {createClientReportHandler} from './client-report.js';
 import {CorrectionProgressError,readCorrectionProgress,readCorrectionProgressMetadata,correctionProgressRevision,saveProgressEntry} from './correction-progress.js';
 import {CloudflareAccessError, cloudflareAccessConfig, createCloudflareAccessVerifier} from './cloudflare-access.js';
-import {UserProfileError,USER_PROFILE_BODY_BYTES,readUserProfile,saveUserProfile} from './user-profile.js';
+import {UserProfileError,USER_PROFILE_BODY_BYTES,readUserProfile,saveUserProfile,readProfileDirectory,validateProfileManager} from './user-profile.js';
 
 /* Minerva Claims shared API — capability links and per-browser approvals.
  * Admin activation links carry 256-bit secrets, supplied only as hashes in env.
@@ -76,6 +76,19 @@ function requireCurrentRole(acl,access,allowedRoles){
 async function confirmMutationPermission(bucket,access,allowedRoles=['admin','editor']){
  if(access.admin&&ADMIN_IDS.includes(access.admin.id)&&allowedRoles.includes('admin'))return;
  const{value:acl}=await readAcl(bucket);requireCurrentRole(acl,access,allowedRoles);
+}
+async function profileCheckedDirectory(bucket,access,admins,accessConfig,{organization=false,allowedRoles=['admin','editor','reviewer','viewer']}={}){
+ const {value:acl}=await readAcl(bucket);requireCurrentRole(acl,access,allowedRoles);
+ const principals=admins.map(person=>({id:person.id,name:actorLabel(person.name,person.id),admin:true}));
+ for(const person of Object.values(acl?.members||{})){
+  if(person?.status!=='approved'||typeof person.id!=='string'||ADMIN_IDS.includes(person.id))continue;
+  if(accessConfig&&(person.emailVerified!==true||person.identity?.provider!=='cloudflare-access'||person.identity.issuer!==accessConfig.issuer||person.identity.email!==person.email||typeof person.identity.subject!=='string'||!person.identity.subject||person.email?.split('@')[1]!==accessConfig.domain))continue;
+  principals.push({id:person.id,name:person.name||'Pessoa sem nome',admin:false});
+ }
+ const directory=await readProfileDirectory(bucket,principals,{organization});
+ const {value:latest}=await readAcl(bucket);requireCurrentRole(latest,access,allowedRoles);
+ if((latest?.revision||null)!==(acl?.revision||null))fail(409,'PROFILE_DIRECTORY_CHANGED','Os acessos foram atualizados. Carregue a lista de gestores novamente.');
+ return directory;
 }
 function materialValues(input){
  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['containerTotal','containerFrozen','containerChilled','containerDry','freightUsd','note','agreements'].includes(key)))fail(400,'MATERIAL_INVALID','Confira os campos manuais do material.');
@@ -409,9 +422,21 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
    }
    if(!access.authenticated)fail(401,'SESSION_REQUIRED','Solicite acesso ou use seu link administrativo para continuar.');
    if(!access.approved)fail(403,access.status==='revoked'?'ACCESS_REVOKED':'ACCESS_PENDING',access.status==='revoked'?'Seu acesso foi revogado. A administração pode rever essa decisão.':'Sua solicitação aguarda aprovação da administração.');
+   if(url.pathname==='/api/profile/managers'||url.pathname==='/api/organization'){
+    const organization=url.pathname==='/api/organization';
+    if(organization&&access.role!=='admin')fail(403,'ADMIN_REQUIRED','Somente a administração pode consultar o organograma.');
+    if(request.method!=='GET')fail(405,'METHOD_NOT_ALLOWED','Use a consulta da lista de pessoas.');
+    return response(await profileCheckedDirectory(env.BUCKET,access,admins,accessConfig,{organization,allowedRoles:organization?['admin']:['admin','editor','reviewer','viewer']}));
+   }
    if(url.pathname==='/api/profile/self'){
-    if(request.method==='GET')return response(await readUserProfile(env.BUCKET,access,{displayName:publicSession(access).name}));
-    if(request.method==='PUT')return response(await saveUserProfile(env.BUCKET,access,await readBody(request,USER_PROFILE_BODY_BYTES),{now,validate:()=>confirmMutationPermission(env.BUCKET,access,['admin','editor','reviewer','viewer'])}));
+    if(request.method==='GET'){
+     const profile=await readUserProfile(env.BUCKET,access,{displayName:publicSession(access).name});
+     const {value:acl}=await readAcl(env.BUCKET);requireCurrentRole(acl,access,['admin','editor','reviewer','viewer']);return response(profile);
+    }
+    if(request.method==='PUT')return response(await saveUserProfile(env.BUCKET,access,await readBody(request,USER_PROFILE_BODY_BYTES),{now,validate:async profile=>{
+     if(profile.managerId){const {people}=await profileCheckedDirectory(env.BUCKET,access,admins,accessConfig,{organization:true});validateProfileManager(profile,(access.admin||access.member).id,people);}
+     await confirmMutationPermission(env.BUCKET,access,['admin','editor','reviewer','viewer']);
+    }}));
     fail(405,'METHOD_NOT_ALLOWED','Use a consulta ou o salvamento do seu perfil.');
    }
    const modifying=!['GET','HEAD'].includes(request.method);

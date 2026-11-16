@@ -132,6 +132,28 @@ test('Access requires JWT independently of legacy cookies and only bootstraps th
  const unknown=await call(env,'/api/session',{token:await signed({email:'third-admin@'+domain})});assert.equal(unknown.body.status,'unregistered');assert.equal(unknown.body.approved,false);
 });
 
+test('Access workplace directory includes only approved verified identities and keeps organization administrative',async()=>{
+ const env=environment(),call=backendFixture(),admin=await adminToken(),token=await signed();
+ const asked=await call(env,'/api/auth/request',{method:'POST',token,body:{name:'Directory Employee'}}),id=asked.body.userId;
+ for(const route of ['/api/profile/managers','/api/organization']){
+  assert.equal((await call(env,route,{token})).status,403);
+  assert.equal((await call(env,route,{headers:{'Cf-Access-Authenticated-User-Email':'admin-a@'+domain}})).status,401);
+ }
+ await call(env,'/api/members/'+id+'/approve',{method:'POST',token:admin,body:{}});
+ const item=env.BUCKET.objects.get('private/access-v3.json'),acl=JSON.parse(item.text),legacy=crypto.randomUUID(),outside=crypto.randomUUID();
+ acl.members[legacy]={id:legacy,name:'Legacy',email:'legacy@'+domain,status:'approved',role:'viewer'};
+ acl.members[outside]={...acl.members[id],id:outside,name:'Wrong Issuer',identity:{...acl.members[id].identity,issuer:'https://other.cloudflareaccess.com'}};
+ item.text=JSON.stringify(acl);
+ const directory=await call(env,'/api/profile/managers',{token});assert.equal(directory.status,200);assert.equal(directory.body.people.length,3);assert(directory.body.people.some(person=>person.id===id));
+ assert(!JSON.stringify(directory.body).includes('@'));assert(!directory.body.people.some(person=>[legacy,outside].includes(person.id)));
+ assert.equal((await call(env,'/api/organization',{token})).status,403);assert.equal((await call(env,'/api/organization',{token:admin})).status,200);
+ const initial=await call(env,'/api/profile/self',{token}),profile={...initial.body.profile,managerId:'owner'};
+ assert.equal((await call(env,'/api/profile/self',{token,method:'PUT',body:{revision:null,profile}})).status,200);
+ assert.equal((await call(env,'/api/organization',{token:admin})).body.people.find(person=>person.id===id).managerId,'owner');
+ await call(env,'/api/members/'+id,{method:'DELETE',token:admin,body:{}});
+ assert.equal((await call(env,'/api/profile/managers',{token})).status,403);assert.equal((await call(env,'/api/organization',{token:admin})).body.people.length,2);
+});
+
 test('verified identity requests use signed email, remain pending and respect live approval/editor/revocation ACL',async()=>{
  const env=environment(),call=backendFixture(),token=await signed(),admin=await adminToken();
  const initial=await call(env,'/api/session',{token});assert.equal(initial.body.authenticated,true);assert.equal(initial.body.status,'unregistered');assert.equal(initial.body.authProvider,'cloudflare-access');

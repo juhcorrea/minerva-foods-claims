@@ -67,11 +67,13 @@
   let sessionWatchTimer = null;
   let sessionCheckInFlight = false;
   let lastSessionCheckAt = 0;
+  let organizationView=null,organizationScope='';
   const body = document.body;
   body.classList.add('team-hosted', 'team-session-pending');
 
   function updateProfile() {
     const profile = publicProfile(session);
+    const scope=profile?session.userId+':'+session.role:'';if(scope!==organizationScope){organizationScope=scope;organizationView?.reset();}
     if ($('teamEmail')) $('teamEmail').textContent = profile ? profile.name : '';
     if ($('teamRole')) $('teamRole').textContent = profile ? roleLabel(profile.role) + ' · ' + ({admin:'bases, correções e acessos',editor:'publica bases e marca correções',reviewer:'marca e desmarca correções',viewer:'relatório compartilhado'})[profile.role] : '';
     document.dispatchEvent(new CustomEvent('minerva:session-updated', {detail:profile}));
@@ -109,7 +111,7 @@
     toolbar.id = 'teamToolbar';
     toolbar.className = 'team-toolbar';
     toolbar.setAttribute('aria-label', 'Relatório compartilhado');
-    toolbar.innerHTML = '<div class="team-account"><span class="team-account-dot" aria-hidden="true"></span><div><strong id="teamEmail"></strong><span id="teamRole"></span></div><button id="teamSignout" class="team-signout" type="button">Sair</button></div><div class="team-actions"><button id="teamRefresh" class="button button-outline" type="button">Atualizar visão</button><button id="teamCopyLink" class="button button-outline" type="button">Copiar link</button><button id="teamManage" class="button button-outline" type="button" hidden>Usuários e solicitações</button><button id="teamPublish" class="button button-primary" type="button" hidden disabled>Publicar atualização</button></div><div id="teamPublication" class="team-publication"></div><p id="teamMessage" class="team-message" role="status" aria-live="polite"></p><div id="teamCopyFallback" class="team-copy-fallback" hidden><label for="teamLinkInput">Copie este link e compartilhe com as pessoas autorizadas</label><input id="teamLinkInput" type="text" readonly><button id="teamCloseCopy" class="button button-text" type="button">Fechar</button></div>';
+    toolbar.innerHTML = '<div class="team-account"><span class="team-account-dot" aria-hidden="true"></span><div><strong id="teamEmail"></strong><span id="teamRole"></span></div><button id="teamSignout" class="team-signout" type="button">Sair</button></div><div class="team-actions"><button id="teamRefresh" class="button button-outline" type="button">Atualizar visão</button><button id="teamCopyLink" class="button button-outline" type="button">Copiar link</button><button id="teamManage" class="button button-outline" type="button" hidden>Usuários E Solicitações</button><button id="teamPublish" class="button button-primary" type="button" hidden disabled>Publicar Atualização</button></div><div id="teamPublication" class="team-publication"></div><p id="teamMessage" class="team-message" role="status" aria-live="polite"></p><div id="teamCopyFallback" class="team-copy-fallback" hidden><label for="teamLinkInput">Copie este link e compartilhe com as pessoas autorizadas</label><input id="teamLinkInput" type="text" readonly><button id="teamCloseCopy" class="button button-text" type="button">Fechar</button></div>';
     const main = document.querySelector('main');
     const filters = document.querySelector('.filters-panel');
     if (main) {
@@ -124,8 +126,15 @@
     members.id = 'teamMembersDialog';
     members.className = 'team-members-dialog';
     members.setAttribute('aria-labelledby', 'teamMembersTitle');
-    members.innerHTML = '<div class="dialog-heading"><div><span class="section-kicker">COMPARTILHAMENTO DO RELATÓRIO</span><h2 id="teamMembersTitle">Usuários e solicitações</h2></div><button id="teamCloseMembers" class="icon-button" type="button" aria-label="Fechar usuários e solicitações">×</button></div><p class="team-member-intro">Compartilhe o link normal do relatório. Cada pessoa informa o nome e solicita acesso; confira o nome e o código do pedido antes de aprovar. A aprovação libera Consulta. Depois, escolha o perfil e clique em Aplicar.</p><div id="teamAdminsList" class="team-admins-list"></div><div class="team-requests-tip"><span>Backup privado para migração: código, bases publicadas, correções e perfis. Sem credenciais ou sessões antigas.</span><button id="teamDownloadMigration" class="button button-outline" type="button" hidden>Baixar backup privado</button></div><div class="team-requests-tip"><span>Admin gerencia bases, correções e acessos. Atualizar bases importa, publica e marca correções. Conferente somente marca e desmarca Já ajustei. Consulta visualiza o relatório.</span><button id="teamRefreshMembers" class="button button-outline" type="button">Atualizar pedidos</button></div><p id="teamMemberMessage" class="team-message" role="status" aria-live="polite"></p><div id="teamMembersList" class="team-members-list"></div>';
+    members.innerHTML = '<div class="dialog-heading"><div><span class="section-kicker">COMPARTILHAMENTO DO RELATÓRIO</span><h2 id="teamMembersTitle">Usuários E Solicitações</h2></div><button id="teamCloseMembers" class="icon-button" type="button" aria-label="Fechar usuários e solicitações">×</button></div><p class="team-member-intro">Compartilhe o link normal do relatório. Cada pessoa informa o nome e solicita acesso; confira o nome e o código do pedido antes de aprovar. A aprovação libera Consulta. Depois, escolha o perfil e clique em Aplicar.</p><div id="teamAdminsList" class="team-admins-list"></div><div class="team-requests-tip"><span>Backup privado para migração: código, bases publicadas, correções e perfis. Sem credenciais ou sessões antigas.</span><button id="teamDownloadMigration" class="button button-outline" type="button" hidden>Baixar backup privado</button></div><div class="team-requests-tip"><span>Admin gerencia bases, correções e acessos. Atualizar bases importa, publica e marca correções. Conferente somente marca e desmarca Já ajustei. Consulta visualiza o relatório.</span><button id="teamRefreshMembers" class="button button-outline" type="button">Atualizar pedidos</button></div><p id="teamMemberMessage" class="team-message" role="status" aria-live="polite"></p><div id="teamMembersList" class="team-members-list"></div>';
     body.append(members);
+    const accessPanel=document.createElement('section');accessPanel.id='teamAccessPanel';accessPanel.setAttribute('role','tabpanel');accessPanel.setAttribute('aria-labelledby','teamAccessTab');for(const child of Array.from(members.children).slice(1))accessPanel.append(child);
+    const tabs=document.createElement('div');tabs.className='team-admin-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Administração');tabs.innerHTML='<button id="teamAccessTab" type="button" role="tab" aria-selected="true" aria-controls="teamAccessPanel">Usuários E Solicitações</button><button id="teamOrganizationTab" type="button" role="tab" aria-selected="false" aria-controls="teamOrganizationPanel" tabindex="-1">Organograma</button>';
+    const orgPanel=document.createElement('section');orgPanel.id='teamOrganizationPanel';orgPanel.hidden=true;orgPanel.setAttribute('role','tabpanel');orgPanel.setAttribute('aria-labelledby','teamOrganizationTab');members.append(tabs,accessPanel,orgPanel);
+    organizationView=global.MinervaOrganization?.mount(orgPanel,getOrganization);
+    $('teamAccessTab').addEventListener('click',()=>selectAdminTab(false));$('teamOrganizationTab').addEventListener('click',()=>selectAdminTab(true));
+    tabs.addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const org=event.key==='End'||event.key!=='Home'&&document.activeElement===$('teamAccessTab');selectAdminTab(org);$(org?'teamOrganizationTab':'teamAccessTab').focus();}});
+    members.addEventListener('close',()=>{organizationView?.reset();selectAdminTab(false);});
     $('teamCloseMembers').addEventListener('click', () => members.close());
     $('teamMembersList').addEventListener('click', changeMemberAccess);
     $('teamRefreshMembers').addEventListener('click', refreshMemberList);
@@ -276,7 +285,7 @@
     $('teamManage').hidden = !admin;
     $('teamDownloadMigration').hidden = !admin;
     $('teamPublish').disabled = !publishable() || publishing || loadingReport;
-    $('teamPublish').textContent = publishing ? 'Publicando…' : 'Publicar atualização';
+    $('teamPublish').textContent = publishing ? 'Publicando…' : 'Publicar Atualização';
     $('teamRefresh').disabled = publishing || loadingReport || draft;
     $('teamRefresh').textContent = loadingReport ? 'Atualizando…' : 'Atualizar visão';
     const publication = $('teamPublication');
@@ -561,8 +570,15 @@
   async function openMembers() {
     if (session?.role !== 'admin') return;
     const dialog = $('teamMembersDialog');
+    selectAdminTab(false);
     if (!dialog.open) dialog.showModal();
     await refreshMemberList();
+  }
+  function selectAdminTab(organization){
+    const selected=organization&&isApprovedSession(session)&&session.role==='admin';
+    for(const [id,on]of [['teamAccessTab',!selected],['teamOrganizationTab',selected]]){const tab=$(id);if(tab){tab.setAttribute('aria-selected',String(on));tab.setAttribute('tabindex',on?'0':'-1');}}
+    if($('teamAccessPanel'))$('teamAccessPanel').hidden=selected;if($('teamOrganizationPanel'))$('teamOrganizationPanel').hidden=!selected;
+    if(selected)void organizationView?.refresh();
   }
   async function changeMemberAccess(event) {
     const button = event.target.closest('[data-member-action]');
@@ -696,26 +712,28 @@
     if(version!==sessionVersion||user!==session?.userId||!isApprovedSession(session)||!canUpdateBases())throw Object.assign(new Error('O acesso mudou.'),{name:'AbortError'});
     return result;
   }
-  async function selfProfileRequest(options){
+  async function selfProfileRequest(options,path='/api/profile/self'){
     if(!isApprovedSession(session))throw new Error('Entre para consultar ou salvar seu perfil.');
     const version=sessionVersion,user=session.userId,role=session.role;
     const current=()=>version===sessionVersion&&session?.userId===user&&session?.role===role&&isApprovedSession(session);
     const cancelled=()=>Object.assign(new Error('A operação do perfil foi interrompida porque seu acesso mudou.'),{name:'AbortError'});
     try{
-      const result=await api('/api/profile/self',options);
+      const result=await api(path,options);
       if(!current())throw cancelled();
       return result;
     }catch(error){if(!current())throw cancelled();throw error;}
   }
   function getSelfProfile(){return selfProfileRequest();}
+  function getProfileManagers(){return selfProfileRequest(undefined,'/api/profile/managers');}
+  function getOrganization(){if(session?.role!=='admin')return Promise.reject(new Error('Apenas administradores podem consultar o organograma.'));return selfProfileRequest(undefined,'/api/organization');}
   function saveSelfProfile(payload){
     const editable=payload?.profile||{},profile={};
-    for(const field of ['name','employeeId','jobTitle','department','unit','avatarDataUrl','keepMenuOpen']){
+    for(const field of ['name','employeeId','jobTitle','department','unit','avatarDataUrl','keepMenuOpen','managerId','managerName']){
       if(Object.prototype.hasOwnProperty.call(editable,field))profile[field]=editable[field];
     }
     return selfProfileRequest({method:'PUT',body:JSON.stringify({revision:payload?.revision??null,profile})});
   }
   createUI();
-  global.MinervaTeam = {refresh:() => {reportCache.clear();return loadReport(app.getOptions());}, setCorrectionProgress, getMaterialInputs, saveMaterialInputs, getSelfProfile, saveSelfProfile, openMembers, copyLink, logout, getProfile:() => {const profile=publicProfile(session);return profile?{...profile,id:session.userId||''}:null;}};
+  global.MinervaTeam = {refresh:() => {reportCache.clear();return loadReport(app.getOptions());}, setCorrectionProgress, getMaterialInputs, saveMaterialInputs, getSelfProfile, saveSelfProfile, getProfileManagers, getOrganization, openMembers, copyLink, logout, getProfile:() => {const profile=publicProfile(session);return profile?{...profile,id:session.userId||''}:null;}};
   boot();
 })(typeof window !== 'undefined' ? window : globalThis);

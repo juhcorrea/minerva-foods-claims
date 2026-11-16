@@ -21,7 +21,7 @@ const handler=createApiHandler({engine,now:()=>epoch});
 function request(path,cookie,{method='GET',body,headers={},csrf=true}={}){const h=new Headers(headers);if(cookie)h.set('cookie',cookie);if(!['GET','HEAD'].includes(method)&&csrf){h.set('origin',origin);h.set('content-type','application/json');h.set('x-minerva-request','1');}return new Request(origin+path,{method,headers:h,body:body===undefined?undefined:typeof body==='string'?body:JSON.stringify(body)});}
 async function call(env,path,cookie,options={},api=handler){const response=await api(request(path,cookie,options),env);return {status:response.status,body:await response.json(),headers:response.headers,cookie:response.headers.get('set-cookie')?.split(';')[0]};}
 const login=(env,id='owner')=>call(env,'/api/auth/exchange',null,{method:'POST',body:{token:tokens[id]}});
-const values=(changes={})=>({name:'Pessoa Exemplo',employeeId:'EX-123',jobTitle:'Analista',department:'Logística',unit:'Unidade Exemplo',avatarDataUrl:'',keepMenuOpen:false,...changes});
+const values=(changes={})=>({name:'Pessoa Exemplo',employeeId:'EX-123',jobTitle:'Analista',department:'Logística',unit:'Unidade Exemplo',avatarDataUrl:'',keepMenuOpen:false,managerId:'',managerName:'',...changes});
 const put=(env,cookie,profile=values(),revision=null)=>call(env,'/api/profile/self',cookie,{method:'PUT',body:{revision,profile}});
 const profileKeys=env=>[...env.BUCKET.objects.keys()].filter(key=>key.startsWith(USER_PROFILE_PREFIX));
 async function member(env,admin,role='viewer'){
@@ -128,4 +128,73 @@ test('storage module has no unauthenticated or unapproved fallback and calls val
  const bucket=new MemoryBucket();for(const access of [{},{authenticated:true,approved:false,member:{id:'x'}}])await assert.rejects(()=>readUserProfile(bucket,access),{status:403});
  let checks=0;const access={authenticated:true,approved:true,role:'viewer',member:{id:'member-a',name:'Viewer'}};
  await saveUserProfile(bucket,access,{revision:null,profile:values()},{validate:async()=>{checks++;},now:()=>epoch});assert.equal(checks,1);
+});
+
+test('manager directory shares only workplace labels and organization is restricted to current administrators',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),editor=await member(env,admin.cookie,'editor');
+ const saved=await put(env,viewer.cookie,values({name:'Nome De Perfil',employeeId:'PRIVATE-EMPLOYEE',avatarDataUrl:png,managerId:'owner'}));assert.equal(saved.status,200);
+ const directory=await call(env,'/api/profile/managers',viewer.cookie);assert.equal(directory.status,200);assert.match(directory.headers.get('cache-control'),/private, no-store/);
+ assert.equal(directory.body.people.length,4);
+ for(const person of directory.body.people)assert.deepEqual(Object.keys(person).sort(),['id','name','jobTitle','department','unit'].sort());
+ assert.deepEqual(directory.body.people.find(person=>person.id===viewer.body.userId),{id:viewer.body.userId,name:'Nome De Perfil',jobTitle:'Analista',department:'Logística',unit:'Unidade Exemplo'});
+ assert(!JSON.stringify(directory.body).includes('PRIVATE-EMPLOYEE'));assert(!JSON.stringify(directory.body).includes('example.test'));assert(!JSON.stringify(directory.body).includes('base64'));
+ for(const cookie of [viewer.cookie,editor.cookie])assert.equal((await call(env,'/api/organization',cookie)).status,403);
+ const organization=await call(env,'/api/organization',admin.cookie);assert.equal(organization.status,200);
+ for(const person of organization.body.people)assert.deepEqual(Object.keys(person).sort(),['id','name','jobTitle','department','unit','managerId','managerName'].sort());
+ assert.equal(organization.body.people.find(person=>person.id===viewer.body.userId).managerId,'owner');
+ await call(env,'/api/members/'+editor.body.userId+'/role',admin.cookie,{method:'POST',body:{role:'admin'}});
+ assert.equal((await call(env,'/api/organization',editor.cookie)).status,200);
+ await call(env,'/api/members/'+editor.body.userId+'/role',admin.cookie,{method:'POST',body:{role:'viewer'}});
+ assert.equal((await call(env,'/api/organization',editor.cookie)).status,403);
+});
+
+test('directories exclude pending and revoked users and do not give managers administrative permission',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie);
+ const pending=await call(env,'/api/auth/request',null,{method:'POST',body:{name:'Pending Directory'}});
+ for(const route of ['/api/profile/managers','/api/organization']){
+  assert.equal((await call(env,route)).status,401);assert.equal((await call(env,route,pending.cookie)).status,403);
+  for(const method of ['PUT','POST','DELETE'])assert.equal((await call(env,route,admin.cookie,{method,body:{}})).status,405);
+ }
+ assert.equal((await put(env,admin.cookie,values({managerId:viewer.body.userId}))).status,200);
+ assert.equal((await call(env,'/api/session',viewer.cookie)).body.role,'viewer');assert.equal((await call(env,'/api/organization',viewer.cookie)).status,403);
+ await call(env,'/api/members/'+viewer.body.userId,admin.cookie,{method:'DELETE',body:{}});
+ assert.equal((await call(env,'/api/profile/managers',viewer.cookie)).status,403);
+ const organization=await call(env,'/api/organization',admin.cookie);
+ assert.equal(organization.body.people.length,2);assert.equal(organization.body.people.find(person=>person.id==='owner').managerId,viewer.body.userId,'Keep the unresolved relationship visible to administration');
+});
+
+test('manager assignment rejects missing users self assignment invalid labels and cycles',async()=>{
+ const env=environment(),admin=await login(env),one=await member(env,admin.cookie),two=await member(env,admin.cookie,'editor');
+ for(const managerId of ['owner','unknown','../private',one.body.userId+'x']){const result=await put(env,admin.cookie,values({managerId}));assert.equal(result.status,400);assert.equal(result.body.code,'PROFILE_MANAGER_INVALID');}
+ for(const patch of [{managerId:one.body.userId,managerName:'Externo'},{managerId:4},{managerName:null},{managerId:'x'.repeat(101)},{managerName:'x'.repeat(161)},{managerName:'Nome\nInválido'}])assert.equal((await put(env,admin.cookie,values(patch))).status,400);
+ const a=await put(env,admin.cookie,values({managerId:one.body.userId}));assert.equal(a.status,200);
+ const b=await put(env,one.cookie,values({managerId:two.body.userId}));assert.equal(b.status,200);
+ const c=await put(env,two.cookie,values({managerId:'owner'}));assert.equal(c.status,400);assert.equal(c.body.code,'PROFILE_MANAGER_CYCLE');
+ assert.equal((await call(env,'/api/profile/self',two.cookie)).body.revision,null);
+ const external=await put(env,two.cookie,values({managerName:'  Gestor Externo  '}));assert.equal(external.status,200);assert.equal(external.body.profile.managerName,'Gestor Externo');
+ assert.equal((await put(env,two.cookie,values(),external.body.revision)).status,200);
+});
+
+test('original seven-field objects and clients remain valid without erasing manager assignments',async()=>{
+ const env=environment(),admin=await login(env),legacy=values();delete legacy.managerId;delete legacy.managerName;
+ const first=await put(env,admin.cookie,legacy);assert.equal(first.status,200);assert.equal(first.body.profile.managerId,'');
+ const key=profileKeys(env)[0],item=env.BUCKET.objects.get(key),stored=JSON.parse(item.text);delete stored.profile.managerId;delete stored.profile.managerName;item.text=JSON.stringify(stored);
+ const read=await call(env,'/api/profile/self',admin.cookie);assert.equal(read.status,200);assert.equal(read.body.profile.managerId,'');assert.equal(read.body.profile.managerName,'');
+ const link=await put(env,admin.cookie,values({managerName:'Gestor Externo'}),read.body.revision);assert.equal(link.status,200);
+ const update=await put(env,admin.cookie,{...legacy,jobTitle:'Novo Cargo'},link.body.revision);assert.equal(update.status,200);assert.equal(update.body.profile.managerName,'Gestor Externo');assert.equal(update.body.profile.jobTitle,'Novo Cargo');
+ const clear=await put(env,admin.cookie,values(),update.body.revision);assert.equal(clear.status,200);assert.equal(clear.body.profile.managerName,'');
+});
+
+test('directory rechecks requester authorization and refuses an ACL snapshot changed during profile reads',async()=>{
+ for(const revokeRequester of [true,false]){
+  const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),other=await member(env,admin.cookie,'editor');
+  env.BUCKET.beforeGet=async key=>{if(!key.startsWith(USER_PROFILE_PREFIX))return;env.BUCKET.beforeGet=null;const item=env.BUCKET.objects.get('private/access-v3.json'),acl=JSON.parse(item.text);acl.members[revokeRequester?viewer.body.userId:other.body.userId].status='revoked';acl.revision='new-revision';item.text=JSON.stringify(acl);};
+  const result=await call(env,'/api/profile/managers',viewer.cookie);assert.equal(result.status,revokeRequester?403:409);assert.equal(result.body.people,undefined);
+ }
+});
+
+test('profile GET cannot finish after the requester is revoked during its storage read',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie);
+ env.BUCKET.beforeGet=async key=>{if(!key.startsWith(USER_PROFILE_PREFIX))return;env.BUCKET.beforeGet=null;const item=env.BUCKET.objects.get('private/access-v3.json'),acl=JSON.parse(item.text);acl.members[viewer.body.userId].status='revoked';item.text=JSON.stringify(acl);};
+ assert.equal((await call(env,'/api/profile/self',viewer.cookie)).status,403);
 });

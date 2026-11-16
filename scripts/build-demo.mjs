@@ -9,7 +9,7 @@ const source = path.join(root, 'dist');
 const output = path.join(root, 'build/demo');
 const files = [
   'index.html', 'site.webmanifest', 'styles.css', 'integration.css',
-  'preferences.css', 'preferences.js', 'profile.css', 'profile.js', 'table-filters.css', 'table-filters.js',
+  'preferences.css', 'preferences.js', 'profile.css', 'profile.js', 'organization.css', 'organization.js', 'table-filters.css', 'table-filters.js',
   'column-layout.css', 'column-layout.js', 'charts.css', 'analysts.css',
   'analysts.js', 'team.css', 'copy-reference.css', 'copy-reference.js',
   'correction-progress.css', 'correction-impact.css', 'correction-impact.js',

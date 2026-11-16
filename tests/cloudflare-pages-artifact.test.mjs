@@ -71,7 +71,7 @@ function runtime(){
 test('compiled Worker protects report assets and private APIs and keeps backup administrative',async()=>{
   const f=runtime(),privatePaths=['/app.js','/engine.js','/team.js','/styles.css','/analysts.js','/meetings.js','/claim-control.js','/materials.css','/materials.js','/materials-data.js','/profile.js','/profile.css'];
   for(const file of privatePaths)for(const method of ['GET','HEAD'])assert.equal((await f.request(file+'?v=test',null,undefined,method)).status,401);
-  for(const route of ['/api/report','/api/report/meta','/api/migration/export','/api/profile/self'])assert.equal((await f.request(route)).status,401);
+  for(const route of ['/api/report','/api/report/meta','/api/migration/export','/api/profile/self','/api/profile/managers','/api/organization'])assert.equal((await f.request(route)).status,401);
   assert(!f.env.BUCKET.reads.includes('private/report-latest-v1.json'));
   for(const route of ['/worker/backend.js','/_worker.js','/.env','/.git/HEAD','/.openai/hosting.json','/dados/bases-publicadas.json','/dados/campos-manuais-materiais.json','/private/material-inputs-v1.json','/codigo-operacional.zip'])assert.equal((await f.request(route)).status,404);
   const entry=await f.request('/');assert.equal(entry.status,200);assert(!(await entry.text()).includes('window.MINERVA_HOSTED=true'));
@@ -97,6 +97,11 @@ test('compiled Worker saves self profiles with independent revision and fixed au
   assert.equal((await f.request('/api/profile/self',admin,{revision:null,profile},'PUT')).status,409);
   assert.equal((await f.request('/api/profile/self',admin,{revision:saved.revision,profile:{...profile,role:'admin'}},'PUT')).status,400);
   assert.equal((await(await f.request('/api/session',admin)).json()).name,'Admin Test One');
+  const managers=await(await f.request('/api/profile/managers',admin)).json(),organization=await(await f.request('/api/organization',admin)).json();
+  assert.equal(managers.people.length,2);assert.equal(organization.people.length,2);
+  assert(managers.people.every(person=>!('managerId'in person)&&!('employeeId'in person)&&!('email'in person)));
+  const linked=await f.request('/api/profile/self',admin,{revision:saved.revision,profile:{...profile,managerId:'developer'}},'PUT');assert.equal(linked.status,200);
+  assert.equal((await(await f.request('/api/organization',admin)).json()).people.find(person=>person.id==='owner').managerId,'developer');
 });
 
 test('compiled Access mode fails closed when destination credentials are not configured',async()=>{

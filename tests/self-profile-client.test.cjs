@@ -2,14 +2,16 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync(require.resolve('../dist/team.js'),'utf8');
 const {isApprovedSession}=require('../dist/team.js');
-const code=source.slice(source.indexOf('  async function selfProfileRequest(options)'),source.indexOf('  createUI();',source.indexOf('  async function selfProfileRequest(options)')));
+const requestStart=source.indexOf('  async function selfProfileRequest(');
+assert(requestStart>=0,'Profile request helpers must be present in the client');
+const code=source.slice(requestStart,source.indexOf('  createUI();',requestStart));
 const approved=role=>({authenticated:true,approved:true,status:'approved',role,userId:'example-person',name:'Pessoa Exemplo',email:'person@example.test'});
-const fields={name:'Nome Do Perfil',employeeId:'EXAMPLE',jobTitle:'Analista',department:'Logística',unit:'Unidade Exemplo',avatarDataUrl:'',keepMenuOpen:false};
+const fields={name:'Nome Do Perfil',employeeId:'EXAMPLE',jobTitle:'Analista',department:'Logística',unit:'Unidade Exemplo',avatarDataUrl:'',keepMenuOpen:false,managerId:'example-manager',managerName:''};
 const copy=value=>JSON.parse(JSON.stringify(value));
 function harness({role='viewer',respond=async()=>({profile:fields,revision:'r1'})}={}){
  const requests=[],context={session:approved(role),sessionVersion:1,isApprovedSession,api:async(path,options)=>{requests.push({path,options:copy(options||{})});return respond(path,options);}};
  vm.runInNewContext(code,context);
- return{context,requests,get:()=>context.getSelfProfile(),save:payload=>context.saveSelfProfile(payload)};
+ return{context,requests,get:()=>context.getSelfProfile(),save:payload=>context.saveSelfProfile(payload),managers:()=>context.getProfileManagers(),organization:()=>context.getOrganization()};
 }
 for(const role of ['admin','editor','reviewer','viewer'])test('self profile '+role+' loads and saves without changing access identity',async()=>{
  const h=harness({role}),identity=copy(h.context.session);
@@ -48,9 +50,33 @@ test('an error belonging to a previous session never leaks into the new account'
  await assert.rejects(pending,error=>error.name==='AbortError'&&!error.message.includes('Old profile'));
 });
 test('users and requests retain existing management identity and handlers',()=>{
- assert.match(source,/id="teamManage"[^>]*>Usuários e solicitações<\/button>/);
- assert.match(source,/<h2 id="teamMembersTitle">Usuários e solicitações<\/h2>/);
+ assert.match(source,/id="teamManage"[^>]*>Usuários E Solicitações<\/button>/);
+ assert.match(source,/<h2 id="teamMembersTitle">Usuários E Solicitações<\/h2>/);
  assert.match(source,/\$\('teamManage'\)\.addEventListener\('click', openMembers\)/);
  assert.match(source,/async function openMembers\(\)\s*\{\s*if \(session\?\.role !== 'admin'\) return;/);
- assert.match(source,/getMaterialInputs, saveMaterialInputs, getSelfProfile, saveSelfProfile, openMembers/);
+ assert.match(source,/getMaterialInputs, saveMaterialInputs, getSelfProfile, saveSelfProfile, getProfileManagers, getOrganization, openMembers/);
+});
+for(const role of ['admin','editor','reviewer','viewer'])test('approved '+role+' can retrieve the manager directory without requesting the organization chart',async()=>{
+ const people=[{id:'example-manager',name:'Gestor Exemplo'}],h=harness({role,respond:async()=>({people})});assert.deepEqual(await h.managers(),{people});assert.deepEqual(h.requests,[{path:'/api/profile/managers',options:{}}]);
+});
+test('organization chart uses its separate admin endpoint and never mutates session identity',async()=>{
+ const nodes=[{id:'example-person',managerId:'example-manager'}],h=harness({role:'admin',respond:async()=>({nodes})}),identity=copy(h.context.session);
+ assert.deepEqual(await h.organization(),{nodes});assert.deepEqual(h.requests,[{path:'/api/organization',options:{}}]);assert.deepEqual(copy(h.context.session),identity);
+});
+for(const role of ['editor','reviewer','viewer'])test('organization chart is blocked before any request for '+role,async()=>{
+ const h=harness({role});await assert.rejects(h.organization(),/Apenas administradores/);assert.equal(h.requests.length,0);
+});
+for(const session of [null,{authenticated:false}, {...approved('admin'),status:'pending',approved:false}, {...approved('admin'),status:'revoked'}])test('unapproved directory and chart requests never leave the client: '+String(session?.status||session?.authenticated),async()=>{
+ const h=harness();h.context.session=session;await assert.rejects(h.managers());await assert.rejects(h.organization());assert.equal(h.requests.length,0);
+});
+for(const operation of ['managers','organization'])for(const [name,change] of [
+ ['account switch',ctx=>{ctx.session={...ctx.session,userId:'other-person'};}],
+ ['role change',ctx=>{ctx.session={...ctx.session,role:'viewer'};}],
+ ['logout',ctx=>{ctx.session=null;ctx.sessionVersion++;}]
+])test('late '+operation+' result is discarded after '+name,async()=>{
+ let finish;const h=harness({role:'admin',respond:()=>new Promise(resolve=>{finish=resolve;})}),pending=h[operation]();change(h.context);finish({people:[{id:'example-manager'}]});await assert.rejects(pending,error=>error.name==='AbortError');
+});
+test('manager save permits an external name and an explicit cleared link without accepting access fields',async()=>{
+ const h=harness();await h.save({revision:'r1',profile:{managerId:'',managerName:'Gestor Externo',role:'admin',email:'forged@example.test'}});await h.save({revision:'r2',profile:{managerId:'',managerName:''}});
+ assert.deepEqual(JSON.parse(h.requests[0].options.body),{revision:'r1',profile:{managerId:'',managerName:'Gestor Externo'}});assert.deepEqual(JSON.parse(h.requests[1].options.body),{revision:'r2',profile:{managerId:'',managerName:''}});
 });

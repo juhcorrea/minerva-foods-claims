@@ -115,3 +115,11 @@ A instalação hospedada pode salvar os dados pessoais em um objeto privado indi
 Usuários E Solicitações fica disponível somente à administração. Aprovar, revogar e gerenciar perfis continua usando os controles autorizados existentes. O PDF de critérios permanece no perfil, fora dos dashboards.
 
 A demonstração pública mantém exclusivamente exemplos fictícios, sem backend, contas reais ou importação de planilhas. Os campos do perfil são ilustrativos nesse ambiente; não há persistência compartilhada nem gestão de usuários de produção.
+
+## Gestor e organograma (16/11/2026)
+
+Meu Perfil permite selecionar um gestor entre as pessoas com acesso aprovado ou informar um gestor externo. O vínculo usa um identificador estável e não altera permissões. Perfis anteriores continuam válidos; clientes antigos não apagam um gestor já informado.
+
+Na instalação hospedada, a administração pode consultar o organograma pelo perfil. A visão preserva pessoas sem gestor cadastrado e sinaliza relações sem correspondência ou ciclos. O diretório compartilha somente nome, cargo, setor e unidade; e-mail, matrícula e foto continuam fora dessa consulta.
+
+A demonstração pública continua usando dados fictícios e não exibe o organograma administrativo nem conecta a contas de produção.

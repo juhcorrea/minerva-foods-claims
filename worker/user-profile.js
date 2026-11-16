@@ -4,6 +4,7 @@ export const USER_PROFILE_PREFIX='private/user-profiles-v1/';
 export const USER_PROFILE_AVATAR_BYTES=512*1024;
 export const USER_PROFILE_BODY_BYTES=720000;
 const profileFields=Object.freeze(['name','employeeId','jobTitle','department','unit','avatarDataUrl','keepMenuOpen']);
+const profileManagerFields=Object.freeze(['managerId','managerName']);
 const profileTextLimits=Object.freeze({name:160,employeeId:80,jobTitle:120,department:120,unit:120});
 const profilePlain=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const profileOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
@@ -30,7 +31,7 @@ function profileAvatarValue(value){
  return value;
 }
 function profileNormalize(value){
- if(!profilePlain(value)||Object.keys(value).length!==profileFields.length||profileFields.some(key=>!profileOwn(value,key))||Object.keys(value).some(key=>!profileFields.includes(key)))profileInvalid();
+ if(!profilePlain(value)||profileFields.some(key=>!profileOwn(value,key))||Object.keys(value).some(key=>!profileFields.includes(key)&&!profileManagerFields.includes(key)))profileInvalid();
  const profile={};
  for(const [field,max]of Object.entries(profileTextLimits)){
   if(typeof value[field]!=='string'||value[field].length>max||/[\u0000-\u001f\u007f]/.test(value[field]))profileInvalid();
@@ -39,14 +40,22 @@ function profileNormalize(value){
  if(profile.name.length<2)profileFail(400,'PROFILE_NAME_REQUIRED','Informe seu nome completo.');
  if(typeof value.keepMenuOpen!=='boolean')profileInvalid();
  profile.avatarDataUrl=profileAvatarValue(value.avatarDataUrl);profile.keepMenuOpen=value.keepMenuOpen;
+ for(const [field,max]of [['managerId',100],['managerName',160]]){
+  const text=value[field]===undefined?'':value[field];
+  if(typeof text!=='string'||text.length>max||/[\u0000-\u001f\u007f]/.test(text))profileInvalid();
+  profile[field]=text.trim();
+ }
+ if(profile.managerId&&profile.managerName)profileFail(400,'PROFILE_MANAGER_INVALID','Selecione uma pessoa do painel ou informe um gestor externo.');
  return profile;
+}
+async function profileHashId(id,admin){
+ const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode((admin?'admin:':'member:')+id));
+ return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 async function profilePrincipalHash(access){
  const person=access.admin||access.member;
  if(!access.authenticated||!access.approved||!person?.id)profileFail(403,'PROFILE_ACCESS_REQUIRED','Entre em uma conta aprovada para acessar seu perfil.');
- const name=(access.admin?'admin:':'member:')+person.id;
- const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(name));
- return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+ return profileHashId(person.id,!!access.admin);
 }
 function profileIdentity(access){
  const person=access.admin||access.member;
@@ -54,7 +63,7 @@ function profileIdentity(access){
 }
 function profileDefault(access,displayName){
  const person=access.admin||access.member;
- return {name:displayName||person.name||'',employeeId:'',jobTitle:'',department:'',unit:'',avatarDataUrl:'',keepMenuOpen:true};
+ return {name:displayName||person.name||'',employeeId:'',jobTitle:'',department:'',unit:'',avatarDataUrl:'',keepMenuOpen:true,managerId:'',managerName:''};
 }
 async function profileReadStored(bucket,hash){
  const object=await bucket.get(USER_PROFILE_PREFIX+hash+'.json');if(!object)return null;
@@ -69,11 +78,41 @@ export async function readUserProfile(bucket,access,{displayName}={}){
  const hash=await profilePrincipalHash(access),found=await profileReadStored(bucket,hash);
  return profilePublicDocument(access,found?.value,displayName);
 }
+// Principals are supplied by the backend after checking the current ACL. The
+// directory exposes only workplace labels; full profiles remain self-only.
+export async function readProfileDirectory(bucket,principals,{organization=false}={}){
+ const people=[];
+ for(let offset=0;offset<principals.length;offset+=8){
+  const batch=await Promise.all(principals.slice(offset,offset+8).map(async person=>{
+   const found=await profileReadStored(bucket,await profileHashId(person.id,person.admin===true));
+   const value=found?.value.profile;
+   return {id:person.id,name:value?.name||person.name,jobTitle:value?.jobTitle||'',department:value?.department||'',unit:value?.unit||'',...(organization?{managerId:value?.managerId||'',managerName:value?.managerName||''}:{})};
+  }));people.push(...batch);
+ }
+ people.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR')||a.id.localeCompare(b.id));
+ return {people};
+}
+export function validateProfileManager(profile,userId,people){
+ // This checks a current directory snapshot, not a cross-profile transaction.
+ // Concurrent reciprocal changes can still race; readers must retain people
+ // and flag invalid links instead of dropping cyclic or unresolved branches.
+ if(!profile.managerId)return;
+ const directory=new Map(people.map(person=>[person.id,person]));
+ if(profile.managerId===userId||!directory.has(profile.managerId))profileFail(400,'PROFILE_MANAGER_INVALID','Selecione outro gestor com acesso aprovado ao painel.');
+ const visited=new Set([userId]);let manager=profile.managerId;
+ while(manager){
+  if(visited.has(manager))profileFail(400,'PROFILE_MANAGER_CYCLE','Esse vínculo criaria um ciclo entre gestores. Escolha outro gestor.');
+  visited.add(manager);manager=directory.get(manager)?.managerId||'';
+ }
+}
 export async function saveUserProfile(bucket,access,input,{validate=async()=>{},now=()=>Date.now()}={}){
  if(!profilePlain(input)||Object.keys(input).length!==2||!profileOwn(input,'revision')||!profileOwn(input,'profile')||!(input.revision===null||(typeof input.revision==='string'&&input.revision.length>0&&input.revision.length<=100)))profileInvalid();
  const profile=profileNormalize(input.profile),hash=await profilePrincipalHash(access),found=await profileReadStored(bucket,hash);
  if(input.revision!==(found?.value.revision||null))profileChanged();
- await validate();
+ // An older client that sends only the original fields must not erase a link.
+ if(!profileManagerFields.some(field=>profileOwn(input.profile,field)))for(const field of profileManagerFields)profile[field]=found?.value.profile[field]||'';
+ if(profile.managerId===(access.admin||access.member).id)profileFail(400,'PROFILE_MANAGER_INVALID','Você não pode ser seu próprio gestor.');
+ await validate(profile);
  const value={schemaVersion:1,principalHash:hash,revision:crypto.randomUUID(),updatedAt:new Date(now()).toISOString(),profile};
  const written=await bucket.put(USER_PROFILE_PREFIX+hash+'.json',JSON.stringify(value),{httpMetadata:{contentType:'application/json; charset=utf-8'},onlyIf:found?{etagMatches:found.etag}:{etagDoesNotMatch:'*'}});
  if(!written)profileChanged();
