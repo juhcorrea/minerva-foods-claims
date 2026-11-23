@@ -751,6 +751,7 @@
     applySupplierOpenBalances(model, controlRows, index, options);
     applyExecutiveReport(model, bdRows, controlRows, options);
     applyProcurementReport(model, bdRows, options);
+    applyCorrectionReviewScope(model, bdRows, controlRows, index, impactRows);
     return model;
   }
 
@@ -804,17 +805,79 @@
       entry.rate = entry.claimed ? entry.received / entry.claimed : null;
       return entry;
     }));
+    applyCorrectionReviewScope(model, bdRows, controlRows, index);
     const meta = {...model.meta, reportView:'suppliers', agingDate:today(), correctionQueueCount:correctionQueueCount(model)};
     return {summary:model.summary, suppliers:model.suppliers.map(({openInstallments,...supplier}) => supplier), supplierAnnual, meta,
-      operationOptions:model.operationOptions, claimStatusOptions:model.claimStatusOptions, receiptCohorts:{meta:model.receiptCohorts.meta}, supplierOpenReport:{meta:model.supplierOpenReport.meta}, baseReconciliation:{meta:model.baseReconciliation.meta},
+      operationOptions:model.operationOptions, claimStatusOptions:model.claimStatusOptions, receiptCohorts:{meta:model.receiptCohorts.meta}, supplierOpenReport:{meta:model.supplierOpenReport.meta}, baseReconciliation:{meta:getCorrectionReviewModel(model).baseReconciliation.meta},
       controlReport:{supplierOptions:model.controlReport.supplierOptions, operationOptions:model.controlReport.operationOptions, meta:model.controlReport.meta}};
+  }
+
+  // Corrections are a presentation/workflow scope, not a new financial ledger.
+  // Temporarily exclude Gado in Control C while preserving the full source
+  // links and all amounts used by receipts, balances and other dashboard tabs.
+  const livestockCorrectionRow=source=>/\bGADO\b/.test(norm(source?.[2]));
+  function getCorrectionReviewModel(model){return model?.correctionReview?{...model,...model.correctionReview,correctionReview:null}:model;}
+  function applyCorrectionReviewScope(model,bdRows,controlRows,index,impactRows=null){
+    const excluded=new Set();for(let n=1;n<controlRows.length;n++)if(livestockCorrectionRow(controlRows[n]))excluded.add(n+1);
+    if(!excluded.size)return;
+    const linkedGado=new Set(),linkedOther=new Set();
+    for(let n=1;n<controlRows.length;n++)if(controlRows[n])for(const claim of controlMatches(controlRows[n],index).matched)(excluded.has(n+1)?linkedGado:linkedOther).add(claim.row);
+    const exclusiveBd=new Set([...linkedGado].filter(row=>!linkedOther.has(row)));
+    const keepIssue=issue=>correctionIssueSource(issue)==='BD'?!exclusiveBd.has(issue.row):!excluded.has(issue.row)&&!(issue.controlRows||[]).some(row=>excluded.has(row));
+    const corrections=model.corrections.filter(change=>!excluded.has(change.row));
+    const allowedChanges=new Set(corrections);
+    const correctionGroups=model.correctionGroups.flatMap(group=>{
+      const changes=(group.changes||[]).filter(change=>allowedChanges.has(change));if(!changes.length)return [];
+      if(changes.length===group.changes.length)return [group];
+      const clone={...group,changes,rows:unique(changes.map(change=>change.row)).sort((a,b)=>a-b),bdRows:unique(changes.flatMap(change=>change.bdRows||[])).sort((a,b)=>a-b),references:unique(changes.map(change=>change.reference)),suppliers:unique(changes.map(change=>change.supplier).filter(Boolean)),analysts:unique(changes.flatMap(change=>change.analysts||[])),rncDates:unique(changes.flatMap(change=>text(change.rncDate).split('; ').filter(Boolean)))};
+      clone.orders=unique(clone.bdRows.flatMap(row=>tokenizeRefs(bdRows[row-1]?.[22]))).sort();clone.reference=clone.orders.join('; ')||clone.references.join('; ');clone.supplier=clone.suppliers.join('; ');clone.correctionCount=changes.length;clone.rowCount=clone.rows.length;
+      for(const key of ['year','market','claimValue'])if(group[key]){const filtered=group[key].changes.filter(change=>allowedChanges.has(change));clone[key]={...group[key],changes:filtered,originalValues:unique(filtered.map(change=>change.original)),correctedValues:unique(filtered.map(change=>change.corrected))};}
+      clone.hasYearCorrection=!!clone.year?.changes.length;clone.hasMarketCorrection=!!clone.market?.changes.length;clone.hasClaimValueCorrection=!!clone.claimValue?.changes.length;
+      clone.hasConflictingCorrections=['year','market','claimValue'].some(key=>clone[key]&&unique(clone[key].correctedValues.map(value=>key==='market'?normalizeMarket(value):number(value))).length>1);
+      clone.hasVaryingOriginals=['year','market','claimValue'].some(key=>clone[key]?.originalValues.length>1);
+      delete clone.progress;delete clone.reviewProgress;return [clone];
+    });
+    // Supplier-wide excess warnings are recalculated from the remaining
+    // receipt rows, so an excluded Gado payment cannot survive as an alert
+    // without a source row. No financial aggregate on the original is changed.
+    const issues=model.issues.filter(keepIssue).flatMap(issue=>{
+      if(issue.kind!=='RECEIVED_ABOVE_FORWARDED')return [issue];
+      const supplier=norm(issue.supplier),forwarded=model.claims.filter(claim=>!exclusiveBd.has(claim.row)&&norm(claim.supplier)===supplier&&normalizeStatus(claim.status)===FORWARDED).reduce((total,claim)=>total+(claim.claimed||0),0);
+      const received=model.installments.filter(inst=>!excluded.has(inst.row)&&inst.includedInRealized&&(inst.bdRows||[]).some(row=>norm(bdRows[row-1]?.[28])===supplier)).reduce((total,inst)=>total+(inst.received||0),0);
+      return forwarded-received<-.005?[{...issue,amount:money(forwarded-received)}]:[];
+    });
+    const reconciliationRows=(model.baseReconciliation?.rows||[]).filter(keepIssue),reconciliationMeta={...model.baseReconciliation?.meta};
+    const countKind=kind=>reconciliationRows.filter(issue=>issue.kind===kind).length,reviewBd=bdRows.slice(1).filter((source,index)=>source?.slice(0,36).some(value=>value!=null&&value!=='')&&!exclusiveBd.has(index+2));
+    Object.assign(reconciliationMeta,{totalBdRows:reviewBd.length,forwardedBdRows:reviewBd.filter(source=>normalizeStatus(source[6])===FORWARDED).length,controlRequiredBdRows:reviewBd.filter(requiresControlLink).length,insuranceExemptBdRows:reviewBd.filter(source=>normalizeStatus(source[6])===FORWARDED&&insuranceClaim(source)).length,totalControlRows:Math.max(0,(reconciliationMeta.totalControlRows||0)-[...excluded].filter(row=>controlRows[row-1]?.slice(0,20).some(value=>value!=null&&value!=='')).length),warningCount:reconciliationRows.length,bdWithoutControl:countKind('CLAIM_FORWARDED_WITHOUT_CONTROL'),controlWithoutBd:countKind('CONTROL_WITHOUT_BD'),partialLinks:reconciliationRows.filter(issue=>['INSURANCE_MIXED_REFERENCE','CONTROL_PARTIAL_LINK','CONTROL_AMBIGUOUS_RNC_YEAR'].includes(issue.kind)).length,yearDifferences:countKind('CONTROL_RNC_YEAR_MISMATCH'),yearCorrectionRows:countKind('CONTROL_RNC_YEAR_MISMATCH'),missingOperationRows:countKind('BD_MISSING_OPERATION')});
+    // Do not remove just one installment from an aggregate monetary audit:
+    // doing so would invent a mismatch between BD and a partial Control sum.
+    const audit=model.claimValueAudit,rows=(audit?.rows||[]).filter(row=>!(row.controlRows||[]).some(id=>excluded.has(id))&&!(row.bdRows||[]).some(id=>exclusiveBd.has(id))),uCorrections=(audit?.uCorrections||[]).filter(change=>!excluded.has(change.row));
+    const auditSummary=summarizeClaimValueAudit(rows,uCorrections,Math.max(0,(audit?.summary.requiredClaims||0)-model.claims.filter(claim=>exclusiveBd.has(claim.row)&&requiresControlLink(bdRows[claim.row-1])).length),(audit?.meta.exemptBdRows||[]).filter(row=>!exclusiveBd.has(row)).length,(audit?.meta.excludedMixedComponents||[]).filter(group=>!(group.controlRows||[]).some(row=>excluded.has(row))).length);
+    const auditMeta={...audit?.meta,exemptBdRows:(audit?.meta.exemptBdRows||[]).filter(row=>!exclusiveBd.has(row)),excludedGadoGroups:(audit?.rows?.length||0)-rows.length,excludedMixedComponents:(audit?.meta.excludedMixedComponents||[]).filter(group=>!(group.controlRows||[]).some(row=>excluded.has(row)))};
+    const projection={corrections,correctionGroups,issues,baseReconciliation:{...model.baseReconciliation,rows:reconciliationRows,meta:reconciliationMeta},claimValueAudit:{...audit,rows,uCorrections,summary:auditSummary,meta:auditMeta},summary:{...model.summary,correctionCount:corrections.length,correctionGroupCount:correctionGroups.length,reviewCount:issues.length},meta:{...model.meta,correctionScope:{excludedControlRows:[...excluded].sort((a,b)=>a-b),excludedBdRows:[...exclusiveBd].sort((a,b)=>a-b),basis:'Controle C contendo a palavra Gado fica temporariamente fora da Correção de Base. Recebimentos, saldos, fontes e vínculos continuam preservados.'}}};
+    if(model.meta.correctionPeriod){
+      const original=model.meta.correctionPeriod,period={...original,bdRows:original.bdRows.filter(row=>!exclusiveBd.has(row)),controlRows:original.controlRows.filter(row=>!excluded.has(row)),referenceBdRows:[],referenceControlRows:[]},parents=new Map();
+      const find=key=>{if(!parents.has(key))parents.set(key,key);let root=key;while(parents.get(root)!==root)root=parents.get(root);while(key!==root){const next=parents.get(key);parents.set(key,root);key=next;}return root;};
+      const join=(a,b)=>{const first=find(a),second=find(b);if(first!==second)parents.set(second,first);};
+      for(let n=1;n<controlRows.length;n++)if(controlRows[n]&&!excluded.has(n+1))for(const claim of controlMatches(controlRows[n],index).matched)join('c'+(n+1),'b'+claim.row);
+      const active=new Set([...period.bdRows.map(row=>find('b'+row)),...period.controlRows.map(row=>find('c'+row))]);
+      for(const key of parents.keys())if(active.has(find(key)))period[key[0]==='b'?'referenceBdRows':'referenceControlRows'].push(Number(key.slice(1)));
+      projection.meta.correctionPeriod=period;
+    }
+    if(impactRows)projection.correctionImpact=correctionImpact(impactRows.filter(row=>!excluded.has(row.row)),model.controlReport.meta);
+    model.correctionReview=projection;
+    projection.meta.correctionQueueCount=buildCorrectionReviewItems(model).length;
+    model.meta.correctionQueueCount=projection.meta.correctionQueueCount;
   }
 
   // One shared, presentation-free queue for the server, calculation worker and
   // UI. Worksheet coordinates join objects within this snapshot only; they are
   // never persisted as acknowledgement identities.
   const correctionIssueSource = issue => issue.source === 'BD' || /^(?:CLAIM_|INVALID_RNC_DATE$|INVALID_CLAIM_AMOUNT$|MISSING_CLAIM_)/.test(issue.kind || '') ? 'BD' : 'Controle';
-  function buildCorrectionReviewItems(model, groups = model?.correctionGroups || []) {
+  function buildCorrectionReviewItems(model, groups) {
+    const original=model;model=getCorrectionReviewModel(model);
+    groups=groups===undefined||groups===original?.correctionGroups?model?.correctionGroups||[]:groups;
+    if(original?.correctionReview){const allowed=new Map((model?.correctionGroups||[]).map(group=>[group.id,group]));groups=groups.map(group=>allowed.get(group.id)).filter(Boolean);}
     const validRows = values => (values || []).filter(value => Number.isInteger(value) && value > 0);
     const period=model?.meta?.correctionPeriod,periodBD=new Set(period?.referenceBdRows||period?.bdRows||[]),periodControl=new Set(period?.referenceControlRows||period?.controlRows||[]);
     const sourceKeys = node => [...validRows(node.bdRows).map(row=>'BD:'+row), ...validRows(node.controlRows).map(row=>'Controle:'+row)];
@@ -874,26 +937,7 @@
   // Count the same connected review groups used by correction-impact.buildQueue.
   // Even a clean audit can connect corrections/issues, so join all audit nodes
   // first and only then discard components without any warning.
-  function correctionQueueCount(model) {
-    if(model.meta?.correctionPeriod)return buildCorrectionReviewItems(model).length;
-    const validRows = rows => (rows || []).filter(row => Number.isInteger(row) && row > 0);
-    const keys = (bdRows,controlRows) => [...validRows(bdRows).map(row => 'BD:'+row), ...validRows(controlRows).map(row => 'Controle:'+row)];
-    const nodes = [...model.correctionGroups.map(group => ({keys:keys(group.bdRows,group.rows),warning:true})),
-      ...model.claimValueAudit.rows.map(audit => ({keys:keys(audit.connectedBdRows || audit.bdRows,audit.controlRows),
-        warning:!!(audit.uncertain || audit.hasClaimValueMismatch || audit.hasReceivedMismatch || audit.status !== 'Conferido')})),
-      ...(model.baseReconciliation?.rows || []).map(issue => ({keys:keys(issue.bdRows,issue.controlRows),warning:true}))];
-    const parents = nodes.map((_,index) => index), owners = new Map();
-    const find = index => {let root=index;while(parents[root]!==root)root=parents[root];while(parents[index]!==index){const next=parents[index];parents[index]=root;index=next;}return root;};
-    nodes.forEach((node,index) => {for (const key of node.keys) {if (owners.has(key)) parents[find(index)] = find(owners.get(key));else owners.set(key,index);}});
-    const warnings = new Set(), standalone = new Set();
-    nodes.forEach((node,index) => {if (node.warning) warnings.add(find(index));});
-    model.issues.forEach((issue,index) => {
-      const source = /^(?:CLAIM_|INVALID_RNC_DATE$|INVALID_CLAIM_AMOUNT$|MISSING_CLAIM_)/.test(issue.kind || '') ? 'BD' : 'Controle';
-      const key = Number.isInteger(issue.row) && issue.row > 0 ? source+':'+issue.row : 'unlinked:'+index;
-      if (owners.has(key)) warnings.add(find(owners.get(key)));else standalone.add(key);
-    });
-    return warnings.size + standalone.size;
-  }
+  function correctionQueueCount(model) {return buildCorrectionReviewItems(model).length;}
   // This master-data review is independent of financial filters. A missing BD
   // link is an alert, never permission to discard confirmed M/R/T receipts.
   function applyBaseReconciliation(model, bdRows, controlRows, index) {
@@ -1091,13 +1135,17 @@
       }
     }
     rows.sort((a,b)=>a.reference.localeCompare(b.reference,'pt-BR'));
-    const summary={claims:unique(rows.flatMap(row=>row.bdRows)).length,requiredClaims:selected.size,exemptClaims:exemptBdRows.length,excludedMixedGroups:excludedMixedComponents.length,groups:rows.length,controlRows:unique(rows.flatMap(row=>row.controlRows)).length,claimValueMismatches:rows.filter(row=>row.hasClaimValueMismatch).length,claimValueCorrectionRows:uCorrections.length,receivedMismatches:rows.filter(row=>row.hasReceivedMismatch).length,uncertainGroups:rows.filter(row=>row.uncertain).length,groupedClaims:rows.filter(row=>row.grouped).length,missingAmounts:{},knownTotals:{}};
+    const summary=summarizeClaimValueAudit(rows,uCorrections,selected.size,exemptBdRows.length,excludedMixedComponents.length);
+    return {rows,summary,uCorrections,meta:{sourcesAvailability:available,scope:controlLinkBasis+' Dentro desse escopo, claims selecionados na BD e todas as parcelas do Controle ligadas por ordem/NF, independentemente do status da parcela, ano de entrada ou data de compensação.',controlLinkBasis,exemptBdRows,excludedMixedComponents,receivedDefinition:'AO — Recebido (USD) da BD deve corresponder ao total previsto: soma de O — Valor USD de todas as parcelas vinculadas, pagas e em aberto, de todos os anos. Recebimento parcial em T não é divergência dessa comparação.',claimDefinition:'U — Valor Integral Claim do Controle deve corresponder a AJ da BD somente quando o vínculo identifica uma única ocorrência no escopo auditável. O mesmo valor integral U repetido nas parcelas é considerado uma vez, nunca somado.',receivedConfirmedDefinition:'Diagnóstico separado: soma de T nas parcelas vinculadas com M = Pago, R válida e T positivo, de todos os anos. Nenhuma parcela paga resulta em zero; ausência de vínculo ou qualquer parcela marcada Pago sem R/T válido deixa o total indisponível. Não substitui a comparação AO com soma O.',remainingScheduledDefinition:'Diferença entre total previsto e recebido confirmado: soma O menos receivedConfirmed, sem limitar resultados negativos. Fica indisponível com vínculo incompleto, O ausente/inválido ou pagamento confirmado incompleto. Não é o saldo oficial em aberto, que segue M/O.',paymentCountDefinition:'installmentCount conta linhas do Controle vinculadas uma vez; receivedConfirmedCount conta pagamentos válidos; pendingInstallmentCount conta M = Vencido ou Dentro do Prazo; unconfirmedPaidCount conta M = Pago sem R válida ou T positivo válido.',prejudiceFormula:'Prejuízo do claim = AJ − AO.',originalPrejudiceFormula:'Visão original = U único do claim − soma de O das parcelas.',lossDistinction:'A Perda agregada do painel permanece Reclamado − (Recebido realizado em T + Em negociação).',allocation:'Componentes de referências compartilhadas são somados uma vez, sem distribuir valores entre claims. Componentes mistos com Seguro ou situações fora do escopo não geram comparação parcial nem correção de U. Vínculos incompletos entre claims do escopo ficam para conferência.',totals:'Cada claim e parcela auditável aparece em um único grupo. Totais com dados incompletos ficam indisponíveis; knownTotals informa somente o subtotal conhecido.',toleranceUSD:.01}};
+  }
+  function summarizeClaimValueAudit(rows,uCorrections,requiredClaims,exemptClaims,excludedMixedGroups){
+    const summary={claims:unique(rows.flatMap(row=>row.bdRows)).length,requiredClaims,exemptClaims,excludedMixedGroups,groups:rows.length,controlRows:unique(rows.flatMap(row=>row.controlRows)).length,claimValueMismatches:rows.filter(row=>row.hasClaimValueMismatch).length,claimValueCorrectionRows:uCorrections.length,receivedMismatches:rows.filter(row=>row.hasReceivedMismatch).length,uncertainGroups:rows.filter(row=>row.uncertain).length,groupedClaims:rows.filter(row=>row.grouped).length,missingAmounts:{},knownTotals:{}};
     for(const field of ['claimed','bdReceived','controlExpected','prejudice','originalClaimValue','originalPrejudice']){
       const values=rows.map(row=>row[field]),missing=values.filter(value=>value==null).length;
       summary.missingAmounts[field]=missing;summary.knownTotals[field]=values.some(value=>value!=null)?money(values.reduce((total,value)=>total+(value??0),0)):null;
       summary[field]=rows.length&&!missing?summary.knownTotals[field]:null;
     }
-    return {rows,summary,uCorrections,meta:{sourcesAvailability:available,scope:controlLinkBasis+' Dentro desse escopo, claims selecionados na BD e todas as parcelas do Controle ligadas por ordem/NF, independentemente do status da parcela, ano de entrada ou data de compensação.',controlLinkBasis,exemptBdRows,excludedMixedComponents,receivedDefinition:'AO — Recebido (USD) da BD deve corresponder ao total previsto: soma de O — Valor USD de todas as parcelas vinculadas, pagas e em aberto, de todos os anos. Recebimento parcial em T não é divergência dessa comparação.',claimDefinition:'U — Valor Integral Claim do Controle deve corresponder a AJ da BD somente quando o vínculo identifica uma única ocorrência no escopo auditável. O mesmo valor integral U repetido nas parcelas é considerado uma vez, nunca somado.',receivedConfirmedDefinition:'Diagnóstico separado: soma de T nas parcelas vinculadas com M = Pago, R válida e T positivo, de todos os anos. Nenhuma parcela paga resulta em zero; ausência de vínculo ou qualquer parcela marcada Pago sem R/T válido deixa o total indisponível. Não substitui a comparação AO com soma O.',remainingScheduledDefinition:'Diferença entre total previsto e recebido confirmado: soma O menos receivedConfirmed, sem limitar resultados negativos. Fica indisponível com vínculo incompleto, O ausente/inválido ou pagamento confirmado incompleto. Não é o saldo oficial em aberto, que segue M/O.',paymentCountDefinition:'installmentCount conta linhas do Controle vinculadas uma vez; receivedConfirmedCount conta pagamentos válidos; pendingInstallmentCount conta M = Vencido ou Dentro do Prazo; unconfirmedPaidCount conta M = Pago sem R válida ou T positivo válido.',prejudiceFormula:'Prejuízo do claim = AJ − AO.',originalPrejudiceFormula:'Visão original = U único do claim − soma de O das parcelas.',lossDistinction:'A Perda agregada do painel permanece Reclamado − (Recebido realizado em T + Em negociação).',allocation:'Componentes de referências compartilhadas são somados uma vez, sem distribuir valores entre claims. Componentes mistos com Seguro ou situações fora do escopo não geram comparação parcial nem correção de U. Vínculos incompletos entre claims do escopo ficam para conferência.',totals:'Cada claim e parcela auditável aparece em um único grupo. Totais com dados incompletos ficam indisponíveis; knownTotals informa somente o subtotal conhecido.',toleranceUSD:.01}};
+    return summary;
   }
   function appendClaimValueCorrections(model,bdRows){
     const changes=model.claimValueAudit.uCorrections;if(!changes.length)return;
@@ -1508,5 +1556,5 @@
         financialBasis:'Relatório adicional de carteira aberta; não altera reclamado, recebido, negociação ou perda dos indicadores financeiros existentes.'}};
   }
 
-  return {analyze, validateHeaders, normalizeRef, tokenizeRefs, normalizeMarket, normalizeStatus, normalizeSupplier:norm, parseDate, number, today, recentClaimYears, buildCorrectionReviewItems, correctionReviewIdentity, correctionReviewTargets, correctionReviewLegacyProgress, version: '1.4.0'};
+  return {analyze, validateHeaders, normalizeRef, tokenizeRefs, normalizeMarket, normalizeStatus, normalizeSupplier:norm, parseDate, number, today, recentClaimYears, getCorrectionReviewModel, buildCorrectionReviewItems, correctionReviewIdentity, correctionReviewTargets, correctionReviewLegacyProgress, version: '1.4.0'};
 });

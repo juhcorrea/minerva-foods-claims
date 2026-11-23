@@ -7,8 +7,8 @@ const copy=value=>JSON.parse(JSON.stringify(value));
 const sample=(overrides={})=>({name:'Pessoa Exemplo',employeeId:'EXAMPLE',jobTitle:'Analista',department:'Logística',unit:'Unidade Exemplo',avatarDataUrl:'',keepMenuOpen:true,managerId:'',managerName:'',...overrides});
 const identity=(role='viewer',id='person-a')=>({id,name:'Conta Exemplo',email:id+'@example.test',role});
 const managers=[{id:'person-a',name:'Pessoa Exemplo',jobTitle:'Analista'},{id:'manager-a',name:'Gestora Exemplo',jobTitle:'Gerente',department:'Logística',unit:'Unidade Exemplo'},{id:'manager-b',name:'Outro Gestor',jobTitle:'Coordenador',department:'Operações',unit:'Unidade Dois'}];
-function harness({role='viewer',hosted=true,load,save,loadManagers,profile=sample(),photoResult='data:image/jpeg;base64,/9j/AA==',deferImage=false}={}){
- const dom=createDOM(),{document,window,element}=dom,proto=Object.getPrototypeOf(document.body),events=new Map(),requests=[],storage=new Map(),images=[],revoked=[],draws=[];
+function harness({role='viewer',hosted=true,load,save,loadManagers,profile=sample(),photoResult='data:image/jpeg;base64,/9j/AA==',deferCrop=false}={}){
+ const dom=createDOM(),{document,window,element}=dom,proto=Object.getPrototypeOf(document.body),events=new Map(),requests=[],storage=new Map(),crops=[],cropCancels=[];
  proto.prepend=function(node){this.insertBefore(node,this.children[0]||null);};
  Object.defineProperty(proto,'innerHTML',{set(markup){
   this.replaceChildren();const stack=[this],voidTags=new Set(['br','hr','img','input','link','meta']);
@@ -19,7 +19,6 @@ function harness({role='viewer',hosted=true,load,save,loadManagers,profile=sampl
    node.hidden=node.hasAttribute('hidden');node.disabled=node.hasAttribute('disabled');node.readOnly=node.hasAttribute('readonly');node.checked=node.hasAttribute('checked');stack.at(-1).append(node);if(!voidTags.has(tag))stack.push(node);
   }
  }});
- const create=document.createElement;document.createElement=tag=>{const node=create(tag);if(tag==='canvas'){node.getContext=()=>({fillRect(){},drawImage(...args){draws.push(args);}});node.toDataURL=()=>photoResult;}return node;};
  document.head=element('head',{},document.documentElement);document.styleSheets=[];
  const shell=element('div',{class:'app-shell'}),top=element('header',{class:'topbar'},shell),actions=element('div',{class:'topbar-actions'},top);element('span',{class:'breadcrumb'},top);
  const imports=element('button',{id:'openImports'},actions),sidebar=element('aside',{class:'sidebar'}),nav=element('nav',{class:'main-nav'},sidebar);element('button',{class:'nav-item',text:'Visão Geral'},nav);const footer=element('div',{class:'sidebar-bottom sidebar-status'},sidebar);element('div',{id:'sidebarAccount'},footer);
@@ -30,13 +29,12 @@ function harness({role='viewer',hosted=true,load,save,loadManagers,profile=sampl
  updatePermissions();
  window.MINERVA_HOSTED=hosted;window.matchMedia=()=>({matches:false,addEventListener(){}});window.localStorage={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)};window.location={href:'https://example.invalid/',origin:'https://example.invalid'};window.scrollY=135;window.scrollTo=value=>{window.scrollY=value.top;};window.setTimeout=()=>1;window.clearTimeout=()=>{};window.addEventListener=(name,fn)=>{if(!events.has(name))events.set(name,[]);events.get(name).push(fn);};
  window.MinervaTeam={getProfile:()=>account,getSelfProfile:async()=>{requests.push({method:'GET',user:account?.id});return load?load(account):copy(record);},getProfileManagers:async()=>{requests.push({method:'DIRECTORY',user:account?.id});return loadManagers?loadManagers(account):{people:copy(managers)};},saveSelfProfile:async payload=>{requests.push({method:'PUT',payload:copy(payload),user:account?.id});if(save)return save(payload,account);record={profile:copy(payload.profile),revision:'r2',identity:{userId:account.id,email:account.email,role:account.role}};return copy(record);},openMembers(){memberOpens++;},logout(){account=null;session();}};
- class PhotoImage{constructor(){this.naturalWidth=640;this.naturalHeight=480;images.push(this);}set src(value){this.url=value;if(!deferImage)setImmediate(()=>this.onload());}}
- const photoURL={createObjectURL:()=> 'blob:photo-example',revokeObjectURL:url=>revoked.push(url)};
- vm.runInNewContext(profileSource,{window,document,URL:photoURL,Image:PhotoImage,console});
+ window.MinervaPhotoCropper={create:()=>({open(source){return new Promise((resolve,reject)=>{const entry={source,resolve,reject};crops.push(entry);if(!deferCrop)setImmediate(()=>resolve(photoResult));});},cancel(){cropCancels.push(true);}})};
+ vm.runInNewContext(profileSource,{window,document,console});
  vm.runInNewContext(preferencesSource,{window,document,URL,console});
  function session(){updatePermissions();document.dispatchEvent({type:'minerva:session-updated'});}
  const $=id=>document.getElementById(id),settle=()=>new Promise(resolve=>setImmediate(resolve));
- return {...dom,$,window,requests,storage,toolbar,rules,images,revoked,draws,get account(){return account;},get memberOpens(){return memberOpens;},settle,open(){$('profileButton').click();},close(){$('closeProfile').click();},input(key,value){const el=$('profileField_'+key);el.value=value;el.dispatchEvent({type:'input',bubbles:true});},setAccount(value){account=value;session();},session,resize(){for(const fn of events.get('resize')||[])fn();},async submit(){$('selfProfileForm').dispatchEvent({type:'submit',preventDefault(){}});await settle();},async photo(file){const el=$('profilePhotoFile');el.files=[file];el.dispatchEvent({type:'change'});await settle();await settle();}};
+ return {...dom,$,window,requests,storage,toolbar,rules,crops,cropCancels,get account(){return account;},get memberOpens(){return memberOpens;},settle,open(){$('profileButton').click();},close(){$('closeProfile').click();},input(key,value){const el=$('profileField_'+key);el.value=value;el.dispatchEvent({type:'input',bubbles:true});},setAccount(value){account=value;session();},session,resize(){for(const fn of events.get('resize')||[])fn();},async submit(){$('selfProfileForm').dispatchEvent({type:'submit',preventDefault(){}});await settle();},async photo(file){const el=$('profilePhotoFile');el.files=[file];el.dispatchEvent({type:'change'});await settle();await settle();}};
 }
 test('profile page edits only own fields, keeps the verified email read-only and saves through the team API',async()=>{
  const h=harness();await h.settle();h.open();assert.equal(h.$('profilePanel').getAttribute('role'),'region');assert.equal(h.$('profileEmail').readOnly,true);assert.equal(h.$('profileEmail').value,'person-a@example.test');assert.equal(h.$('mainContent').hasAttribute('inert'),true);
@@ -77,21 +75,45 @@ test('conflict preserves the draft until the user explicitly reloads the saved p
  const h=harness({save:async()=>{throw Object.assign(Error('Perfil alterado em outra sessão.'),{status:409});}});await h.settle();h.open();h.input('name','Rascunho Em Conflito');await h.submit();assert.equal(h.$('profileField_name').value,'Rascunho Em Conflito');assert.equal(h.$('profileReload').hidden,false);assert.match(h.$('profileSaveStatus').textContent,/outra sessão|recarreg/i);
  h.$('profileReload').click();await h.settle();assert.equal(h.$('profileField_name').value,'Pessoa Exemplo');assert.equal(h.$('profileReload').hidden,true);assert.equal(h.$('profileSave').disabled,false);
 });
-test('valid photo is cropped to a small JPEG draft, saved only on confirmation, and can be removed or cancelled',async()=>{
- const h=harness();await h.settle();h.open();await h.photo({type:'image/png',size:1000});assert.equal(h.requests.some(r=>r.method==='PUT'),false);assert.equal(h.$('profilePhoto').querySelector('img').src,'data:image/jpeg;base64,/9j/AA==');assert.equal(h.draws.length,1);assert.deepEqual(h.revoked,['blob:photo-example']);assert.equal(h.draws[0][1],80);assert.equal(h.draws[0][2],0);assert.equal(h.draws[0][3],480);assert.equal(h.draws[0][7],384);
+test('photo selection opens the shared cropper and only an explicit save publishes the accepted draft',async()=>{
+ const h=harness();await h.settle();h.open();const file={type:'image/png',size:1000};await h.photo(file);assert.equal(h.requests.some(r=>r.method==='PUT'),false);assert.equal(h.crops[0].source,file);assert.equal(h.$('profilePhoto').querySelector('img').src,'data:image/jpeg;base64,/9j/AA==');assert.equal(h.$('profileReframePhoto').disabled,false);
  await h.submit();assert.match(h.requests.at(-1).payload.profile.avatarDataUrl,/^data:image\/jpeg;base64,/);h.$('profileRemovePhoto').click();assert.equal(h.$('profilePhoto').querySelector('img'),null);h.$('profileCancel').click();h.open();assert(h.$('profilePhoto').querySelector('img'));h.$('profileRemovePhoto').click();await h.submit();assert.equal(h.requests.at(-1).payload.profile.avatarDataUrl,'');
 });
-test('invalid, excessive, or unreadable photos keep the current photo and never save',async()=>{
- for(const file of [{type:'image/svg+xml',size:100},{type:'text/html',size:100},{type:'image/png',size:5*1024*1024+1},{type:'image/jpeg',size:0}]){const h=harness();await h.settle();h.open();await h.photo(file);assert.match(h.$('profileSaveStatus').textContent,/JPG, PNG ou WebP/);assert.equal(h.images.length,0);assert.equal(h.requests.some(r=>r.method==='PUT'),false);}
- const broken=harness({deferImage:true});await broken.settle();broken.open();const pending=broken.photo({type:'image/jpeg',size:100});broken.images[0].onerror();await pending;assert.match(broken.$('profileSaveStatus').textContent,/Não foi possível ler/);assert.deepEqual(broken.revoked,['blob:photo-example']);
-});
-test('late photo processing cannot reintroduce an image after Cancel or account switch',async()=>{
- for(const change of [h=>h.$('profileCancel').click(),h=>h.setAccount(identity('viewer','person-b'))]){const h=harness({deferImage:true});await h.settle();h.open();const pending=h.photo({type:'image/jpeg',size:100});change(h);h.images[0].onload();await pending;assert.equal(h.$('profilePhoto').querySelector('img'),null);}
+
+test('invalid photos are rejected before opening the cropper and cropper errors preserve the current photo',async()=>{
+ for(const file of [{type:'image/svg+xml',size:100},{type:'text/html',size:100},{type:'image/png',size:5*1024*1024+1},{type:'image/jpeg',size:0}]){const h=harness();await h.settle();h.open();await h.photo(file);assert.match(h.$('profileSaveStatus').textContent,/JPG, PNG ou WebP/);assert.equal(h.crops.length,0);assert.equal(h.requests.some(r=>r.method==='PUT'),false);}
+ const before='data:image/jpeg;base64,/9j/AA==',broken=harness({deferCrop:true,profile:sample({avatarDataUrl:before})});await broken.settle();broken.open();await broken.photo({type:'image/jpeg',size:100});broken.crops[0].reject(Error('Não foi possível ler a foto.'));await broken.settle();assert.match(broken.$('profileSaveStatus').textContent,/Não foi possível ler/);assert.equal(broken.$('profilePhoto').querySelector('img').src,before);assert.equal(broken.$('profileSave').disabled,false);
 });
 
-test('reloading the saved profile invalidates an older photo still being processed',async()=>{
- const h=harness({deferImage:true});await h.settle();h.open();const pending=h.photo({type:'image/jpeg',size:100});h.$('profileReload').click();await h.settle();h.images[0].onload();await pending;assert.equal(h.$('profilePhoto').querySelector('img'),null);assert.equal(h.$('profileSaveStatus').textContent,'');assert.deepEqual(h.revoked,['blob:photo-example']);
+test('crop cancellation keeps the photo and other draft fields and blocks save only while cropping',async()=>{
+ const before='data:image/jpeg;base64,/9j/AA==',h=harness({deferCrop:true,profile:sample({avatarDataUrl:before})});await h.settle();h.open();h.input('jobTitle','Rascunho Do Cargo');const status=h.$('profileSaveStatus').textContent;await h.photo({type:'image/png',size:1000});assert.equal(h.$('profileSave').disabled,true);await h.submit();assert.equal(h.requests.some(r=>r.method==='PUT'),false);
+ h.crops[0].resolve(null);await h.settle();assert.equal(h.$('profilePhoto').querySelector('img').src,before);assert.equal(h.$('profileField_jobTitle').value,'Rascunho Do Cargo');assert.equal(h.$('profileSaveStatus').textContent,status);assert.equal(h.$('profileSave').disabled,false);
 });
+
+test('reframing uses the accepted original file until save and then falls back to the saved JPEG',async()=>{
+ const h=harness({deferCrop:true});await h.settle();h.open();const first={type:'image/png',size:1000},other={type:'image/jpeg',size:2000},a='data:image/jpeg;base64,/9j/AA==',b='data:image/jpeg;base64,/9j/BBBB';assert.equal(h.$('profileReframePhoto').disabled,true);
+ await h.photo(first);h.crops[0].resolve(a);await h.settle();await h.photo(other);h.crops[1].resolve(null);await h.settle();h.$('profileReframePhoto').click();assert.equal(h.crops[2].source,first);h.crops[2].resolve(b);await h.settle();assert.equal(h.$('profilePhoto').querySelector('img').src,b);assert.equal(h.requests.some(r=>r.method==='PUT'),false);
+ await h.submit();h.$('profileReframePhoto').click();assert.equal(h.crops[3].source,b);h.crops[3].resolve(null);await h.settle();
+});
+
+test('closing the page retains an accepted photo draft but invalidates a pending reframe',async()=>{
+ const h=harness({deferCrop:true});await h.settle();h.open();const file={type:'image/png',size:1000},accepted='data:image/jpeg;base64,/9j/AA==';await h.photo(file);h.crops[0].resolve(accepted);await h.settle();h.$('profileReframePhoto').click();h.close();assert(h.cropCancels.length>0);h.crops[1].resolve('data:image/jpeg;base64,/9j/BBBB');await h.settle();h.open();assert.equal(h.$('profilePhoto').querySelector('img').src,accepted);h.$('profileReframePhoto').click();assert.equal(h.crops[2].source,file);h.crops[2].resolve(null);await h.settle();
+});
+
+test('late crop results cannot restore a photo after cancel logout account switch close removal reload or administrative update',async()=>{
+ const actions=[h=>h.$('profileCancel').click(),h=>h.setAccount(null),h=>h.setAccount(identity('viewer','person-b')),h=>h.close(),h=>h.$('profileRemovePhoto').dispatchEvent({type:'click'}),h=>h.$('profileReload').click(),h=>h.window.MinervaProfile.applyExternalUpdate({profile:sample(),revision:'r-admin',identity:{userId:'person-a',email:'person-a@example.test',role:'viewer'}})];
+ for(const action of actions){const h=harness({deferCrop:true});await h.settle();h.open();await h.photo({type:'image/jpeg',size:100});action(h);await h.settle();h.crops[0].resolve('data:image/jpeg;base64,/9j/AA==');await h.settle();assert.equal(h.$('profilePhoto').querySelector('img'),null);assert(h.cropCancels.length>0);assert.equal(h.requests.some(r=>r.method==='PUT'),false);}
+});
+
+test('a canceled crop cannot alter a later save or an administrative dirty-draft conflict',async()=>{
+ const h=harness({deferCrop:true});await h.settle();h.open();await h.photo({type:'image/png',size:100});h.close();h.open();h.input('name','Nome Salvo');await h.submit();h.crops[0].resolve('data:image/jpeg;base64,/9j/AA==');await h.settle();assert.equal(h.requests.findLast(r=>r.method==='PUT').payload.profile.avatarDataUrl,'');assert.equal(h.$('profilePhoto').querySelector('img'),null);assert.equal(h.$('profileSaveStatus').textContent,'Alterações salvas.');
+ h.input('jobTitle','Cargo Em Rascunho');await h.photo({type:'image/png',size:100});h.window.MinervaProfile.applyExternalUpdate({profile:sample({name:'Nome Administrativo'}),revision:'r-admin',identity:{userId:'person-a',email:'person-a@example.test',role:'viewer'}});h.crops[1].resolve('data:image/jpeg;base64,/9j/BBBB');await h.settle();assert.equal(h.$('profileField_jobTitle').value,'Cargo Em Rascunho');assert.equal(h.$('profilePhoto').querySelector('img'),null);assert.match(h.$('profileSaveStatus').textContent,/rascunho foi mantido/);assert.equal(h.$('profileSave').disabled,true);
+});
+
+test('profile initials use the first and last names without inserting a middle initial',()=>{
+ const {initialLetters}=require('../dist/profile.js');assert.equal(initialLetters('  Ana Maria Souza  '),'AS');assert.equal(initialLetters('José'),'J');assert.equal(initialLetters(''),'');
+});
+
 test('local preview stores only the preview profile locally and cannot open user administration',async()=>{
  const h=harness({hosted:false});await h.settle();h.open();h.input('name','Nome Fictício');await h.submit();assert.equal(h.requests.length,0);assert.equal(h.$('profileUsersNav').hidden,true);assert.equal(h.$('profileUsersLink').hidden,true);assert.equal(JSON.parse(h.storage.get('minerva.claims.demo-profile.v1')).profile.name,'Nome Fictício');assert.equal(h.toolbar.parentElement,h.$('mainContent'));
 });

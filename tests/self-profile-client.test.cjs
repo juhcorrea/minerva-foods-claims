@@ -104,3 +104,11 @@ test('admin photo payload supports replace and remove without transmitting navig
 test('old admin payload does not introduce an empty photo when omitted',async()=>{
  const h=harness({role:'admin'}),profile={...fields};delete profile.avatarDataUrl;await h.saveMember('other',{revision:'r-photo',profile});assert(!Object.hasOwn(JSON.parse(h.requests[0].options.body).profile,'avatarDataUrl'));
 });
+
+test('organization visibility is transmitted only by the admin editor and retains explicit false',async()=>{
+ const h=harness({role:'admin'});
+ for(const showInOrganization of [false,true])await h.saveMember('other',{profile:{...fields,showInOrganization}});
+ assert.equal(JSON.parse(h.requests[0].options.body).profile.showInOrganization,false);assert.equal(JSON.parse(h.requests[1].options.body).profile.showInOrganization,true);
+ await h.saveMember('other',{profile:fields});assert(!Object.hasOwn(JSON.parse(h.requests[2].options.body).profile,'showInOrganization'));
+ await h.save({profile:{...fields,showInOrganization:false}});assert(!Object.hasOwn(JSON.parse(h.requests[3].options.body).profile,'showInOrganization'));
+});

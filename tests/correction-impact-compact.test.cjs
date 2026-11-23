@@ -1,11 +1,11 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../dist/correction-impact.js'),'utf8');
-const XLSX=require('../dist/vendor/xlsx.full.min.js');
+const XLSX=require('../dist/vendor/xlsx.full.min.js'),ClaimsEngine=require('../dist/engine.js');
 function setup(){
  const listeners={},host={innerHTML:'',replaceChildren(){this.innerHTML='';}},active=new Set();
  const document={getElementById:id=>id==='correctionImpact'?host:null,addEventListener:(event,fn)=>listeners[event]=fn};
- const window={XLSX,MinervaTableFilters:{prepare:(id,headers,rows)=>rows,heading:(id,column,label)=>label,ariaSort:()=> 'none',has:id=>active.has(id),hasSort:()=>false,summary:()=>'<div class="table-filter-summary">Filtro ativo<button>Limpar filtros</button></div>'}};
+ const window={XLSX,ClaimsEngine,MinervaTableFilters:{prepare:(id,headers,rows)=>rows,heading:(id,column,label)=>label,ariaSort:()=> 'none',has:id=>active.has(id),hasSort:()=>false,summary:()=>'<div class="table-filter-summary">Filtro ativo<button>Limpar filtros</button></div>'}};
  vm.runInNewContext(source,{window,document});return{api:window.MinervaCorrectionImpact,host,listeners,active};
 }
 function model(){
@@ -49,4 +49,18 @@ test('the two comparison outcomes are independent, preserve zero and do not vali
  assert.deepEqual(result({...base,grouped:true,connectedBdRows:[2,5],hasClaimValueMismatch:true}),{claimValue:'A conferir',installments:'Divergência'});assert.deepEqual(result({...base,complete:false}),{claimValue:'A conferir',installments:'A conferir'});assert.deepEqual(result({...base,claimed:0,originalClaimValue:0,bdReceived:0,controlExpected:0,deltaReceived:0,hasReceivedMismatch:false}),{claimValue:'Confere',installments:'Confere'});
  assert.equal(JSON.stringify(base),before);const m=model();m.claimValueAudit.rows=[{...m.claimValueAudit.rows[0],...base}];h.api.render(m);assert(!/prejuízo/i.test(h.host.innerHTML));assert(h.host.innerHTML.includes('Reclamado × integral'));assert(h.host.innerHTML.includes('Total registrado × parcelas'));assert(h.host.innerHTML.includes('>Confere</strong>'));assert(h.host.innerHTML.includes('>Divergência</strong>'));
  const wb=XLSX.utils.book_new();h.api.addWorksheets(wb);for(const name of ['Claim original','Claim corrigido']){const [headers,row]=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1});assert(!headers.some(header=>/prejuízo/i.test(header)));assert.equal(row[headers.indexOf('Reclamado × integral')],'Confere');assert.equal(row[headers.indexOf('Total registrado × parcelas')],'Divergência');}
+});
+
+
+test('correction archive and Excel consume the correction-only projection without exposing excluded receipt rows',()=>{
+ const h=setup(),m=model(),review=model();
+ m.correctionImpact.original[0].supplier='GADO EXCLUIDO ORIGINAL';m.correctionImpact.corrected[0].supplier='GADO EXCLUIDO CORRIGIDO';m.correctionImpact.original[0].received=m.correctionImpact.corrected[0].received=98765;
+ m.claimValueAudit.rows[0].reference='GADO-EXCLUIDO';m.claimValueAudit.rows[0].controlRows=[99];m.claimValueAudit.uCorrections=[{row:99,cell:'U99',reference:'GADO-EXCLUIDO',original:15,corrected:40,bdRows:[98]}];
+ m.baseReconciliation={meta:{bdWithoutControl:8,controlWithoutBd:9,partialLinks:10,yearDifferences:11}};
+ m.correctionReview={correctionImpact:review.correctionImpact,claimValueAudit:review.claimValueAudit,baseReconciliation:{meta:{bdWithoutControl:0,controlWithoutBd:0,partialLinks:0,yearDifferences:1}},meta:review.meta};
+ const before=JSON.stringify(m);h.api.render(m);const html=h.host.innerHTML;
+ assert(!html.includes('GADO-EXCLUIDO'));assert(!html.includes('GADO EXCLUIDO'));assert(!html.includes('98.765'));assert(html.includes('<strong>120</strong>'));assert(html.includes('0 Controle sem BD'));
+ const wb=XLSX.utils.book_new();h.api.addWorksheets(wb);const exported=Object.fromEntries(wb.SheetNames.map(name=>[name,XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1})]));
+ assert(!JSON.stringify(exported).includes('GADO-EXCLUIDO'));assert(!JSON.stringify(exported).includes('GADO EXCLUIDO'));assert.equal(exported['Cenario corrigido'][1][3],120);assert.equal(exported['Ajustes valor integral U'].length,1);
+ assert.equal(JSON.stringify(m),before,'Financial model and raw correction evidence stay unchanged');
 });

@@ -25,6 +25,7 @@
 .member-profile-manager-option:hover,.member-profile-manager-option:focus-visible{background:var(--pale);color:var(--blue)}
 .member-profile-manager-option strong{display:block;font-size:calc(11px * var(--minerva-text-scale,1));font-weight:650}.member-profile-manager-option small{display:block;margin-top:2px}
 .member-profile-manager-note{display:block;border-top:1px solid var(--line);padding:9px 10px 5px;margin-top:4px}
+.member-profile-visibility{display:flex;align-items:flex-start;gap:10px;padding-top:17px;border-top:1px solid var(--line);cursor:pointer}.member-profile-visibility>input{flex:none;width:16px;height:16px;margin:3px 0 0;accent-color:var(--blue)}.member-profile-visibility strong{display:block;font-size:calc(11px * var(--minerva-text-scale,1));font-weight:600;line-height:1.6}.member-profile-visibility small{display:block;margin-top:4px;color:var(--muted);font-size:calc(10px * var(--minerva-text-scale,1));line-height:1.65}
 .member-profile-status{margin:17px 0 0;padding:11px 13px;border:1px solid var(--line);border-radius:6px;background:var(--pale);color:var(--blue);font-size:calc(11px * var(--minerva-text-scale,1));line-height:1.65}
 .member-profile-status.is-error{background:var(--red-pale);color:var(--red);border-color:currentColor}
 .member-profile-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}

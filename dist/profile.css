@@ -31,6 +31,7 @@ body.profile-page-open #mainContent{display:none!important}
 .profile-photo-actions{display:grid;gap:5px;padding:22px 22px 17px}
 #profilePanel.profile-page .button{width:auto;min-height:40px;font-size:calc(11px * var(--minerva-text-scale));border-radius:6px;padding:10px 15px}
 #profilePanel.profile-page .profile-photo-actions .button{width:100%;font-weight:550}
+#profilePanel.profile-page .profile-photo-actions .profile-reframe-photo{min-height:34px;padding:7px 12px}
 #profilePanel.profile-page .profile-photo-actions .button-quiet{min-height:30px;padding:5px 0;font-size:calc(10px * var(--minerva-text-scale));color:var(--muted)}
 #profilePanel.profile-page .profile-text-button{min-height:30px;border:0;border-radius:4px;background:transparent;padding:5px 0;color:var(--muted);font-size:calc(10px * var(--minerva-text-scale));font-weight:500;line-height:1.5}
 #profilePanel.profile-page .profile-text-button:hover:not(:disabled){color:var(--blue);text-decoration:underline;text-underline-offset:3px}

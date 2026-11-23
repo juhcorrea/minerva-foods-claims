@@ -32,7 +32,7 @@ function profileAvatarValue(value){
  return value;
 }
 function profileNormalize(value){
- if(!profilePlain(value)||profileFields.some(key=>!profileOwn(value,key))||Object.keys(value).some(key=>!profileFields.includes(key)&&!profileManagerFields.includes(key)))profileInvalid();
+ if(!profilePlain(value)||profileFields.some(key=>!profileOwn(value,key))||Object.keys(value).some(key=>!profileFields.includes(key)&&!profileManagerFields.includes(key)&&key!=='showInOrganization'))profileInvalid();
  const profile={};
  for(const [field,max]of Object.entries(profileTextLimits)){
   if(typeof value[field]!=='string'||value[field].length>max||/[\u0000-\u001f\u007f]/.test(value[field]))profileInvalid();
@@ -41,6 +41,8 @@ function profileNormalize(value){
  if(profile.name.length<2)profileFail(400,'PROFILE_NAME_REQUIRED','Informe seu nome completo.');
  if(typeof value.keepMenuOpen!=='boolean')profileInvalid();
  profile.avatarDataUrl=profileAvatarValue(value.avatarDataUrl);profile.keepMenuOpen=value.keepMenuOpen;
+ if(profileOwn(value,'showInOrganization')&&typeof value.showInOrganization!=='boolean')profileInvalid();
+ profile.showInOrganization=value.showInOrganization??true;
  for(const [field,max]of [['managerId',100],['managerName',160]]){
   const text=value[field]===undefined?'':value[field];
   if(typeof text!=='string'||text.length>max||/[\u0000-\u001f\u007f]/.test(text))profileInvalid();
@@ -64,7 +66,7 @@ function profileIdentity(access){
 }
 function profileDefault(access,displayName){
  const person=access.admin||access.member;
- return {name:displayName||person.name||'',employeeId:'',jobTitle:'',department:'',unit:'',avatarDataUrl:'',keepMenuOpen:true,managerId:'',managerName:''};
+ return {name:displayName||person.name||'',employeeId:'',jobTitle:'',department:'',unit:'',avatarDataUrl:'',keepMenuOpen:true,managerId:'',managerName:'',showInOrganization:true};
 }
 async function profileReadStored(bucket,hash){
  const object=await bucket.get(USER_PROFILE_PREFIX+hash+'.json');if(!object)return null;
@@ -82,17 +84,32 @@ export async function readUserProfile(bucket,access,{displayName}={}){
 // Principals are supplied by the backend after checking the current ACL. The
 // Manager selection exposes workplace labels only. The administrative
 // organization view may also display the already validated profile photo.
-export async function readProfileDirectory(bucket,principals,{organization=false}={}){
+export async function readProfileDirectory(bucket,principals,{organization=false,relationships=false}={}){
  const people=[];
  for(let offset=0;offset<principals.length;offset+=8){
   const batch=await Promise.all(principals.slice(offset,offset+8).map(async person=>{
    const found=await profileReadStored(bucket,await profileHashId(person.id,person.admin===true));
    const value=found?.value.profile;
-   return {id:person.id,name:value?.name||person.name,jobTitle:value?.jobTitle||'',department:value?.department||'',unit:value?.unit||'',...(organization?{managerId:value?.managerId||'',managerName:value?.managerName||'',avatarDataUrl:value?.avatarDataUrl||''}:{})};
+   return {id:person.id,name:value?.name||person.name,jobTitle:value?.jobTitle||'',department:value?.department||'',unit:value?.unit||'',...(organization||relationships?{managerId:value?.managerId||'',managerName:value?.managerName||''}:{}),...(organization?{avatarDataUrl:value?.avatarDataUrl||'',showInOrganization:value?.showInOrganization??true}:{})};
   }));people.push(...batch);
  }
  people.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR')||a.id.localeCompare(b.id));
- return {people};
+ // Manager validation uses the complete stored graph. Visibility changes only
+ // the administrative presentation, never the saved manager links or access.
+ if(!organization)return {people};
+ const directory=new Map(people.map(person=>[person.id,person]));
+ return {people:people.filter(person=>person.showInOrganization).map(person=>{
+  const {showInOrganization,...visible}=person;
+  if(directory.get(visible.managerId)?.showInOrganization===false){
+   const visited=new Set([visible.id]);let managerId=visible.managerId;
+   while(managerId&&directory.get(managerId)?.showInOrganization===false&&!visited.has(managerId)){
+    visited.add(managerId);managerId=directory.get(managerId).managerId;
+   }
+   visible.managerId=managerId&&!visited.has(managerId)&&directory.get(managerId)?.showInOrganization===true?managerId:'';
+   visible.managerName='';
+  }
+  return visible;
+ })};
 }
 export function validateProfileManager(profile,userId,people){
  // This checks a current directory snapshot, not a cross-profile transaction.
@@ -122,15 +139,18 @@ export async function saveUserProfile(bucket,access,input,options={}){
  profileValidateEnvelope(input);
  const profile=profileNormalize(input.profile),hash=await profilePrincipalHash(access),found=await profileReadStored(bucket,hash);
  if(input.revision!==(found?.value.revision||null))profileChanged();
+ const visibility=found?.value.profile.showInOrganization??true;
+ if(profileOwn(input.profile,'showInOrganization')&&profile.showInOrganization!==visibility)profileFail(403,'PROFILE_VISIBILITY_ADMIN_REQUIRED','A exibição no organograma é definida pela administração em Usuários E Solicitações.');
+ profile.showInOrganization=visibility;
  // An older client that sends only the original fields must not erase a link.
  if(!profileManagerFields.some(field=>profileOwn(input.profile,field)))for(const field of profileManagerFields)profile[field]=found?.value.profile[field]||'';
  return profileWriteStored(bucket,access,profile,hash,found,options);
 }
 export async function saveMemberProfile(bucket,target,input,options={}){
  profileValidateEnvelope(input);
- if(!profilePlain(input.profile)||profileAdministrativeFields.some(field=>!profileOwn(input.profile,field))||Object.keys(input.profile).some(field=>!profileAdministrativeFields.includes(field)&&field!=='avatarDataUrl'))profileFail(400,'PROFILE_ADMIN_FIELDS_INVALID','Edite somente os dados pessoais, a foto, o local de trabalho e o gestor.');
+ if(!profilePlain(input.profile)||profileAdministrativeFields.some(field=>!profileOwn(input.profile,field))||Object.keys(input.profile).some(field=>!profileAdministrativeFields.includes(field)&&!['avatarDataUrl','showInOrganization'].includes(field)))profileFail(400,'PROFILE_ADMIN_FIELDS_INVALID','Edite somente os dados pessoais, a foto, o local de trabalho, o gestor e a exibição no organograma.');
  const hash=await profilePrincipalHash(target),found=await profileReadStored(bucket,hash);
  if(input.revision!==(found?.value.revision||null))profileChanged();
- const profile=profileNormalize({...input.profile,avatarDataUrl:profileOwn(input.profile,'avatarDataUrl')?input.profile.avatarDataUrl:found?.value.profile.avatarDataUrl||'',keepMenuOpen:found?.value.profile.keepMenuOpen??true});
+ const profile=profileNormalize({...input.profile,avatarDataUrl:profileOwn(input.profile,'avatarDataUrl')?input.profile.avatarDataUrl:found?.value.profile.avatarDataUrl||'',keepMenuOpen:found?.value.profile.keepMenuOpen??true,showInOrganization:profileOwn(input.profile,'showInOrganization')?input.profile.showInOrganization:found?.value.profile.showInOrganization??true});
  return profileWriteStored(bucket,target,profile,hash,found,options);
 }

@@ -21,9 +21,9 @@ const handler=createApiHandler({engine,now:()=>epoch});
 function request(path,cookie,{method='GET',body,headers={},csrf=true}={}){const h=new Headers(headers);if(cookie)h.set('cookie',cookie);if(!['GET','HEAD'].includes(method)&&csrf){h.set('origin',origin);h.set('content-type','application/json');h.set('x-minerva-request','1');}return new Request(origin+path,{method,headers:h,body:body===undefined?undefined:typeof body==='string'?body:JSON.stringify(body)});}
 async function call(env,path,cookie,options={},api=handler){const response=await api(request(path,cookie,options),env);return {status:response.status,body:await response.json(),headers:response.headers,cookie:response.headers.get('set-cookie')?.split(';')[0]};}
 const login=(env,id='owner')=>call(env,'/api/auth/exchange',null,{method:'POST',body:{token:tokens[id]}});
-const values=(changes={})=>({name:'Pessoa Exemplo',employeeId:'EX-123',jobTitle:'Analista',department:'Logística',unit:'Unidade Exemplo',avatarDataUrl:'',keepMenuOpen:false,managerId:'',managerName:'',...changes});
+const values=(changes={})=>({name:'Pessoa Exemplo',employeeId:'EX-123',jobTitle:'Analista',department:'Logística',unit:'Unidade Exemplo',avatarDataUrl:'',keepMenuOpen:false,managerId:'',managerName:'',showInOrganization:true,...changes});
 const put=(env,cookie,profile=values(),revision=null)=>call(env,'/api/profile/self',cookie,{method:'PUT',body:{revision,profile}});
-const administrativeValues=(changes={})=>{const profile=values(changes);delete profile.avatarDataUrl;delete profile.keepMenuOpen;return profile;};
+const administrativeValues=(changes={})=>{const profile=values(changes);delete profile.avatarDataUrl;delete profile.keepMenuOpen;if(!Object.hasOwn(changes,'showInOrganization'))delete profile.showInOrganization;return profile;};
 const putMember=(env,cookie,userId,profile=administrativeValues(),revision=null)=>call(env,'/api/profile/member?userId='+encodeURIComponent(userId),cookie,{method:'PUT',body:{revision,profile}});
 const profileKeys=env=>[...env.BUCKET.objects.keys()].filter(key=>key.startsWith(USER_PROFILE_PREFIX));
 async function member(env,admin,role='viewer'){
@@ -180,9 +180,9 @@ test('manager assignment rejects missing users self assignment invalid labels an
 });
 
 test('original seven-field objects and clients remain valid without erasing manager assignments',async()=>{
- const env=environment(),admin=await login(env),legacy=values();delete legacy.managerId;delete legacy.managerName;
+ const env=environment(),admin=await login(env),legacy=values();delete legacy.managerId;delete legacy.managerName;delete legacy.showInOrganization;
  const first=await put(env,admin.cookie,legacy);assert.equal(first.status,200);assert.equal(first.body.profile.managerId,'');
- const key=profileKeys(env)[0],item=env.BUCKET.objects.get(key),stored=JSON.parse(item.text);delete stored.profile.managerId;delete stored.profile.managerName;item.text=JSON.stringify(stored);
+ const key=profileKeys(env)[0],item=env.BUCKET.objects.get(key),stored=JSON.parse(item.text);delete stored.profile.managerId;delete stored.profile.managerName;delete stored.profile.showInOrganization;item.text=JSON.stringify(stored);
  const read=await call(env,'/api/profile/self',admin.cookie);assert.equal(read.status,200);assert.equal(read.body.profile.managerId,'');assert.equal(read.body.profile.managerName,'');
  const link=await put(env,admin.cookie,values({managerName:'Gestor Externo'}),read.body.revision);assert.equal(link.status,200);
  const update=await put(env,admin.cookie,{...legacy,jobTitle:'Novo Cargo'},link.body.revision);assert.equal(update.status,200);assert.equal(update.body.profile.managerName,'Gestor Externo');assert.equal(update.body.profile.jobTitle,'Novo Cargo');
@@ -293,4 +293,62 @@ test('administrative photo uploads use the shared raster limit and reject invali
  }
  assert.equal((await putMember(env,admin.cookie,id,{...administrativeValues(),avatarDataUrl:png,keepMenuOpen:false},first.body.revision)).status,400);
  assert.deepEqual((await call(env,'/api/profile/self',viewer.cookie)).body,first.body);
+});
+
+test('organization visibility defaults on and is changed only through the administrative member endpoint',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),id=viewer.body.userId;
+ assert.equal((await call(env,'/api/profile/member?userId='+id,admin.cookie)).body.profile.showInOrganization,true);
+ const acl=env.BUCKET.objects.get('private/access-v3.json').text;
+ const hidden=await putMember(env,admin.cookie,id,administrativeValues({showInOrganization:false}));assert.equal(hidden.status,200);assert.equal(hidden.body.profile.showInOrganization,false);
+ assert.equal(env.BUCKET.objects.get('private/access-v3.json').text,acl);assert.equal((await call(env,'/api/session',viewer.cookie)).body.role,'viewer');
+ const denied=await put(env,viewer.cookie,values(),hidden.body.revision);assert.equal(denied.status,403);assert.equal(denied.body.code,'PROFILE_VISIBILITY_ADMIN_REQUIRED');
+ const own=values({jobTitle:'Meu Cargo'});delete own.showInOrganization;
+ const updated=await put(env,viewer.cookie,own,hidden.body.revision);assert.equal(updated.status,200);assert.equal(updated.body.profile.showInOrganization,false);
+ const roundtrip=await put(env,viewer.cookie,updated.body.profile,updated.body.revision);assert.equal(roundtrip.status,200);assert.equal(roundtrip.body.profile.showInOrganization,false);
+ const legacyAdmin=await putMember(env,admin.cookie,id,administrativeValues({department:'Nova Área'}),roundtrip.body.revision);assert.equal(legacyAdmin.status,200);assert.equal(legacyAdmin.body.profile.showInOrganization,false);
+ const shown=await putMember(env,admin.cookie,id,administrativeValues({showInOrganization:true}),legacyAdmin.body.revision);assert.equal(shown.status,200);assert.equal(shown.body.profile.showInOrganization,true);
+ assert.equal((await putMember(env,admin.cookie,id,administrativeValues({showInOrganization:false}),legacyAdmin.body.revision)).status,409);
+ for(const showInOrganization of ['false',null,0,{},[]])assert.equal((await putMember(env,admin.cookie,id,administrativeValues({showInOrganization}),shown.body.revision)).status,400);
+ assert.equal((await put(env,admin.cookie,values({showInOrganization:false}))).status,403,'Even an admin changes visibility in the dedicated member editor');
+ const ownHidden=await putMember(env,admin.cookie,'owner',administrativeValues({showInOrganization:false}));assert.equal(ownHidden.status,200);assert.equal(ownHidden.body.identity.role,'admin');
+ assert.equal((await call(env,'/api/organization',admin.cookie)).status,200,'Hiding a person never removes their access');
+});
+
+test('organization removes hidden people and photos while reconnecting visible reports to the nearest visible ancestor',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),editor=await member(env,admin.cookie,'editor');
+ const hiddenAdmin=await putMember(env,admin.cookie,'developer',{...administrativeValues({name:'Hidden Technical Name',managerId:'owner',showInOrganization:false}),avatarDataUrl:png});assert.equal(hiddenAdmin.status,200);
+ const hiddenEditor=await putMember(env,admin.cookie,editor.body.userId,administrativeValues({name:'Hidden Manager Name',managerId:'developer',showInOrganization:false}));assert.equal(hiddenEditor.status,200);
+ const report=await put(env,viewer.cookie,values({name:'Visible Report',managerId:editor.body.userId}));assert.equal(report.status,200);
+ const result=await call(env,'/api/organization',admin.cookie);assert.equal(result.status,200);assert.equal(result.body.people.length,2);
+ assert.equal(result.body.people.find(person=>person.id===viewer.body.userId).managerId,'owner');
+ const serialized=JSON.stringify(result.body);for(const hidden of ['Hidden Technical Name','Hidden Manager Name','developer',editor.body.userId,'base64','showInOrganization'])assert(!serialized.includes(hidden),hidden);
+ const managers=await call(env,'/api/profile/managers',viewer.cookie);assert(managers.body.people.some(person=>person.id==='developer'));assert(managers.body.people.some(person=>person.id===editor.body.userId));
+ for(const person of managers.body.people)assert.deepEqual(Object.keys(person).sort(),['id','name','jobTitle','department','unit'].sort());
+ assert.equal((await call(env,'/api/profile/self',viewer.cookie)).body.profile.managerId,editor.body.userId,'The stored manager link is never rewritten');
+ const visibleAgain=await putMember(env,admin.cookie,editor.body.userId,administrativeValues({name:'Returned Manager',managerId:'developer',showInOrganization:true}),hiddenEditor.body.revision);assert.equal(visibleAgain.status,200);
+ const restored=await call(env,'/api/organization',admin.cookie);assert.equal(restored.body.people.find(person=>person.id===viewer.body.userId).managerId,editor.body.userId);
+});
+
+test('manager validation uses hidden people and their real relationships for both admin and self changes',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),editor=await member(env,admin.cookie,'editor');
+ const hidden=await putMember(env,admin.cookie,editor.body.userId,administrativeValues({managerId:viewer.body.userId,showInOrganization:false}));assert.equal(hidden.status,200);
+ for(const result of [await put(env,viewer.cookie,values({managerId:editor.body.userId})),await putMember(env,admin.cookie,viewer.body.userId,administrativeValues({managerId:editor.body.userId}))]){assert.equal(result.status,400);assert.equal(result.body.code,'PROFILE_MANAGER_CYCLE');}
+ const cleared=await putMember(env,admin.cookie,editor.body.userId,administrativeValues({showInOrganization:false}),hidden.body.revision);assert.equal(cleared.status,200);
+ const linked=await put(env,viewer.cookie,values({managerId:editor.body.userId}));assert.equal(linked.status,200,'A hidden person remains a valid manager');
+ const organization=await call(env,'/api/organization',admin.cookie);assert.equal(organization.body.people.find(person=>person.id===viewer.body.userId).managerId,'');
+});
+
+test('hidden cycles external names and missing parents never leak into the visible organization',async()=>{
+ const env=environment(),admin=await login(env),viewer=await member(env,admin.cookie),editor=await member(env,admin.cookie,'editor'),reviewer=await member(env,admin.cookie,'reviewer');
+ const hidden=await putMember(env,admin.cookie,editor.body.userId,administrativeValues({name:'Hidden One',managerName:'Hidden External Name',showInOrganization:false}));assert.equal(hidden.status,200);
+ assert.equal((await putMember(env,admin.cookie,reviewer.body.userId,administrativeValues({name:'Hidden Two',showInOrganization:false}))).status,200);
+ assert.equal((await put(env,viewer.cookie,values({managerId:editor.body.userId}))).status,200);
+ const changeStored=(id,managerId)=>{const item=env.BUCKET.objects.get(USER_PROFILE_PREFIX+hash('member:'+id)+'.json'),saved=JSON.parse(item.text);saved.profile.managerId=managerId;saved.profile.managerName='';item.text=JSON.stringify(saved);};
+ for(const parent of ['', 'missing-parent',viewer.body.userId,reviewer.body.userId]){
+  if(parent)changeStored(editor.body.userId,parent);
+  if(parent===reviewer.body.userId)changeStored(reviewer.body.userId,editor.body.userId);
+  const result=await call(env,'/api/organization',admin.cookie);assert.equal(result.status,200);assert.equal(result.body.people.length,3);
+  const visible=result.body.people.find(person=>person.id===viewer.body.userId);assert.equal(visible.managerId,'');assert.equal(visible.managerName,'');
+  const serialized=JSON.stringify(result.body);for(const hiddenText of ['Hidden One','Hidden Two','Hidden External Name',editor.body.userId,reviewer.body.userId])assert(!serialized.includes(hiddenText));
+ }
 });

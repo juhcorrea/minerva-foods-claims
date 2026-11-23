@@ -158,3 +158,24 @@ test('correction progress accepts plural and legacy array filters with plural pr
  assert.equal((await mark(env,admin,snapshot,group,true,{options:{...filters,operation:'INVALID IGNORED LEGACY',supplier:'INVALID IGNORED LEGACY'}})).status,200);
  for(const extra of [{suppliers:['FORNECEDOR TESTE',{}]},{operations:['EXPORTAÇÃO - CARRETA','INVALID']},{controlOperations:['INVALID']},{suppliers:Array(201).fill('FORNECEDOR TESTE')}])assert.equal((await mark(env,admin,snapshot,group,true,{options:{...filters,...extra}})).status,400);
 });
+
+test('Gado corrections cannot be acknowledged through an old group key while other corrections remain writable',async()=>{
+ const env=environment(),admin=await login(env),input=twoOrders();
+ const before=(await publish(env,admin,input)).body;
+ const excluded=before.model.correctionGroups.find(group=>group.reference===input.bd[1][22]);
+ assert(excluded?.progress?.key);
+ input.control[0][2]='Setor';input.control[1][2]=' Gado ';input.control[2][2]='GADO VIVO';
+ const after=(await publish(env,admin,input,before.revision)).body;
+ const review=engine.getCorrectionReviewModel(after.model);
+ assert(after.model.correctionGroups.some(group=>group.reference===excluded.reference),'Original reconciliation data is retained');
+ assert(!review.correctionGroups.some(group=>group.rows.some(row=>[2,3].includes(row))));
+ const items=engine.buildCorrectionReviewItems(after.model);
+ assert(items.every(item=>item.controlRows.every(row=>![2,3].includes(row))));
+ assert(items.every(item=>/^[a-f0-9]{64}$/.test(item.progress?.key)));
+ const rejected=await mark(env,admin,after,excluded,true);
+ assert.equal(rejected.status,409);assert.equal(rejected.body.code,'CORRECTION_CHANGED');
+ const normal=review.correctionGroups.find(group=>group.reference==='SO/SECOND');
+ assert(normal?.progress?.key);assert.equal((await mark(env,admin,after,normal,true)).status,200);
+ const reloaded=(await call(env,'/api/report?years=2025,2026',admin.cookie)).body;
+ assert(engine.getCorrectionReviewModel(reloaded.model).correctionGroups.find(group=>group.reference==='SO/SECOND').progress.done);
+});

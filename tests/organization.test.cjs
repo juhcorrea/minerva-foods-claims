@@ -76,3 +76,32 @@ test('each person renders a photo or first-last initials and external managers g
 test('an image loading error falls back to initials and reset removes all avatar data',async()=>{
  const h=harness(async()=>({people:[person('a','Gestora De Exemplo',{avatarDataUrl:pngAvatar})]}));await h.controller.refresh();const avatar=h.host.querySelector('.org-avatar'),image=avatar.querySelector('img');image.dispatchEvent({type:'error'});assert.equal(avatar.querySelector('img'),null);assert.equal(avatar.textContent,'GE');assert.equal(avatar.classList.contains('has-photo'),false);await h.controller.refresh();assert(h.host.querySelector('img'));h.controller.reset();assert.equal(h.host.querySelector('img'),null);assert.equal(h.host.querySelector('.org-avatar'),null);
 });
+
+test('only an explicit false visibility flag excludes a person; names never decide visibility',()=>{
+ const model=buildOrganization([person('a','Desenvolvimento'),person('b','Conta Técnica',{showInOrganization:false}),person('c','Pessoa Exemplo',{showInOrganization:true}),person('d','Outra Pessoa',{showInOrganization:'false'})]);assert.equal(model.total,3);assert.deepEqual(model.nodes.map(node=>node.id),['a','c','d']);assert.equal(allPeople(model).length,3);assert.equal(selectOrganization(model,'desenvolvimento').matches.size,1);
+});
+
+test('a hidden manager is replaced by the nearest visible ancestor without changing stored input links',()=>{
+ const people=[person('root','Gestora Visível'),person('hidden-one','Primeira Conta Oculta',{showInOrganization:false,managerId:'root'}),person('hidden-two','Segunda Conta Oculta',{showInOrganization:false,managerId:'hidden-one'}),person('child','Analista Visível',{managerId:'hidden-two',managerName:'Segunda Conta Oculta'})],before=JSON.stringify(people),model=buildOrganization(people);
+ assert.equal(model.total,2);assert.equal(allPeople(model).length,2);assert.equal(model.nodes[1].parent,model.nodes[0]);assert.equal(model.nodes[1].managerId,'root');assert.equal(model.nodes[1].managerName,'');assert.equal(model.issueCount,0);assert.equal(JSON.stringify(people),before);assert.equal(selectOrganization(model,'oculta').matches.size,0);
+});
+
+test('hidden roots and unresolvable hidden chains keep their teams under Manager Not Informed',()=>{
+ for(const hiddenLinks of [{managerId:'',managerName:''},{managerId:'missing',managerName:''},{managerId:'',managerName:'Gestor Externo Da Conta Oculta'},{managerId:'hidden',managerName:''},{managerId:'child',managerName:''}]){
+  const model=buildOrganization([person('hidden','Conta Oculta',{showInOrganization:false,avatarDataUrl:pngAvatar,...hiddenLinks}),person('child','Pessoa Visível',{managerId:'hidden',managerName:'Conta Oculta'})]);assert.equal(model.total,1);assert.equal(model.nodes[0].parent.name,'Gestor Não Informado');assert.equal(model.nodes[0].managerId,'');assert.equal(model.nodes[0].managerName,'');assert.equal(model.issueCount,0);assert.equal(allPeople(model).length,1);
+ }
+});
+
+test('cycles or duplicate identities among hidden managers do not lose visible people or disclose hidden groups',()=>{
+ for(const extra of [person('other','Outra Conta Oculta',{showInOrganization:false,managerId:'hidden'}),person('hidden','Duplicata Oculta',{showInOrganization:false})]){
+  const model=buildOrganization([person('hidden','Conta Oculta',{showInOrganization:false,managerId:'other'}),extra,person('child','Pessoa Visível',{managerId:'hidden'})]);assert.equal(model.total,1);assert.equal(model.groups.length,1);assert.equal(model.groups[0].key,'unknown');assert.equal(allPeople(model).length,1);
+ }
+});
+
+test('hidden people contribute no name photo id count or search result to the rendered chart',async()=>{
+ const people=[person('private-hidden-id','Nome Da Conta Oculta',{avatarDataUrl:pngAvatar,showInOrganization:false}),person('visible','Pessoa Visível',{managerId:'private-hidden-id',managerName:'Nome Da Conta Oculta'})],h=harness(async()=>({people}));await h.controller.refresh();assert.equal(h.host.querySelector('.org-count').textContent,'1');assert.equal(h.host.querySelectorAll('.org-person').length,1);assert.equal(h.host.querySelector('img'),null);assert.equal(h.host.querySelector('[data-person-id="private-hidden-id"]'),null);assert(!h.host.textContent.includes('Nome Da Conta Oculta'));assert(h.host.textContent.includes('Gestor Não Informado'));const input=h.host.querySelector('.org-search');input.value='conta oculta';input.dispatchEvent({type:'input'});assert.equal(h.host.querySelectorAll('.org-person').length,0);assert.equal(h.host.querySelector('.org-results').textContent,'0 Pessoas Encontradas · 1 Pessoa No Total');
+});
+
+test('an entirely hidden directory produces a zero total without synthetic people or groups',async()=>{
+ const h=harness(async()=>({people:[person('hidden','Conta Oculta',{showInOrganization:false})]}));await h.controller.refresh();assert.equal(h.host.querySelector('.org-count').textContent,'0');assert.equal(h.host.querySelectorAll('.org-group').length,0);assert(h.host.textContent.includes('Nenhuma Pessoa Disponível'));assert(!h.host.textContent.includes('Conta Oculta'));
+});

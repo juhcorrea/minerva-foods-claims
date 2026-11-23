@@ -93,14 +93,14 @@ function profileSameTarget(previous,current){
  const old=previous.admin||previous.member,next=current.admin||current.member;
  if(previous.role!==current.role||old.email!==next.email||old.name!==next.name)fail(409,'PROFILE_MEMBER_CHANGED','O cadastro dessa pessoa foi atualizado. Carregue os dados novamente.');
 }
-async function profileCheckedDirectory(bucket,access,admins,accessConfig,{organization=false,allowedRoles=['admin','editor','reviewer','viewer']}={}){
+async function profileCheckedDirectory(bucket,access,admins,accessConfig,{organization=false,relationships=false,allowedRoles=['admin','editor','reviewer','viewer']}={}){
  const {value:acl}=await readAcl(bucket);requireCurrentRole(acl,access,allowedRoles);
  const principals=admins.map(person=>({id:person.id,name:actorLabel(person.name,person.id),admin:true}));
  for(const person of Object.values(acl?.members||{})){
   if(!profileEligibleMember(person,accessConfig))continue;
   principals.push({id:person.id,name:person.name||'Pessoa sem nome',admin:false});
  }
- const directory=await readProfileDirectory(bucket,principals,{organization});
+ const directory=await readProfileDirectory(bucket,principals,{organization,relationships});
  const {value:latest}=await readAcl(bucket);requireCurrentRole(latest,access,allowedRoles);
  if((latest?.revision||null)!==(acl?.revision||null))fail(409,'PROFILE_DIRECTORY_CHANGED','Os acessos foram atualizados. Carregue a lista de gestores novamente.');
  return directory;
@@ -342,7 +342,8 @@ function publicCorrectionProgress(key,entry) {
 }
 async function hydrateCorrectionProgress(bucket,model,engine,bdRows,controlRows) {
  const found=await readCorrectionProgress(bucket),{value}=found;
- await Promise.all((model.correctionGroups||[]).map(async group=>{const key=await correctionProgressKey(group);group.progress=publicCorrectionProgress(key,value?.entries[key]);}));
+ const reviewModel=engine.getCorrectionReviewModel?.(model)||model;
+ await Promise.all((reviewModel.correctionGroups||[]).map(async group=>{const key=await correctionProgressKey(group);group.progress=publicCorrectionProgress(key,value?.entries[key]);}));
  await Promise.all((engine.correctionReviewTargets?.(model,bdRows,controlRows)||[]).map(async({item,identity})=>{
   const key=await hashToken(identity),entry=value?.entries[key]??engine.correctionReviewLegacyProgress(item),progress=publicCorrectionProgress(key,entry);
   for(const source of [...item.groups,...item.audits,...item.issues])source.reviewProgress=progress;
@@ -368,7 +369,8 @@ async function saveCorrectionProgress(bucket,access,body,url,engine) {
  if(saved.schemaVersion!==1||!Array.isArray(saved.bd)||!Array.isArray(saved.control))fail(503,'REPORT_INVALID','O relatório publicado precisa ser conferido pelas administradoras.');
  const options=correctionOptions(body.options,url,saved,engine);
  let model;try{model=engine.analyze(saved.bd,saved.control,options);}catch{fail(503,'REPORT_ANALYSIS_FAILED','Não foi possível conferir a correção no relatório publicado.');}
- const keys=await Promise.all([...(model.correctionGroups||[]).map(correctionProgressKey),...(engine.correctionReviewTargets?.(model,saved.bd,saved.control)||[]).map(target=>hashToken(target.identity))]);
+ const reviewModel=engine.getCorrectionReviewModel?.(model)||model;
+ const keys=await Promise.all([...(reviewModel.correctionGroups||[]).map(correctionProgressKey),...(engine.correctionReviewTargets?.(model,saved.bd,saved.control)||[]).map(target=>hashToken(target.identity))]);
  if(!keys.includes(body.key))fail(409,'CORRECTION_CHANGED','A divergência mudou ou não está neste recorte. Atualize a visão antes de marcar.');
  const actor=access.admin||access.member,entry={done:body.done,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,reportRevision:body.reportRevision};
  const result=await saveProgressEntry(bucket,body.key,entry,{validate:async()=>{
@@ -448,7 +450,7 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
      const document=await readUserProfile(env.BUCKET,target,{displayName:publicSession(target).name});await validateTarget();return response(document);
     }
     return response(await saveMemberProfile(env.BUCKET,target,await readBody(request,USER_PROFILE_BODY_BYTES),{now,validate:async profile=>{
-     if(profile.managerId){const {people}=await profileCheckedDirectory(env.BUCKET,access,admins,accessConfig,{organization:true,allowedRoles:['admin']});validateProfileManager(profile,userId,people);}
+     if(profile.managerId){const {people}=await profileCheckedDirectory(env.BUCKET,access,admins,accessConfig,{relationships:true,allowedRoles:['admin']});validateProfileManager(profile,userId,people);}
      await validateTarget();
     }}));
    }
@@ -464,7 +466,7 @@ export function createApiHandler({engine,now=()=>Date.now(),migrationSource=null
      const {value:acl}=await readAcl(env.BUCKET);requireCurrentRole(acl,access,['admin','editor','reviewer','viewer']);return response(profile);
     }
     if(request.method==='PUT')return response(await saveUserProfile(env.BUCKET,access,await readBody(request,USER_PROFILE_BODY_BYTES),{now,validate:async profile=>{
-     if(profile.managerId){const {people}=await profileCheckedDirectory(env.BUCKET,access,admins,accessConfig,{organization:true});validateProfileManager(profile,(access.admin||access.member).id,people);}
+     if(profile.managerId){const {people}=await profileCheckedDirectory(env.BUCKET,access,admins,accessConfig,{relationships:true});validateProfileManager(profile,(access.admin||access.member).id,people);}
      await confirmMutationPermission(env.BUCKET,access,['admin','editor','reviewer','viewer']);
     }}));
     fail(405,'METHOD_NOT_ALLOWED','Use a consulta ou o salvamento do seu perfil.');
