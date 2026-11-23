@@ -21,10 +21,28 @@
     return valid?url:'';
   }
 
+  function visiblePeople(people){
+    const byId=new Map();
+    for(const person of people){const id=text(person?.id);if(id){if(!byId.has(id))byId.set(id,[]);byId.get(id).push(person);}}
+    return people.filter(person=>person?.showInOrganization!==false).map(person=>{
+      const managerId=text(person?.managerId),targets=byId.get(managerId)||[];
+      if(!targets.some(manager=>manager.showInOrganization===false))return person;
+      const seen=new Set([text(person?.id)]);let nextId=managerId;
+      while(nextId&&!seen.has(nextId)){
+        seen.add(nextId);const candidates=byId.get(nextId)||[];
+        if(candidates.length!==1)break;
+        const manager=candidates[0];
+        if(manager.showInOrganization!==false)return{...person,managerId:text(manager.id),managerName:''};
+        nextId=text(manager.managerId);
+      }
+      return{...person,managerId:'',managerName:''};
+    });
+  }
+
   // Build a forest without inventing a reporting relationship for missing data.
   function buildOrganization(people){
     if(!Array.isArray(people))throw new Error('Resposta do organograma inválida.');
-    const ids=new Map(),nodes=people.map((person,index)=>{
+    const ids=new Map(),nodes=visiblePeople(people).map((person,index)=>{
       const source=person&&typeof person==='object'?person:{};
       const node={kind:'person',key:'person:'+index,id:text(source.id),name:text(source.name)||'Nome Não Informado',initials:initials(source.name),avatarDataUrl:rasterAvatar(source.avatarDataUrl),jobTitle:text(source.jobTitle),department:text(source.department),unit:text(source.unit),managerId:text(source.managerId),managerName:text(source.managerName),children:[],issues:[],parent:null,linkedManager:null,groupKey:''};
       if(node.id){if(!ids.has(node.id))ids.set(node.id,[]);ids.get(node.id).push(node);}
@@ -130,7 +148,7 @@
     function render(){
       if(!model)return;
       const selection=selectOrganization(model,search.value);count.textContent=model.total.toLocaleString('pt-BR');
-      results.textContent=selection.searching?selection.matches.size.toLocaleString('pt-BR')+' '+(selection.matches.size===1?'Pessoa Encontrada':'Pessoas Encontradas')+' · '+model.total.toLocaleString('pt-BR')+' Pessoas No Total':model.issueCount?model.issueCount.toLocaleString('pt-BR')+' '+(model.issueCount===1?'Pessoa Com Vínculo A Conferir':'Pessoas Com Vínculo A Conferir'):'';
+      results.textContent=selection.searching?selection.matches.size.toLocaleString('pt-BR')+' '+(selection.matches.size===1?'Pessoa Encontrada':'Pessoas Encontradas')+' · '+model.total.toLocaleString('pt-BR')+' '+(model.total===1?'Pessoa No Total':'Pessoas No Total'):model.issueCount?model.issueCount.toLocaleString('pt-BR')+' '+(model.issueCount===1?'Pessoa Com Vínculo A Conferir':'Pessoas Com Vínculo A Conferir'):'';
       if(!model.total){empty('Nenhuma Pessoa Disponível No Organograma.');return;}
       if(!selection.matches.size){empty('Nenhuma Pessoa Encontrada. Altere A Busca.');return;}
       content.replaceChildren();

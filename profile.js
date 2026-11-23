@@ -3,13 +3,14 @@
   const FIELDS = ['name','employeeId','jobTitle','department','unit'];
   const MAX_FILE = 5 * 1024 * 1024, MAX_AVATAR = 512 * 1024;
   const TYPES = ['image/jpeg','image/png','image/webp'];
-  function initialLetters(name) {return String(name || '').trim().split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toLocaleUpperCase('pt-BR');}
+  function initialLetters(name) {const words=String(name||'').trim().split(/\s+/).filter(Boolean);return (words.length>1?[words[0],words.at(-1)]:words).map(word=>word[0]).join('').toLocaleUpperCase('pt-BR');}
   function profileValues(value) {const v=value||{},p={};for(const key of FIELDS)p[key]=typeof v[key]==='string'?v[key]:'';p.managerId=typeof v.managerId==='string'?v.managerId:'';p.managerName=typeof v.managerName==='string'?v.managerName:'';p.avatarDataUrl=typeof v.avatarDataUrl==='string'&&/^data:image\/(jpeg|png|webp);base64,/.test(v.avatarDataUrl)?v.avatarDataUrl:'';p.keepMenuOpen=v.keepMenuOpen!==false;return p;}
   function validPhoto(file) {return Boolean(file && TYPES.includes(file.type) && file.size>0 && file.size<=MAX_FILE);}
   if (typeof module!=='undefined'&&module.exports) {module.exports={profileValues,initialLetters,validPhoto,MAX_FILE,MAX_AVATAR};return;}
   const $=id=>document.getElementById(id);
   let hooks={},mounted=false,account=null,accountKey='',documentValue=null,draft=null,dirty=false,loading=false,saving=false,loadVersion=0,photoVersion=0,returnScroll=0,externalChange=false;
   let managers=[],managerVersion=0,managerLoaded=false,managerBusy=false;
+  let photoCropper=null,photoBusy=false,photoOriginal=null;
   const normalizeManager=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('pt-BR');
   function managerLabel(){return draft?.managerId?(managers.find(person=>person.id===draft.managerId)?.name||'Gestor Cadastrado'):draft?.managerName||'';}
   function closeManagers(){$('profileManagerOptions').hidden=true;$('profileManagerSearch').setAttribute('aria-expanded','false');}
@@ -36,7 +37,8 @@
   const field=(id,label,placeholder,max,wide=false)=>'<div class="profile-field'+(wide?' profile-field-wide':'')+'"><label for="profileField_'+id+'">'+label+'</label><input id="profileField_'+id+'" name="'+id+'" maxlength="'+max+'" placeholder="'+placeholder+'" autocomplete="'+(id==='name'?'name':'off')+'"'+(id==='name'?' required minlength="2"':'')+'></div>';
   const externalChangeMessage='Seu perfil foi atualizado pela administração. Seu rascunho foi mantido. Clique em Recarregar Perfil para usar os dados salvos ou em Cancelar para descartar o rascunho.';
   function status(text,error=false) {const el=$('profileSaveStatus');if(!el)return;if(externalChange&&!loading&&!error&&text){text=externalChangeMessage;error=true;}el.textContent=text;el.classList.toggle('is-error',error);el.hidden=!text;}
-  function disabled() {const form=$('selfProfileForm');if(!form)return;for(const el of form.querySelectorAll('input,button'))el.disabled=loading||saving;for(const id of ['profileChangePhoto','profileRemovePhoto','profilePhotoFile','profileCamera'])$(id).disabled=loading||saving||!documentValue; if($('profileRemovePhoto'))$('profileRemovePhoto').disabled=loading||saving||!documentValue||!draft?.avatarDataUrl;$('profileSave').disabled=loading||saving||!documentValue||externalChange;}
+  function disabled() {const form=$('selfProfileForm');if(!form)return;for(const el of form.querySelectorAll('input,button'))el.disabled=loading||saving;const photoBlocked=loading||saving||photoBusy||!documentValue||externalChange;for(const id of ['profileChangePhoto','profileRemovePhoto','profilePhotoFile','profileCamera','profileReframePhoto'])$(id).disabled=photoBlocked;for(const id of ['profileRemovePhoto','profileReframePhoto'])$(id).disabled=photoBlocked||!draft?.avatarDataUrl;$('profileSave').disabled=loading||saving||photoBusy||!documentValue||externalChange;}
+  function stopPhoto(resetSource=false){photoVersion++;photoBusy=false;photoCropper?.cancel();if(resetSource)photoOriginal=null;}
   function photo(el,url,name){if(!el)return;el.replaceChildren();if(url){const img=document.createElement('img');img.src=url;img.alt='Foto do perfil';el.append(img);}else el.textContent=initialLetters(name)||'P';}
   function paintIdentity(value,identity) {
     const name=value?.name||account?.name||'Meu Perfil';
@@ -55,7 +57,7 @@
   function currentKey() {return global.MINERVA_HOSTED===true?(account?.id||''):'local-demo';}
   async function load(force=false) {
     const key=currentKey();if(!key||loading||(!force&&documentValue))return;
-    const version=++loadVersion;photoVersion++;loading=true;disabled();status('Carregando seu perfil…');
+    const version=++loadVersion;stopPhoto(true);loading=true;disabled();status('Carregando seu perfil…');
     try {
       let result;
       if(global.MINERVA_HOSTED===true) result=await global.MinervaTeam.getSelfProfile();
@@ -71,27 +73,27 @@
     if(!mounted)return;account=profile;
     const next=currentKey();
     for(const id of ['profileUsersNav','profileUsersLink'])if($(id))$(id).hidden=global.MINERVA_HOSTED!==true||profile?.role!=='admin';
-    if(next!==accountKey){accountKey=next;loadVersion++;photoVersion++;managerVersion++;managers=[];managerLoaded=false;managerBusy=false;documentValue=null;draft=profileValues({name:profile?.name||'Pessoa Exemplo'});dirty=false;externalChange=false;loading=false;saving=false;populate();if(global.MINERVA_HOSTED===true&&!profile){hooks.close?.(false);status('');return;}void load();}
+    if(next!==accountKey){accountKey=next;loadVersion++;stopPhoto(true);managerVersion++;managers=[];managerLoaded=false;managerBusy=false;documentValue=null;draft=profileValues({name:profile?.name||'Pessoa Exemplo'});dirty=false;externalChange=false;loading=false;saving=false;populate();if(global.MINERVA_HOSTED===true&&!profile){hooks.close?.(false);status('');return;}void load();}
     else if(documentValue)paintIdentity(dirty?readDraft():documentValue.profile,documentValue.identity);
   }
   function open(){returnScroll=global.scrollY||0;document.body.classList.add('profile-page-open');$('profilePanel').style.cssText='';$('profilePanel').hidden=false;$('mainContent')?.setAttribute('inert','');if(!dirty&&documentValue){draft=profileValues(documentValue.profile);populate();}void load();void loadManagers();global.scrollTo?.({top:0,behavior:'instant'});}
-  function close(){document.body.classList.remove('profile-page-open');$('mainContent')?.removeAttribute('inert');if(returnScroll)global.scrollTo?.({top:returnScroll,behavior:'instant'});}
+  function close(){stopPhoto();disabled();document.body.classList.remove('profile-page-open');$('mainContent')?.removeAttribute('inert');if(returnScroll)global.scrollTo?.({top:returnScroll,behavior:'instant'});}
   function applyExternalUpdate(result){
     if(!mounted||global.MINERVA_HOSTED!==true||!account?.id||result?.identity?.userId!==account.id||!result.profile||typeof result.profile!=='object'||Array.isArray(result.profile)||typeof result.revision!=='string'||!result.revision)return false;
     if(documentValue?.revision===result.revision)return true;
     if(dirty)readDraft();
-    loadVersion++;photoVersion++;loading=false;saving=false;
+    loadVersion++;stopPhoto(true);loading=false;saving=false;
     documentValue={...result,profile:profileValues(result.profile)};
     externalChange=dirty;
     if(dirty){paintIdentity(draft,documentValue.identity);$('profileReload').hidden=false;disabled();status(externalChangeMessage,true);}
     else{draft=profileValues(documentValue.profile);populate();$('profileReload').hidden=true;status('Seu perfil foi atualizado.');}
     return true;
   }
-  function cancel(){if(saving)return;draft=profileValues(documentValue?.profile||{name:account?.name});dirty=false;externalChange=false;photoVersion++;populate();$('profileReload').hidden=true;status('');hooks.close?.(true);}
+  function cancel(){if(saving)return;stopPhoto(true);draft=profileValues(documentValue?.profile||{name:account?.name});dirty=false;externalChange=false;populate();$('profileReload').hidden=true;status('');hooks.close?.(true);}
   async function save(event){
-    event.preventDefault();if(loading||saving||!documentValue||externalChange)return;
+    event.preventDefault();if(loading||saving||photoBusy||!documentValue||externalChange)return;
     readDraft();const value=profileValues(draft);value.name=value.name.trim();if(value.name.length<2){status('Informe seu nome completo.',true);$('profileField_name').focus();return;}
-    const key=currentKey(),version=loadVersion;saving=true;disabled();status('Salvando alterações…');
+    const key=currentKey(),version=loadVersion;stopPhoto(true);saving=true;disabled();status('Salvando alterações…');
     try{
       let result;
       if(global.MINERVA_HOSTED===true)result=await global.MinervaTeam.saveSelfProfile({revision:documentValue.revision,profile:value});
@@ -102,22 +104,25 @@
     }catch(error){if(key===currentKey()&&version===loadVersion){status(error.status===409?'Seu perfil foi alterado em outra sessão. Clique em Recarregar Perfil antes de editar novamente.':error.message||'Não foi possível salvar. Tente novamente.',true);$('profileReload').hidden=false;}}
     finally{if(key===currentKey()&&version===loadVersion){saving=false;disabled();}}
   }
-  async function compressPhoto(file){
-    if(!validPhoto(file))throw new Error('Escolha uma foto JPG, PNG ou WebP de até 5 MB.');
-    const url=URL.createObjectURL(file);
-    try{const img=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('Não foi possível ler esta foto. Escolha outra imagem.'));image.src=url;});
-      if(!img.naturalWidth||!img.naturalHeight||img.naturalWidth*img.naturalHeight>40000000)throw new Error('A resolução da foto é muito grande. Escolha uma imagem menor.');
-      const canvas=document.createElement('canvas');canvas.width=canvas.height=384;const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Seu navegador não conseguiu preparar a foto.');
-      ctx.fillStyle='#ffffff';ctx.fillRect(0,0,384,384);const side=Math.min(img.naturalWidth,img.naturalHeight);ctx.drawImage(img,(img.naturalWidth-side)/2,(img.naturalHeight-side)/2,side,side,0,0,384,384);
-      const data=canvas.toDataURL('image/jpeg',0.86);if(data.length*0.75>MAX_AVATAR)throw new Error('A foto ficou muito grande. Escolha outra imagem.');return data;
-    }finally{URL.revokeObjectURL(url);}
+  async function cropPhoto(source,isFile=false){
+    if(!source||loading||saving||!documentValue||externalChange||$('profilePanel').hidden)return;
+    if(isFile&&!validPhoto(source)){status('Escolha uma foto JPG, PNG ou WebP de até 5 MB.',true);return;}
+    stopPhoto();const version=photoVersion,key=currentKey();photoBusy=true;disabled();
+    try{
+      if(!photoCropper){if(typeof global.MinervaPhotoCropper?.create!=='function')throw new Error('O enquadramento da foto não está disponível. Atualize a página e tente novamente.');photoCropper=global.MinervaPhotoCropper.create();}
+      const data=await photoCropper.open(source);
+      if(version!==photoVersion||key!==currentKey()||!documentValue||$('profilePanel').hidden||data===null)return;
+      if(typeof data!=='string'||!/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(data)||data.length*0.75>MAX_AVATAR)throw new Error('Não foi possível preparar esta foto. Escolha outra imagem.');
+      readDraft();draft.avatarDataUrl=data;if(isFile)photoOriginal=source;dirty=true;paintIdentity(draft,documentValue.identity);status('Foto pronta. Clique em Salvar Alterações para confirmar.');
+    }catch(error){if(version===photoVersion&&key===currentKey())status(error.message||'Não foi possível enquadrar a foto.',true);}
+    finally{if(version===photoVersion){photoBusy=false;disabled();}}
   }
-  async function choosePhoto(event){const file=event.target.files?.[0];event.target.value='';if(!file)return;const version=++photoVersion,key=currentKey();try{const data=await compressPhoto(file);if(version!==photoVersion||key!==currentKey())return;readDraft();draft.avatarDataUrl=data;dirty=true;paintIdentity(draft,documentValue?.identity);disabled();status('Foto pronta. Clique em Salvar Alterações para confirmar.');}catch(error){if(version===photoVersion)status(error.message,true);}}
+  function choosePhoto(event){const file=event.target.files?.[0];event.target.value='';if(file)void cropPhoto(file,true);}
   function openUsers(){if(global.MINERVA_HOSTED!==true||account?.role!=='admin')return;hooks.close?.(false);global.MinervaTeam?.openMembers();}
   function mount(options){
     if(mounted)return;hooks=options||{};const panel=$('profilePanel');if(!panel)return;
     const controls=$('profileControls'),resources=$('profileResources'),signout=$('profileSignout'),closeButton=$('closeProfile');
-    panel.classList.add('profile-page');panel.setAttribute('role','region');panel.innerHTML='<div class="profile-page-heading"><div><span class="profile-eyebrow">Sua Conta</span><h1 id="profilePanelTitle">Meu Perfil</h1></div><div id="profileCloseHost"></div></div><div class="profile-layout"><aside class="profile-summary"><div class="profile-cover"></div><div class="profile-photo-wrap"><div id="profilePhoto" class="profile-photo"></div><button type="button" id="profileCamera" class="profile-camera" aria-label="Alterar foto">'+cameraIcon+'</button></div><strong id="profilePanelName" class="profile-panel-name"></strong><span id="profilePanelContact" class="profile-panel-contact"></span><span id="profilePanelRole" class="profile-panel-role"></span><div class="profile-photo-actions"><button type="button" class="button button-outline" id="profileChangePhoto">Alterar Foto</button><button type="button" class="profile-text-button" id="profileRemovePhoto">Remover Foto</button><small>JPG, PNG ou WebP · até 5 MB<br>A imagem será ajustada ao formato do perfil.</small><input id="profilePhotoFile" type="file" accept="image/jpeg,image/png,image/webp" hidden></div><div class="profile-access"><small>Seu Acesso</small><strong id="profileAccessLabel"></strong><span id="profileAccessDescription"></span><p id="profilePanelNote" hidden></p></div><div class="profile-side-links"><button type="button" id="profileUsersLink" hidden>'+userIcon+'<span>Usuários E Solicitações</span></button><div id="profileSignoutHost"></div></div></aside><div class="profile-content"><form id="selfProfileForm" class="profile-form"><section class="profile-card"><header class="profile-card-heading">'+userIcon+'<div><h2>Dados Pessoais</h2><p>Como você será identificado no painel.</p></div></header><div class="profile-fields">'+field('name','Nome Completo','Seu nome completo',120,true)+'<div class="profile-field profile-field-wide"><label for="profileEmail">E-mail Corporativo</label><input id="profileEmail" type="email" readonly autocomplete="email"><small>Vinculado à conta de acesso.</small></div>'+field('employeeId','Matrícula','Sua matrícula',40)+field('jobTitle','Cargo','Informe seu cargo',100)+'</div></section><section class="profile-card"><header class="profile-card-heading">'+officeIcon+'<div><h2>Local De Trabalho</h2><p>Sua área e unidade.</p></div></header><div class="profile-fields">'+field('department','Setor','Informe seu setor',100)+field('unit','Unidade','Informe sua unidade',100)+'</div></section><section class="profile-card"><header class="profile-card-heading">'+menuIcon+'<div><h2>Preferências Do Painel</h2><p>Escolha como prefere navegar.</p></div></header><label class="profile-menu-preference"><input id="profileKeepMenu" type="checkbox"><span>Manter O Menu Lateral Aberto<small>Desmarcado: o menu fica compacto, com os ícones de navegação.</small></span></label><div class="profile-locale"><span>Português (Brasil)</span><span>Horário De Brasília</span><span>Data: Dia/Mês/Ano</span></div></section><div class="profile-save-row"><small>A foto e os dados ficam vinculados à sua conta no painel.</small><button type="button" id="profileCancel" class="button button-outline">Cancelar</button><button type="submit" id="profileSave" class="button button-primary">Salvar Alterações</button></div><div id="profileSaveStatus" class="profile-save-status" role="status" aria-live="polite" hidden></div><button type="button" id="profileReload" class="profile-text-button" hidden>Recarregar Perfil</button></form><details class="profile-tools"><summary>Recursos Do Painel</summary><div id="profileToolsHost"></div></details></div></div>';
+    panel.classList.add('profile-page');panel.setAttribute('role','region');panel.innerHTML='<div class="profile-page-heading"><div><span class="profile-eyebrow">Sua Conta</span><h1 id="profilePanelTitle">Meu Perfil</h1></div><div id="profileCloseHost"></div></div><div class="profile-layout"><aside class="profile-summary"><div class="profile-cover"></div><div class="profile-photo-wrap"><div id="profilePhoto" class="profile-photo"></div><button type="button" id="profileCamera" class="profile-camera" aria-label="Alterar foto">'+cameraIcon+'</button></div><strong id="profilePanelName" class="profile-panel-name"></strong><span id="profilePanelContact" class="profile-panel-contact"></span><span id="profilePanelRole" class="profile-panel-role"></span><div class="profile-photo-actions"><button type="button" class="button button-outline" id="profileChangePhoto">Alterar Foto</button><button type="button" class="button button-outline profile-reframe-photo" id="profileReframePhoto">Enquadrar Foto</button><button type="button" class="profile-text-button" id="profileRemovePhoto">Remover Foto</button><small>JPG, PNG ou WebP · até 5 MB<br>Ajuste o enquadramento antes de salvar.</small><input id="profilePhotoFile" type="file" accept="image/jpeg,image/png,image/webp" hidden></div><div class="profile-access"><small>Seu Acesso</small><strong id="profileAccessLabel"></strong><span id="profileAccessDescription"></span><p id="profilePanelNote" hidden></p></div><div class="profile-side-links"><button type="button" id="profileUsersLink" hidden>'+userIcon+'<span>Usuários E Solicitações</span></button><div id="profileSignoutHost"></div></div></aside><div class="profile-content"><form id="selfProfileForm" class="profile-form"><section class="profile-card"><header class="profile-card-heading">'+userIcon+'<div><h2>Dados Pessoais</h2><p>Como você será identificado no painel.</p></div></header><div class="profile-fields">'+field('name','Nome Completo','Seu nome completo',120,true)+'<div class="profile-field profile-field-wide"><label for="profileEmail">E-mail Corporativo</label><input id="profileEmail" type="email" readonly autocomplete="email"><small>Vinculado à conta de acesso.</small></div>'+field('employeeId','Matrícula','Sua matrícula',40)+field('jobTitle','Cargo','Informe seu cargo',100)+'</div></section><section class="profile-card"><header class="profile-card-heading">'+officeIcon+'<div><h2>Local De Trabalho</h2><p>Sua área e unidade.</p></div></header><div class="profile-fields">'+field('department','Setor','Informe seu setor',100)+field('unit','Unidade','Informe sua unidade',100)+'</div></section><section class="profile-card"><header class="profile-card-heading">'+menuIcon+'<div><h2>Preferências Do Painel</h2><p>Escolha como prefere navegar.</p></div></header><label class="profile-menu-preference"><input id="profileKeepMenu" type="checkbox"><span>Manter O Menu Lateral Aberto<small>Desmarcado: o menu fica compacto, com os ícones de navegação.</small></span></label><div class="profile-locale"><span>Português (Brasil)</span><span>Horário De Brasília</span><span>Data: Dia/Mês/Ano</span></div></section><div class="profile-save-row"><small>A foto e os dados ficam vinculados à sua conta no painel.</small><button type="button" id="profileCancel" class="button button-outline">Cancelar</button><button type="submit" id="profileSave" class="button button-primary">Salvar Alterações</button></div><div id="profileSaveStatus" class="profile-save-status" role="status" aria-live="polite" hidden></div><button type="button" id="profileReload" class="profile-text-button" hidden>Recarregar Perfil</button></form><details class="profile-tools"><summary>Recursos Do Painel</summary><div id="profileToolsHost"></div></details></div></div>';
     $('profileCloseHost').append(closeButton);closeButton.textContent='Voltar Ao Painel';closeButton.className='button button-outline';closeButton.setAttribute('aria-label','Voltar Ao Painel');$('profileButton').removeAttribute('aria-haspopup');
     const managerField=document.createElement('div');managerField.className='profile-field profile-field-wide profile-manager-field';managerField.innerHTML='<label for="profileManagerSearch">Gestor</label><div class="profile-manager-input"><input id="profileManagerSearch" maxlength="160" placeholder="Buscar pessoa ou informar o nome do gestor" autocomplete="off" aria-controls="profileManagerOptions" aria-expanded="false"><button type="button" id="profileManagerClear" aria-label="Limpar Gestor" title="Limpar Gestor">×</button></div><div id="profileManagerOptions" class="profile-manager-options" hidden></div><small id="profileManagerHint">Selecione uma pessoa cadastrada ou informe o nome de um gestor externo ao painel. Deixe vazio se ainda não souber.</small>';$('profileField_unit').closest('.profile-fields').append(managerField);
     $('profileManagerSearch').addEventListener('focus',()=>{void loadManagers();renderManagers();});
@@ -131,8 +136,8 @@
     $('profileUsersLink').addEventListener('click',openUsers);$('selfProfileForm').addEventListener('submit',save);
     $('selfProfileForm').addEventListener('input',()=>{if(!draft||!documentValue)return;dirty=true;readDraft();paintIdentity(draft,documentValue?.identity);status('Alterações não salvas.');});
     $('profileCancel').addEventListener('click',cancel);$('profileReload').addEventListener('click',()=>{dirty=false;void load(true);$('profileReload').hidden=true;});
-    $('profileChangePhoto').addEventListener('click',()=>$('profilePhotoFile').click());$('profileCamera').addEventListener('click',()=>$('profilePhotoFile').click());$('profilePhotoFile').addEventListener('change',choosePhoto);
-    $('profileRemovePhoto').addEventListener('click',()=>{photoVersion++;readDraft();draft.avatarDataUrl='';dirty=true;paintIdentity(draft,documentValue?.identity);disabled();status('Foto removida. Clique em Salvar Alterações para confirmar.');});
+    $('profileChangePhoto').addEventListener('click',()=>$('profilePhotoFile').click());$('profileCamera').addEventListener('click',()=>$('profilePhotoFile').click());$('profilePhotoFile').addEventListener('change',choosePhoto);$('profileReframePhoto').addEventListener('click',()=>{void cropPhoto(photoOriginal||draft?.avatarDataUrl);});
+    $('profileRemovePhoto').addEventListener('click',()=>{if(loading||saving||!documentValue||externalChange)return;stopPhoto(true);readDraft();draft.avatarDataUrl='';dirty=true;paintIdentity(draft,documentValue?.identity);disabled();status('Foto removida. Clique em Salvar Alterações para confirmar.');});
     mounted=true;
   }
   global.MinervaProfile={mount,sync,open,close,applyExternalUpdate};
