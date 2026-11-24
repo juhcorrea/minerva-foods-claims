@@ -15,3 +15,18 @@
 [data-theme=dark] .correction-progress-button[aria-pressed=true]{background:#225441;color:#c2f2d6;border-color:#3c8060}
 @media(max-width:760px){.correction-progress-message{padding:0 17px 14px}}
 @media print{.correction-progress-message{display:none}.correction-progress-button{border:0;padding:0;font-size:7pt!important;background:transparent!important;color:#1d6341!important}.correction-progress-cell small{font-size:6pt!important;color:#365544!important}#correctionTable tr.correction-complete>td{background:#edf7f0!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+
+.correction-progress-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;max-width:240px}
+.correction-divergence-button{color:#805b10}
+.correction-divergence-button:hover:not(:disabled){border-color:#aa853e;background:#faf4e3}
+.correction-divergence-button[aria-pressed=true]{border-color:#c0a15f;background:#f7e8b9;color:#614710;font-weight:600}
+#correctionTable tr.correction-receipt-divergence>td{background:#fff9e9}
+#correctionTable tr.correction-receipt-divergence:hover>td{background:#fbf0d3}
+[data-theme=dark] .correction-divergence-button{color:#e8ce86}
+[data-theme=dark] .correction-divergence-button:hover:not(:disabled){border-color:#b19455;background:#4a3d23}
+[data-theme=dark] .correction-divergence-button[aria-pressed=true]{border-color:#b19455;background:#5b4820;color:#ffebad}
+[data-theme=dark] #correctionTable tr.correction-receipt-divergence>td{background:#38321f}
+[data-theme=dark] #correctionTable tr.correction-receipt-divergence:hover>td{background:#463c23}
+@media print{.correction-progress-button[aria-pressed=false]{display:none}.correction-divergence-button[aria-pressed=true]{color:#614710!important}#correctionTable tr.correction-receipt-divergence>td{background:#fff4d8!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+
+@media print{.correction-progress-cell[data-progress-done=false][data-progress-divergence=false]::after{content:"Pendente";color:var(--ink);font-size:7pt}}
