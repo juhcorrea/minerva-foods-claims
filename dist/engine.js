@@ -127,6 +127,14 @@
     return unique(splitRefParts(v).map(normalizeRef).filter(Boolean));
   }
 
+  // A placeholder such as NA is truthy but is not an order. Display the NF
+  // already recorded in the BD when the order is absent, keeping its original
+  // formatting. Matching keys and immutable source cells are unchanged.
+  function correctionReference(order,nf) {
+    const visible=value=>normalizeRef(value)?splitRefParts(value).filter(part=>normalizeRef(part)).join('; '):'';
+    return visible(order)||visible(nf);
+  }
+
   function normalizeMarket(v) {
     const n = norm(v);
     if (n === 'ME' || n === 'MERCADO EXTERNO') return 'ME';
@@ -243,9 +251,9 @@
         index.get(k).add(c);
       }
       if (otherFilters && periodEligible && war) { excludedWar++; excludedWarAmount += c.claimed; }
-      if (!insuranceClaim(r) && otherFilters && !war && !rncDate) issue('INVALID_RNC_DATE', { row: c.row, reference: c.order || c.nf, supplier, bdRows: [c.row], detail: 'Data RNC vazia ou inválida; ocorrência fora dos totais por ano.' });
-      if (!insuranceClaim(r) && c.eligible && claimedValue == null) issue('INVALID_CLAIM_AMOUNT', { row: c.row, reference: c.order || c.nf, supplier, bdRows: [c.row], detail: 'Reclamado (USD) vazio ou inválido. Valor não somado; conferir a célula AJ.' });
-      if (!insuranceClaim(r) && c.eligible && !statusKey) issue('MISSING_CLAIM_STATUS', { row: c.row, reference: c.order || c.nf, supplier, bdRows: [c.row], detail: 'Situação da BD vazia. Reclamado incluído pela regra de exclusão; confirmar a classificação antes de conciliar recebimentos.' });
+      if (!insuranceClaim(r) && otherFilters && !war && !rncDate) issue('INVALID_RNC_DATE', { row: c.row, reference: correctionReference(c.order,c.nf), supplier, bdRows: [c.row], detail: 'Data RNC vazia ou inválida; ocorrência fora dos totais por ano.' });
+      if (!insuranceClaim(r) && c.eligible && claimedValue == null) issue('INVALID_CLAIM_AMOUNT', { row: c.row, reference: correctionReference(c.order,c.nf), supplier, bdRows: [c.row], detail: 'Reclamado (USD) vazio ou inválido. Valor não somado; conferir a célula AJ.' });
+      if (!insuranceClaim(r) && c.eligible && !statusKey) issue('MISSING_CLAIM_STATUS', { row: c.row, reference: correctionReference(c.order,c.nf), supplier, bdRows: [c.row], detail: 'Situação da BD vazia. Reclamado incluído pela regra de exclusão; confirmar a classificação antes de conciliar recebimentos.' });
       if (!insuranceClaim(r) && c.eligible && !keys.length) issue('MISSING_CLAIM_REFERENCE', { row: c.row, supplier, bdRows: [c.row], detail: 'Ocorrência sem Ordem/NF válida para cruzamento.' });
     }
     const claims = all.filter(c => c.eligible);
@@ -411,7 +419,7 @@
       c.linkState = linked.length ? linked.some(i => i.grouped) ? 'grouped' : 'matched' : c.candidateControlRows.length ? 'review' : 'unmatched';
       if (c.linkState === 'unmatched' && c.controlLinkRequired) {
         supplierRow(c.supplierKey).unmatchedClaims++;
-        issue('CLAIM_WITHOUT_LINK', {row: c.row, reference: c.order || c.nf, supplier: c.supplier, bdRows: [c.row], amount: c.claimed, detail: 'Sem correspondência no Controle. Isso não comprova ausência de pagamento; revisar a referência.'});
+        issue('CLAIM_WITHOUT_LINK', {row: c.row, reference: correctionReference(c.order,c.nf), supplier: c.supplier, bdRows: [c.row], amount: c.claimed, detail: 'Sem correspondência no Controle. Isso não comprova ausência de pagamento; revisar a referência.'});
       }
     }
 
@@ -993,12 +1001,12 @@
       if(!insuranceClaim(source)&&!text(source[25])&&source.slice(0,36).some(value=>text(value)!=='')){
         meta.missingOperationRows++;
         const sgr=text(source[0]),order=text(source[22]),nf=text(source[24]),supplier=text(source[28])||'Não informado';
-        add('BD_MISSING_OPERATION','Operação em branco','BD',row,order||nf||sgr,supplier,[{row}],`BD!Z${row}: Operação em branco. Conferir e preencher na BD de origem. SGR em A${row}: ${sgr||'não informado'}; Ordem em W${row}: ${order||'não informada'}; NF em Y${row}: ${nf||'não informada'}; Negociação em AC${row}: ${supplier}. Nenhuma operação foi inferida; valores e critérios financeiros permanecem preservados.`,{sourceCells:['BD!Z'+row],cell:'Z'+row,field:'Operação',sgr,order,nf,originalOperation:source[25]??null});
+        add('BD_MISSING_OPERATION','Operação em branco','BD',row,correctionReference(order,nf)||sgr,supplier,[{row}],`BD!Z${row}: Operação em branco. Conferir e preencher na BD de origem. SGR em A${row}: ${sgr||'não informado'}; Ordem em W${row}: ${order||'não informada'}; NF em Y${row}: ${nf||'não informada'}; Negociação em AC${row}: ${supplier}. Nenhuma operação foi inferida; valores e critérios financeiros permanecem preservados.`,{sourceCells:['BD!Z'+row],cell:'Z'+row,field:'Operação',sgr,order,nf,originalOperation:source[25]??null});
       }
       meta.totalBdRows++;if(normalizeStatus(source[6])!==FORWARDED)continue;meta.forwardedBdRows++;
       if(!requiresControlLink(source)){meta.insuranceExemptBdRows++;continue;}meta.controlRequiredBdRows++;
       if(linked.has(row))continue;meta.bdWithoutControl++;
-      add('CLAIM_FORWARDED_WITHOUT_CONTROL','Ressarcimento sem vínculo no Controle','BD',row,text(source[22])||text(source[24]),text(source[28])||'Não informado',[{row}],`BD!G${row}: Claim com situação RESSARCIMENTO ENCAMINHADO na BD, fora da área Seguro em Q${row}, sem ordem/NF correspondente identificada no Controle. Conferir a referência em BD!W${row} (Ordem) / Y${row} (NF) ou o lançamento no Controle; a ausência de vínculo pode decorrer de uma referência divergente.`,{sourceCells:['BD!G'+row,'BD!Q'+row,'BD!W'+row,'BD!Y'+row],negotiationArea:text(source[16])});
+      add('CLAIM_FORWARDED_WITHOUT_CONTROL','Ressarcimento sem vínculo no Controle','BD',row,correctionReference(source[22],source[24]),text(source[28])||'Não informado',[{row}],`BD!G${row}: Claim com situação RESSARCIMENTO ENCAMINHADO na BD, fora da área Seguro em Q${row}, sem ordem/NF correspondente identificada no Controle. Conferir a referência em BD!W${row} (Ordem) / Y${row} (NF) ou o lançamento no Controle; a ausência de vínculo pode decorrer de uma referência divergente.`,{sourceCells:['BD!G'+row,'BD!Q'+row,'BD!W'+row,'BD!Y'+row],negotiationArea:text(source[16])});
     }
     appendBaseYearCorrections(model,changes,bdRows);meta.warningCount=rows.length;meta.yearCorrectionRows=meta.yearDifferences;model.baseReconciliation={rows,meta};
   }

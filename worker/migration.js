@@ -1,4 +1,4 @@
-import {CORRECTION_PROGRESS_LEGACY_KEY,CorrectionProgressError,readCorrectionProgress,readCorrectionProgressMetadata} from './correction-progress.js';
+import {CORRECTION_PROGRESS_LEGACY_KEY,CorrectionProgressError,readCorrectionProgress,readCorrectionProgressMetadata,isCorrectionProgressState} from './correction-progress.js';
 /* Private migration snapshot. This module only reads the allowlisted operational
  * objects below; it deliberately never enumerates the bucket or writes data. */
 const MIGRATION_OBJECTS = Object.freeze([
@@ -45,9 +45,9 @@ function migrationProgress(value) {
   if (!migrationRecord(value) || value.schemaVersion !== 1 || !migrationRecord(value.entries)) migrationInvalid();
   const entries = Object.create(null);
   for (const [key, record] of Object.entries(value.entries)) {
-    if (!/^[a-f0-9]{64}$/.test(key) || !migrationRecord(record) || typeof record.done !== 'boolean') migrationInvalid();
+    if (!/^[a-f0-9]{64}$/.test(key) || !isCorrectionProgressState(record)) migrationInvalid();
     // SHA-256 keys identify corrections. They are data, not authentication hashes.
-    entries[key] = migrationPick(record, ['done','updatedAt','updatedBy','updatedByUserId','reportRevision']);
+    entries[key] = migrationPick(record, ['done','receiptDivergence','updatedAt','updatedBy','updatedByUserId','reportRevision']);
   }
   return {schemaVersion:1, entries};
 }

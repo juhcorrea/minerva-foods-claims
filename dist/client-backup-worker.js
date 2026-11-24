@@ -8,6 +8,9 @@ const CORRECTION_PROGRESS_KEYS=Object.freeze([CORRECTION_PROGRESS_LEGACY_KEY,...
 const cpEncoder=new TextEncoder();
 const cpPlain=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const cpKey=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
+// Old acknowledgements omit receiptDivergence; they remain valid and mean false.
+// A financial review that is still pending cannot also be marked as adjusted.
+const isCorrectionProgressState=value=>cpPlain(value)&&typeof value.done==='boolean'&&(!Object.hasOwn(value,'receiptDivergence')||typeof value.receiptDivergence==='boolean')&&!(value.done&&value.receiptDivergence);
 class CorrectionProgressError extends Error {
   constructor(status,code,message){super(message);this.name='CorrectionProgressError';this.status=status;this.code=code;}
 }
@@ -15,7 +18,7 @@ const cpFail=(status,code,message)=>{throw new CorrectionProgressError(status,co
 const cpInvalid=()=>cpFail(503,'CORRECTION_PROGRESS_INVALID','O acompanhamento das correções precisa ser conferido.');
 function cpValidate(value,prefix){
   if(!cpPlain(value)||value.schemaVersion!==1||!cpPlain(value.entries))cpInvalid();
-  for(const [key,entry]of Object.entries(value.entries))if(!cpKey(key)||(prefix!==undefined&&key[0]!==prefix)||!cpPlain(entry)||typeof entry.done!=='boolean')cpInvalid();
+  for(const [key,entry]of Object.entries(value.entries))if(!cpKey(key)||(prefix!==undefined&&key[0]!==prefix)||!isCorrectionProgressState(entry))cpInvalid();
   return value;
 }
 function cpEtag(object){if(object===null||object===undefined)return null;if(typeof object.etag!=='string'||!object.etag)cpInvalid();return object.etag;}
@@ -44,7 +47,7 @@ async function readCorrectionProgress(bucket){
   return {value:{schemaVersion:1,revision,entries},etag:revision,revision};
 }
 async function saveProgressEntry(bucket,key,entry,{validate=async()=>{},attempts=5}={}){
-  if(!cpKey(key)||!cpPlain(entry)||typeof entry.done!=='boolean'||typeof validate!=='function'||!Number.isInteger(attempts)||attempts<1||attempts>5)cpFail(400,'INVALID_CORRECTION_PROGRESS','Informe uma correção e uma marcação válidas.');
+  if(!cpKey(key)||!isCorrectionProgressState(entry)||typeof validate!=='function'||!Number.isInteger(attempts)||attempts<1||attempts>5)cpFail(400,'INVALID_CORRECTION_PROGRESS','Informe uma correção e uma marcação válidas.');
   const objectKey=CORRECTION_PROGRESS_SHARD_PREFIX+key[0]+'.json',index=parseInt(key[0],16)+1;
   for(let attempt=0;attempt<attempts;attempt++){
     const found=await cpReadObject(bucket,objectKey,index),next={schemaVersion:1,revision:crypto.randomUUID(),entries:{...(found?.value.entries||{}),[key]:entry}},body=JSON.stringify(next);
@@ -116,9 +119,9 @@ function migrationProgress(value) {
   if (!migrationRecord(value) || value.schemaVersion !== 1 || !migrationRecord(value.entries)) migrationInvalid();
   const entries = Object.create(null);
   for (const [key, record] of Object.entries(value.entries)) {
-    if (!/^[a-f0-9]{64}$/.test(key) || !migrationRecord(record) || typeof record.done !== 'boolean') migrationInvalid();
+    if (!/^[a-f0-9]{64}$/.test(key) || !isCorrectionProgressState(record)) migrationInvalid();
     // SHA-256 keys identify corrections. They are data, not authentication hashes.
-    entries[key] = migrationPick(record, ['done','updatedAt','updatedBy','updatedByUserId','reportRevision']);
+    entries[key] = migrationPick(record, ['done','receiptDivergence','updatedAt','updatedBy','updatedByUserId','reportRevision']);
   }
   return {schemaVersion:1, entries};
 }

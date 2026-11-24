@@ -61,6 +61,16 @@ test('restore rejects nonempty destination and damaged checksum before any write
   await assert.rejects(restoreMigrationObjects(empty,await pack()),/Confirme explicitamente/);assert.deepEqual(empty.writes,[]);
 });
 
+test('receipt divergence survives backup restore and malformed states fail before any writes',async()=>{
+ const original=fixtures(),key='b'.repeat(64);original[keys[1]].entries[key]={done:false,receiptDivergence:true,updatedAt:stamp,updatedBy:'Financeiro Exemplo',updatedByUserId:'owner',reportRevision:'older-report'};
+ const backup=await pack(original),destination=new Bucket();await restoreMigrationObjects(destination,backup,{confirmNewEmptyBucket:true});assert.deepEqual(destination.objects.get(keys[1]).value,original[keys[1]],'New divergence and unchanged legacy done records both survive');
+ for(const invalid of [{done:true,receiptDivergence:true},{done:false,receiptDivergence:'true'},{done:false,receiptDivergence:null}]){
+  const altered=await pack(),file='dados/acompanhamento-correcoes.json',value=JSON.parse(new TextDecoder().decode(altered.files.get(file)));value.entries[key]=invalid;
+  const bytes=new TextEncoder().encode(JSON.stringify(value));altered.files.set(file,bytes);Object.assign(altered.manifest.files.find(item=>item.path===file),{bytes:bytes.byteLength,sha256:hash(bytes)});
+  const empty=new Bucket();await assert.rejects(restoreMigrationObjects(empty,altered,{confirmNewEmptyBucket:true}),/marcação inválida/);assert.deepEqual(empty.writes,[]);
+ }
+});
+
 test('export and restore retain all approved roles and verified Access identity without migrating legacy records',async()=>{
  const original=fixtures(),acl=original[keys[2]];
  for(const role of ['admin','reviewer','viewer']){const id='qa-'+role,email=id+'@corp.example';acl.members[id]={id,name:'QA '+role,email,status:'approved',role,requestedAt:stamp,emailVerified:true,identity:{provider:'cloudflare-access',issuer:'https://qa-team.cloudflareaccess.com',subject:id,email}};}

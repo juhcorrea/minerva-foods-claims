@@ -1,7 +1,7 @@
 import {buildMigrationFiles, MigrationExportError} from './migration.js';
 import {migrationZipResponse} from './zip.js';
 import {createClientReportHandler} from './client-report.js';
-import {CorrectionProgressError,readCorrectionProgress,readCorrectionProgressMetadata,correctionProgressRevision,saveProgressEntry} from './correction-progress.js';
+import {CorrectionProgressError,readCorrectionProgress,readCorrectionProgressMetadata,correctionProgressRevision,saveProgressEntry,isCorrectionProgressState} from './correction-progress.js';
 import {CloudflareAccessError, cloudflareAccessConfig, createCloudflareAccessVerifier} from './cloudflare-access.js';
 import {UserProfileError,USER_PROFILE_BODY_BYTES,readUserProfile,saveUserProfile,saveMemberProfile,readProfileDirectory,validateProfileManager} from './user-profile.js';
 
@@ -338,7 +338,7 @@ async function correctionProgressKey(group) {
  return hashToken(JSON.stringify({schema:1,refs,changes}));
 }
 function publicCorrectionProgress(key,entry) {
- return {key,done:entry?.done===true,updatedAt:typeof entry?.updatedAt==='string'?entry.updatedAt:null,updatedBy:typeof entry?.updatedBy==='string'?actorLabel(entry.updatedBy,entry.updatedByUserId):null};
+ return {key,done:entry?.done===true,receiptDivergence:entry?.receiptDivergence===true,updatedAt:typeof entry?.updatedAt==='string'?entry.updatedAt:null,updatedBy:typeof entry?.updatedBy==='string'?actorLabel(entry.updatedBy,entry.updatedByUserId):null};
 }
 async function hydrateCorrectionProgress(bucket,model,engine,bdRows,controlRows) {
  const found=await readCorrectionProgress(bucket),{value}=found;
@@ -363,7 +363,7 @@ function correctionOptions(value,url,saved,engine) {
  return analysisOptions(query,saved,engine);
 }
 async function saveCorrectionProgress(bucket,access,body,url,engine) {
- if(Object.keys(body).some(key=>!['key','done','reportRevision','options'].includes(key))||typeof body.key!=='string'||!(/^[a-f0-9]{64}$/).test(body.key)||typeof body.done!=='boolean'||typeof body.reportRevision!=='string'||!body.reportRevision||body.reportRevision.length>100)fail(400,'INVALID_CORRECTION_PROGRESS','Informe uma correção e uma marcação válidas.');
+ if(Object.keys(body).some(key=>!['key','done','receiptDivergence','reportRevision','options'].includes(key))||typeof body.key!=='string'||!(/^[a-f0-9]{64}$/).test(body.key)||!isCorrectionProgressState(body)||typeof body.reportRevision!=='string'||!body.reportRevision||body.reportRevision.length>100)fail(400,'INVALID_CORRECTION_PROGRESS','Informe uma correção e uma marcação válidas.');
  const {value:saved}=await jsonObject(bucket,REPORT_KEY);
  if(!saved||saved.revision!==body.reportRevision)fail(409,'REPORT_CHANGED','O relatório foi atualizado. Atualize a visão antes de marcar a correção.');
  if(saved.schemaVersion!==1||!Array.isArray(saved.bd)||!Array.isArray(saved.control))fail(503,'REPORT_INVALID','O relatório publicado precisa ser conferido pelas administradoras.');
@@ -372,7 +372,7 @@ async function saveCorrectionProgress(bucket,access,body,url,engine) {
  const reviewModel=engine.getCorrectionReviewModel?.(model)||model;
  const keys=await Promise.all([...(reviewModel.correctionGroups||[]).map(correctionProgressKey),...(engine.correctionReviewTargets?.(model,saved.bd,saved.control)||[]).map(target=>hashToken(target.identity))]);
  if(!keys.includes(body.key))fail(409,'CORRECTION_CHANGED','A divergência mudou ou não está neste recorte. Atualize a visão antes de marcar.');
- const actor=access.admin||access.member,entry={done:body.done,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,reportRevision:body.reportRevision};
+ const actor=access.admin||access.member,entry={done:body.done,receiptDivergence:body.receiptDivergence===true,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,reportRevision:body.reportRevision};
  const result=await saveProgressEntry(bucket,body.key,entry,{validate:async()=>{
   await confirmMutationPermission(bucket,access,['admin','editor','reviewer']);
   if((await reportMeta(bucket))?.revision!==body.reportRevision)fail(409,'REPORT_CHANGED','O relatório foi atualizado. Atualize a visão antes de marcar a correção.');

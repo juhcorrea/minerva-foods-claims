@@ -86,6 +86,8 @@ test('malformed known objects and non-scalar allowlisted data fail instead of ex
     [reportKey,{...seed()[reportKey],bd:[['Value'],[{token:'hidden'}]]}],
     [progressKey,{schemaVersion:1,entries:{invalid:{done:true}}}],
     [progressKey,{schemaVersion:1,entries:{[correctionKey]:{done:'yes'}}}],
+    [progressKey,{schemaVersion:1,entries:{[correctionKey]:{done:false,receiptDivergence:'true'}}}],
+    [progressKey,{schemaVersion:1,entries:{[correctionKey]:{done:true,receiptDivergence:true}}}],
     [aclKey,{...seed()[aclKey],members:{bad:{id:'bad',name:{token:'hidden'}}}}],
   ];
   for(const [key,value] of cases){const data=seed();data[key]=value;await assert.rejects(run(new ReadOnlyR2(data)),error=>error.status===503&&error.code==='MIGRATION_INVALID_STORAGE');}

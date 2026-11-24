@@ -50,7 +50,7 @@ async function mark(env,admin,snapshot,group,done,extra={}){return call(env,'/ap
 test('correction follow-up persists for viewers across sessions without changing report data',async()=>{
  const env=environment(),admin=await login(env),visitor=await ask(env);await approve(env,admin.cookie,visitor.body.userId);
  const saved=await publish(env,admin);assert.equal(saved.status,200);const snapshot=saved.body,g=snapshot.model.correctionGroups[0];
- assert.match(g.progress.key,/^[a-f0-9]{64}$/);assert.deepEqual(g.progress,{key:g.progress.key,done:false,updatedAt:null,updatedBy:null});
+ assert.match(g.progress.key,/^[a-f0-9]{64}$/);assert.deepEqual(g.progress,{key:g.progress.key,done:false,receiptDivergence:false,updatedAt:null,updatedBy:null});
  const financialBefore=env.BUCKET.objects.get('private/report-latest-v1.json').text;
  const result=await mark(env,admin,snapshot,g,true);assert.equal(result.status,200);assert.equal(result.body.progress.done,true);assert.equal(result.body.progress.updatedBy,'Owner');assert.equal(result.body.progress.updatedByUserId,undefined);
  assert.equal(result.body.reportRevision,snapshot.revision);assert.equal(env.BUCKET.objects.get('private/report-latest-v1.json').text,financialBefore);
@@ -67,9 +67,24 @@ test('follow-up mutation enforces admin authorization, origin, boolean and curre
  assert.equal((await call(env,'/api/correction-progress',null,{method:'POST',body})).status,401);
  assert.equal((await call(env,'/api/correction-progress',visitor.cookie,{method:'POST',body})).status,403);
  assert.equal((await call(env,'/api/correction-progress',admin.cookie,{method:'POST',body,csrf:false})).status,403);
- for(const bad of [{done:'true'},{done:1},{key:'x'},{reportRevision:''},{options:{...queryOptions,years:[2101]}},{options:{...queryOptions,allYears:'true'}},{options:{supplier:{}}},{updatedBy:'Forged'}])assert.equal((await call(env,'/api/correction-progress',admin.cookie,{method:'POST',body:{...body,...bad}})).status,400);
+ for(const bad of [{done:'true'},{done:1},{receiptDivergence:true},{receiptDivergence:'true'},{receiptDivergence:1},{receiptDivergence:null},{key:'x'},{reportRevision:''},{options:{...queryOptions,years:[2101]}},{options:{...queryOptions,allYears:'true'}},{options:{supplier:{}}},{updatedBy:'Forged'}])assert.equal((await call(env,'/api/correction-progress',admin.cookie,{method:'POST',body:{...body,...bad}})).status,400);
  assert.equal((await call(env,'/api/correction-progress',admin.cookie,{method:'POST',body:{...body,key:'f'.repeat(64)}})).status,409);
  assert.equal(env.BUCKET.objects.has(PROGRESS_KEY),false);
+});
+
+test('receipt divergence is a shared unresolved state, switches to adjusted and remains separate from source values',async()=>{
+ const env=environment(),admin=await login(env),visitor=await ask(env);await approve(env,admin.cookie,visitor.body.userId);
+ const first=(await publish(env,admin)).body,target=engine.buildCorrectionReviewItems(first.model).find(item=>!item.groups.length),financialBefore=env.BUCKET.objects.get('private/report-latest-v1.json').text;
+ assert(target?.progress?.key,'Non-automatic correction queue items also support the new state');
+ let priorRevision=first.model.meta.correctionProgressRevision;
+ for(const state of [{done:false,receiptDivergence:true},{done:true,receiptDivergence:false},{done:false,receiptDivergence:true},{done:false}]){
+  const saved=await mark(env,admin,first,target,state.done,state);assert.equal(saved.status,200,JSON.stringify(saved.body));
+  assert.equal(saved.body.progress.done,state.done);assert.equal(saved.body.progress.receiptDivergence,state.receiptDivergence===true);assert.equal(saved.body.progress.updatedBy,'Owner');assert(saved.body.progress.updatedAt);
+  assert.notEqual(saved.body.correctionProgressRevision,priorRevision);priorRevision=saved.body.correctionProgressRevision;
+  const loaded=(await call(env,'/api/report?years=2025,2026',visitor.cookie)).body,progress=engine.buildCorrectionReviewItems(loaded.model).find(item=>item.progress.key===target.progress.key).progress;
+  assert.deepEqual(progress,saved.body.progress);assert.deepEqual(loaded.model.summary,first.model.summary);assert.equal(env.BUCKET.objects.get('private/report-latest-v1.json').text,financialBefore);
+ }
+ assert.equal((await mark(env,visitor,first,target,false,{receiptDivergence:true})).status,403);
 });
 
 test('reordered rows retain progress; new divergences and stale reports cannot reuse it',async()=>{

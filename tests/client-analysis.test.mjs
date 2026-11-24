@@ -33,8 +33,8 @@ test('projected browser calculation preserves every financial and audit result a
   for(const selection of variants){
     const options={years:[2026],asOf:'2026-11-10',lossFormula:'subtract-negotiating',...selection},actual=await f.runner.analyze(f.manifest,options),expected=E.analyze(f.input.bd,f.input.control,options);
     delete expected.unmatchedControls;expected.meta.correctionProgressRevision='none';
-    for(const group of expected.correctionGroups||[])group.progress={key:await correctionProgressKey(group,webcrypto),done:false,updatedAt:null,updatedBy:null};
-    for(const {item,identity}of E.correctionReviewTargets(expected,f.input.bd,f.input.control)){const reviewProgress={key:hash(identity),done:false,updatedAt:null,updatedBy:null};for(const source of [...item.groups,...item.audits,...item.issues])source.reviewProgress=reviewProgress;}
+    for(const group of expected.correctionGroups||[])group.progress={key:await correctionProgressKey(group,webcrypto),done:false,receiptDivergence:false,updatedAt:null,updatedBy:null};
+    for(const {item,identity}of E.correctionReviewTargets(expected,f.input.bd,f.input.control)){const reviewProgress={key:hash(identity),done:false,receiptDivergence:false,updatedAt:null,updatedBy:null};for(const source of [...item.groups,...item.audits,...item.issues])source.reviewProgress=reviewProgress;}
     assert.deepEqual(actual,expected,JSON.stringify(selection));assert(!JSON.stringify(actual).includes('PRIVATE UNUSED'));
   }
   assert.equal(f.reads.length,f.manifest.parts.length,'Subsequent filters reuse this revision only in memory');
@@ -52,6 +52,21 @@ test('worker hydrates every queue item and explicit new marks override legacy fa
  for(const item of items)f.manifest.progress.entries[item.progress.key]={done:true,updatedAt:'2026-11-10T12:00:00Z',updatedBy:'QA Reviewer'};
  f.manifest.progress.revision='marked';const marked=await f.runner.analyze(f.manifest,options);assert(E.buildCorrectionReviewItems(marked).every(item=>item.progress.done));
  const key=items[0].progress.key;f.manifest.progress.entries[key].done=false;const undone=await f.runner.analyze(f.manifest,options);assert.equal(E.buildCorrectionReviewItems(undone).find(item=>item.progress.key===key).progress.done,false);assert.equal(JSON.stringify(f.input),baseline);assert.deepEqual(undone.summary,first.summary);assert.equal(f.reads.length,f.manifest.parts.length);
+});
+
+test('receipt divergence survives browser reloads and filters without changing finances or excluded Gado scope',async()=>{
+ const input=sources();input.control[0][2]='Setor';input.control[2][2]='Gado Vivo';
+ const f=manifestFixture(input),options={allYears:true,asOf:'2026-11-24'},first=await f.runner.analyze(f.manifest,options),items=E.buildCorrectionReviewItems(first);
+ assert(items.length);assert(items.every(item=>!item.controlRows.includes(3)));
+ const key=items[0].progress.key;f.manifest.progress={revision:'finance-review',entries:{[key]:{done:false,receiptDivergence:true,updatedAt:'2026-11-24T12:00:00Z',updatedBy:'Reviewer Example'}}};
+ const reads=f.reads.length,marked=await f.runner.analyze(f.manifest,options),current=E.buildCorrectionReviewItems(marked).find(item=>item.progress.key===key);
+ assert.equal(current.progress.done,false);assert.equal(current.progress.receiptDivergence,true);assert.equal(current.progress.updatedBy,'Reviewer Example');
+ assert.deepEqual(marked.summary,first.summary);assert.equal(f.reads.length,reads);
+ const next=manifestFixture(input);next.manifest.progress=f.manifest.progress;
+ const reloaded=await next.runner.analyze(next.manifest,options);assert.equal(E.buildCorrectionReviewItems(reloaded).find(item=>item.progress.key===key).progress.receiptDivergence,true);
+ f.manifest.progress.entries[key]={done:true,receiptDivergence:false,updatedAt:'2026-11-24T13:00:00Z',updatedBy:'Second Reviewer'};
+ const adjusted=await f.runner.analyze(f.manifest,options),done=E.buildCorrectionReviewItems(adjusted).find(item=>item.progress.key===key).progress;
+ assert.equal(done.done,true);assert.equal(done.receiptDivergence,false);assert.deepEqual(adjusted.summary,first.summary);
 });
 
 test('a legacy-only acknowledged correction is inherited and an explicit queue undo overrides it',async()=>{

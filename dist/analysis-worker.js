@@ -65,13 +65,14 @@
       const rows=await load(manifest,onProgress);onProgress({phase:'analysis'});
       const model=engine.analyze(rows.bd,rows.control,options),progress=manifest.progress||{entries:{},revision:'none'};
       if(typeof progress.revision!=='string'||!progress.entries||typeof progress.entries!=='object'||Array.isArray(progress.entries))failure('O acompanhamento das correções está inválido.');
-      await Promise.all((model.correctionGroups||[]).map(async group=>{
+      const reviewModel=engine.getCorrectionReviewModel?.(model)||model;
+      await Promise.all((reviewModel.correctionGroups||[]).map(async group=>{
         const key=await correctionProgressKey(group,crypto),entry=progress.entries[key];
-        group.progress={key,done:entry?.done===true,updatedAt:typeof entry?.updatedAt==='string'?entry.updatedAt:null,updatedBy:typeof entry?.updatedBy==='string'?entry.updatedBy:null};
+        group.progress={key,done:entry?.done===true,receiptDivergence:entry?.receiptDivergence===true,updatedAt:typeof entry?.updatedAt==='string'?entry.updatedAt:null,updatedBy:typeof entry?.updatedBy==='string'?entry.updatedBy:null};
       }));
       await Promise.all(engine.correctionReviewTargets(model,rows.bd,rows.control).map(async({item,identity})=>{
         const key=await digest(crypto,new TextEncoder().encode(identity)),entry=progress.entries[key]??engine.correctionReviewLegacyProgress(item);
-        const reviewProgress={key,done:entry?.done===true,updatedAt:typeof entry?.updatedAt==='string'?entry.updatedAt:null,updatedBy:typeof entry?.updatedBy==='string'?entry.updatedBy:null};
+        const reviewProgress={key,done:entry?.done===true,receiptDivergence:entry?.receiptDivergence===true,updatedAt:typeof entry?.updatedAt==='string'?entry.updatedAt:null,updatedBy:typeof entry?.updatedBy==='string'?entry.updatedBy:null};
         for(const source of [...item.groups,...item.audits,...item.issues])source.reviewProgress=reviewProgress;
       }));
       model.meta={...model.meta,correctionProgressRevision:progress.revision};

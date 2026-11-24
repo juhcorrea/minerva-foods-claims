@@ -100,7 +100,7 @@ test('the modal labels equal reclaimed and integral as correct even when BD tota
 });
 
 function progressFixture(role='reviewer'){
- const h=appFixture(),calls=[],messages=[];let renders=0,respond=async payload=>({progress:{key:payload.key,done:payload.done,updatedBy:'Synthetic reviewer',updatedAt:'2026-11-10T12:00:00.000Z'},correctionProgressRevision:'progress-new'});
+ const h=appFixture(),calls=[],messages=[];let renders=0,respond=async payload=>({progress:{key:payload.key,done:payload.done,receiptDivergence:payload.receiptDivergence===true,updatedBy:'Synthetic reviewer',updatedAt:'2026-11-10T12:00:00.000Z'},correctionProgressRevision:'progress-new'});
  h.model.meta={years:[2026],allYears:true,asOf:'2026-11-10'};Object.assign(h.context.state,{view:'corrections',publishedMeta:{revision:'source-revision'},bd:null,control:null});
  h.context.window.MinervaTeam={getProfile:()=>({id:'synthetic-user',role}),setCorrectionProgress:async payload=>{calls.push(payload);return respond(payload);}};
  h.context.$=()=>({open:false});h.context.setText=(id,text)=>messages.push({id,text});h.context.currentScenario=()=> 'corrected';h.context.renderCorrections=()=>renders++;
@@ -151,4 +151,42 @@ test('correction screen helpers, details and queue worksheets share the correcti
  assert.deepEqual(plain(groups.map(group=>group.id)),['g3']);assert.equal(rows.length,1);assert(!rows[0].controlRows.includes(999));assert(!rows[0].reference.includes('GADO EXCLUIDO'));
  h.context.correctionDetail(rows[0].id);assert(!h.details[0].html.includes('GADO EXCLUIDO'));assert(!h.details[0].html.includes('999'));
  h.context.correctionWorksheets({});assert.equal(h.sheets.Correcoes.rows.length,1);assert.equal(h.sheets.Conferencias.rows.length,0);assert(!JSON.stringify(h.sheets).includes('GADO EXCLUIDO'));assert.equal(JSON.stringify(raw),before);
+});
+
+
+test('receipt divergence is exclusive, shared by list/detail/Excel and does not change financial diagnostics',async()=>{
+ const h=progressFixture();hydrateReview(h.model);const item=h.context.reviewRows().find(row=>row.groups.length>1),key=item.progress.key,problems=JSON.stringify(item.problems),amount=item.referenceAmount;
+ const divergent=row=>Object.assign(h.button(row),{dataset:{correctionProgress:row.progress.key,progressAction:'receipt-divergence'}}),current=()=>h.context.reviewRows().find(row=>row.progress.key===key);
+ const initialHtml=h.context.correctionProgressCell(item);assert(initialHtml.includes('Divergência Recebimento'));assert(initialHtml.includes('data-progress-action="receipt-divergence"'));assert.equal((initialHtml.match(/aria-pressed="false"/g)||[]).length,2);
+ await h.context.toggleCorrectionProgress(divergent(item));let row=current();assert.equal(row.progress.done,false);assert.equal(row.progress.receiptDivergence,true);assert.equal(JSON.stringify(row.problems),problems);assert.equal(row.referenceAmount,amount);
+ const html=h.context.correctionProgressCell(row);assert(html.includes('data-progress-divergence="true"'));assert(html.includes('Desmarcar divergência recebimento'));assert(html.includes('Synthetic reviewer'));h.context.correctionDetail(row.id);assert(h.details.at(-1).html.includes('Divergência Recebimento'));
+ h.applied.correctionProgressFilter=['pending'];assert(!h.context.reviewRows().some(row=>row.progress.key===key));h.applied.correctionProgressFilter=['done'];assert(!h.context.reviewRows().some(row=>row.progress.key===key));h.applied.correctionProgressFilter=['receipt-divergence'];assert.equal(h.context.reviewRows().length,1);
+ h.context.correctionWorksheets({});const sheet=h.sheets['Fila de conferencia'];assert.equal(sheet.rows[0][sheet.headers.indexOf('Acompanhamento')],'Divergência Recebimento');assert.equal(sheet.rows[0][sheet.headers.indexOf('Marcado por')],'Synthetic reviewer');assert(sheet.rows[0][sheet.headers.indexOf('Marcado em (Brasília)')]);
+ const changes=h.sheets.Correcoes;assert(changes.rows.length);for(const cells of changes.rows){assert.equal(cells[changes.headers.indexOf('Ajustado na planilha')],'Não');assert.equal(cells[changes.headers.indexOf('Acompanhamento')],'Divergência Recebimento');assert.equal(cells[changes.headers.indexOf('Marcado por')],'Synthetic reviewer');}
+ h.applied.correctionProgressFilter=[];await h.context.toggleCorrectionProgress(h.button(row));row=current();assert.equal(row.progress.done,true);assert.equal(row.progress.receiptDivergence,false,'Marking corrected removes the pending-finance flag');await h.context.toggleCorrectionProgress(divergent(row));row=current();assert.equal(row.progress.done,false);assert.equal(row.progress.receiptDivergence,true,'Marking divergent removes completion');await h.context.toggleCorrectionProgress(divergent(row));row=current();assert.equal(row.progress.done,false);assert.equal(row.progress.receiptDivergence,false);assert.equal(JSON.stringify(row.problems),problems);assert.equal(row.referenceAmount,amount);assert(h.calls.every(call=>typeof call.done==='boolean'&&typeof call.receiptDivergence==='boolean'&&!(call.done&&call.receiptDivergence)));
+});
+
+test('divergence filter combines with completion and column filters without including unreviewed rows',()=>{
+ const h=appFixture();hydrateReview(h.model);const rows=h.context.reviewRows(),marked=rows[0],divergent=rows[1];for(const source of [...marked.groups,...marked.audits,...marked.issues])source.reviewProgress.done=true;for(const source of [...divergent.groups,...divergent.audits,...divergent.issues])source.reviewProgress.receiptDivergence=true;
+ h.applied.correctionProgressFilter=['done','receipt-divergence'];assert.equal(h.context.reviewRows().length,2);h.applied.correctionProgressFilter=['pending'];assert.equal(h.context.reviewRows().length,rows.length-2);h.applied.correctionProgressFilter=[];h.F.importState({tables:[{id:'correctionTable',filters:[{column:7,values:['Divergência Recebimento']}],sort:null}]});assert.equal(h.context.reviewRows().length,1);assert.equal(h.context.reviewRows()[0].progress.key,divergent.progress.key);
+});
+
+test('two status buttons for one item cannot send concurrent conflicting writes',async()=>{
+ const h=progressFixture();hydrateReview(h.model);const row=h.context.reviewRows()[0];let finish;h.respond(()=>new Promise(resolve=>{finish=resolve;}));
+ const first=h.context.toggleCorrectionProgress(h.button(row));await h.context.toggleCorrectionProgress({...h.button(row),dataset:{correctionProgress:row.progress.key,progressAction:'receipt-divergence'}});assert.equal(h.calls.length,1);finish({progress:{key:row.progress.key,done:true,receiptDivergence:false},correctionProgressRevision:'saved'});await first;
+ h.respond(async payload=>({progress:{key:payload.key,done:payload.done,receiptDivergence:payload.receiptDivergence}}));await h.context.toggleCorrectionProgress({...h.button(row),dataset:{correctionProgress:row.progress.key,progressAction:'receipt-divergence'}});assert.equal(h.calls.length,2);assert.equal(h.context.reviewRows().find(item=>item.progress.key===row.progress.key).progress.receiptDivergence,true);
+});
+
+test('correction summary separates corrected, receipt divergence and pending counts',()=>{
+ const h=appFixture();hydrateReview(h.model);const rows=h.context.reviewRows();for(const source of [...rows[0].groups,...rows[0].audits,...rows[0].issues])source.reviewProgress.done=true;for(const source of [...rows[1].groups,...rows[1].audits,...rows[1].issues])source.reviewProgress.receiptDivergence=true;
+ const texts={},node={querySelectorAll:()=>[],setAttribute(){}};h.model.meta={months:[]};Object.assign(h.context,{$:()=>node,populateAnalysts(){},cleanMonths:()=>[],analysisPeriodLabel:()=>'',setText:(id,value)=>texts[id]=value,paged(){}});vm.runInContext(between(app,'  function renderCorrections','  function correctionDetail'),h.context);h.context.renderCorrections();assert(texts.correctionFilterSummary.includes('1 ajustados · 1 com divergência recebimento · '+(rows.length-2)+' pendentes'));assert.equal(texts.correctionCount,String(rows.length));
+});
+
+
+test('historical NA order uses the recorded NF through list, copy control, detail title and Excel',()=>{
+ const h=appFixture(),bd=Array(64).fill(null);Object.assign(bd,{0:'NF-QA',1:'2022-01-13',3:'ME',6:'RESSARCIMENTO ENCAMINHADO',22:'NA',24:'000123',25:'EXPORTAÇÃO - CTNR',28:'Supplier QA',35:100,40:80});
+ const bh=Object.assign(Array(64).fill(null),{0:'Nº SGR',1:'Data RNC',3:'Mercado',6:'Situação',10:'Motivo',22:'Ordem',24:'NF',25:'Operação',28:'Negociação',35:'Reclamado (USD)',40:'Recebido (USD)',56:'Analista'}),ch=Object.assign(Array(32).fill(null),{1:'Ano Entrada',2:'Setor',3:'Mercado',7:'Referência (Ordem/NF)',10:'Fornecedor',11:'Tipo de Negociação',12:'Status Pagamento',13:'Data Pagamento',14:'Valor USD',17:'Data compensação',19:'Valor Recebido USD',20:'Valor Integral Claim',30:'Ano Compensação',31:'Analista'});
+ const model=engine.analyze([bh,bd],[ch],{allYears:false,years:[2026],asOf:'2026-11-24'});Object.assign(h.model,model);hydrateReview(h.model);vm.runInNewContext(fs.readFileSync(require.resolve('../dist/copy-reference.js'),'utf8'),{window:h.context.window,document:{addEventListener(){}}});
+ const row=h.context.reviewRows().find(row=>row.bdRows.includes(2));assert(row);assert.equal(row.reference,'000123');const cells=h.context.reviewCells(row);assert(cells[0].includes('data-copy-reference="000123"'));assert(!cells[0].includes('>NA<'));
+ h.context.correctionDetail(row.id);assert.equal(h.details.at(-1).title,'Conferência · 000123');h.context.correctionWorksheets({});assert.equal(h.sheets['Fila de conferencia'].rows[0][0],'000123');assert(h.sheets.Conferencias.rows.every(cells=>cells[2]==='000123'));assert.equal(bd[22],'NA');assert.equal(bd[24],'000123');
 });

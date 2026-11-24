@@ -188,7 +188,11 @@ test('browser reviewer only updates progress; delegated admin can backup and los
  const f=await fixture(),published=await f.publish(),member=await f.call('/api/auth/request',{method:'POST',body:{name:'QA Roles',email:'qa-roles@corp.example'}}),path='/api/members/'+member.body.userId;
  await f.call(path+'/approve',{cookie:f.admin,method:'POST',body:{}});await f.call(path+'/role',{cookie:f.admin,method:'POST',body:{role:'reviewer'}});
  const manifest=(await f.call('/api/client-report',{cookie:member.cookie})).body,key='8'.repeat(64),body={key,done:true,reportRevision:published.revision};
- for(const done of [true,false]){const saved=await f.call('/api/correction-progress',{cookie:member.cookie,method:'POST',body:{...body,done}});assert.equal(saved.status,200);assert.equal(saved.body.progress.done,done);}
+ for(const state of [{done:true},{done:false,receiptDivergence:true},{done:true,receiptDivergence:false},{done:false}]){
+  const saved=await f.call('/api/correction-progress',{cookie:member.cookie,method:'POST',body:{...body,...state}});assert.equal(saved.status,200);assert.equal(saved.body.progress.done,state.done);assert.equal(saved.body.progress.receiptDivergence,state.receiptDivergence===true);
+  const reloaded=(await f.call('/api/client-report/progress',{cookie:f.admin})).body;assert.deepEqual(reloaded.entries[key],saved.body.progress);
+ }
+ for(const state of [{done:true,receiptDivergence:true},{done:false,receiptDivergence:'true'},{done:false,receiptDivergence:null},{done:false,receiptDivergence:1},{done:false,receiptDivergence:{}}])assert.equal((await f.call('/api/correction-progress',{cookie:member.cookie,method:'POST',body:{...body,...state}})).status,400);
  assert.equal((await f.call('/api/correction-progress',{cookie:member.cookie,method:'POST',body,csrf:false})).status,403);
  for(const route of ['/api/client-report/start','/api/client-report/cleanup','/api/client-report/'+published.revision+'/parts','/api/client-report/'+published.revision+'/commit','/api/client-report/upgrade/start','/api/client-report/upgrade/part','/api/client-report/upgrade/commit','/api/report',path+'/role'])assert.equal((await f.call(route,{cookie:member.cookie,method:'POST',body:{}})).status,403,route);
  for(const route of ['/api/members','/api/client-report/backup','/api/client-report/backup-source?part=0',manifest.parts[0].url+'&original=1'])assert.equal((await f.call(route,{cookie:member.cookie})).status,403,route);

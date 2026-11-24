@@ -49,10 +49,21 @@ test('full reads compute revision from the same object versions that supplied th
  const snapshot=await readCorrectionProgress(bucket);assert.equal(snapshot.value.entries[a].done,true);assert.notEqual(snapshot.revision,(await readCorrectionProgressMetadata(bucket)).revision);
 });
 test('large progress backup roundtrip preserves every entry while each stored object stays below D1 limits',async()=>{
- const entries=Object.fromEntries(Array.from({length:10000},(_,i)=>[key('large-'+i),entry(i%3!==0)])),logical={schemaVersion:1,entries},parts=partitionCorrectionProgress(logical),bucket=new Bucket();
+ const entries=Object.fromEntries(Array.from({length:10000},(_,i)=>[key('large-'+i),{...entry(i%3!==0),...(i%3===0?{receiptDivergence:true}:{})}])),logical={schemaVersion:1,entries},parts=partitionCorrectionProgress(logical),bucket=new Bucket();
  assert(Buffer.byteLength(JSON.stringify(logical))>2*1024*1024);assert.equal(parts.length,16);for(const part of parts){assert(part.body.byteLength<CORRECTION_PROGRESS_OBJECT_BYTES);await bucket.put(part.key,part.body);}
  const sourceData=new TextEncoder().encode('Synthetic source'),exported=await buildMigrationFiles({bucket,source:{data:sourceData,sha256:createHash('sha256').update(sourceData).digest('hex'),commitSha:'a'.repeat(40),fileCount:1,restorationInstructions:'Use an empty offline destination.'}});
  const files=new Map(exported.files.filter(file=>file.name!=='MANIFESTO.json').map(file=>[file.name,file.data])),checked=await validateMigrationBackup(exported.manifest,files),destination=new Bucket();
  const restored=await restoreMigrationObjects(destination,checked,{confirmNewEmptyBucket:true});assert.equal(restored.writtenKeys.length,16);assert(!destination.objects.has(CORRECTION_PROGRESS_LEGACY_KEY));
  assert.deepEqual({...((await readCorrectionProgress(destination)).value.entries)},entries);assert.equal(exported.manifest.counts.correctionEntries,10000);
+});
+
+test('storage accepts unresolved receipt divergence and rejects invalid or contradictory states without writing',async()=>{
+ const bucket=new Bucket(),hash=key('receipt-divergence'),review={...entry(false),receiptDivergence:true};
+ await saveProgressEntry(bucket,hash,review);assert.deepEqual((await readCorrectionProgress(bucket)).value.entries[hash],review);
+ const before=JSON.stringify([...bucket.objects]);
+ for(const bad of [{...entry(),receiptDivergence:true},{...entry(false),receiptDivergence:'true'},{...entry(false),receiptDivergence:null},{...entry(false),receiptDivergence:1}]){
+  await assert.rejects(saveProgressEntry(bucket,hash,bad),error=>error.code==='INVALID_CORRECTION_PROGRESS');assert.equal(JSON.stringify([...bucket.objects]),before);
+  assert.throws(()=>partitionCorrectionProgress({schemaVersion:1,entries:{[hash]:bad}}),error=>error.code==='CORRECTION_PROGRESS_INVALID');
+ }
+ await saveProgressEntry(bucket,hash,entry());assert.equal((await readCorrectionProgress(bucket)).value.entries[hash].done,true,'Legacy adjusted writes remain accepted');
 });

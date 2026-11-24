@@ -1,5 +1,6 @@
 import {cleanup} from './client-report-cleanup.js';
 import {sanitizeMigrationMaterials} from './migration.js';
+import {isCorrectionProgressState} from './correction-progress.js';
 // Small authenticated storage operations for browser-side analysis. Source
 // worksheets stay private; readers receive only the fields used by the engine.
 export const CLIENT_REPORT_PROJECTION_VERSION = 3;
@@ -165,11 +166,11 @@ export function createClientReportHandler(deps){
   return response({...meta(saved),model:null},200,{'etag':`"${id}"`});
  }
  async function saveProgress(bucket,request,access){
-  const body=await readBody(request,16384);fields(body,['key','done','reportRevision','options']);
-  if(typeof body.key!=='string'||!/^[a-f0-9]{64}$/.test(body.key)||typeof body.done!=='boolean'||!isId(body.reportRevision))fail(400,'INVALID_CORRECTION_PROGRESS','Informe uma correção e uma marcação válidas.');
+  const body=await readBody(request,16384);fields(body,['key','done','receiptDivergence','reportRevision','options']);
+  if(typeof body.key!=='string'||!/^[a-f0-9]{64}$/.test(body.key)||!isCorrectionProgressState(body)||!isId(body.reportRevision))fail(400,'INVALID_CORRECTION_PROGRESS','Informe uma correção e uma marcação válidas.');
   // This is an authorized reviewer acknowledgement only. Financial values and the
   // reconciliation are still derived from the immutable worksheets in the worker.
-  const actor=actorOf(access),entry={done:body.done,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,reportRevision:body.reportRevision};
+  const actor=actorOf(access),entry={done:body.done,receiptDivergence:body.receiptDivergence===true,updatedAt:stamp(),updatedBy:actor.name,updatedByUserId:actor.id,reportRevision:body.reportRevision};
   const result=await saveProgressEntry(bucket,body.key,entry,{validate:async()=>{
    await confirmMutationPermission(bucket,access,['admin','editor','reviewer']);
    if((await metadata(bucket))?.revision!==body.reportRevision)fail(409,'REPORT_CHANGED','O relatório mudou. Atualize a visão antes de marcar a correção.');

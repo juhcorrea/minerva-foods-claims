@@ -155,3 +155,11 @@ A demonstração pública usa apenas exemplos fictícios e não abre a administr
 Registros identificados como Gado na coluna de setor do Controle de Recebimento ficam fora da fila de Correção de Base, inclusive contagens, detalhes e exportações da aba. A exclusão se limita a essa conferência; os registros originais e os cálculos de recebimentos continuam preservados.
 
 Os critérios ficam no PDF de regras do perfil. A demonstração e os testes usam apenas dados fictícios, sem copiar planilhas, fotos, perfis, valores operacionais ou configurações privadas.
+
+## Referências e acompanhamento das correções (24/11/2026)
+
+A Correção de Base apresenta a NF válida quando a Ordem não está informada ou contém NA/N/A, mantendo o identificador para busca, cópia, detalhes e exportação. Essa apresentação não cria vínculos financeiros.
+
+O acompanhamento oferece Pendente, Já Ajustei e Divergência Recebimento como estados exclusivos. As marcações compartilhadas preservam autoria e data, permitem troca ou remoção e acompanham filtros, exportações e restauração. Divergência Recebimento indica um caso revisado que depende de conferência com o financeiro; não altera os valores das bases.
+
+A demonstração e os testes continuam usando somente dados fictícios, sem arquivos, contatos, valores operacionais, links administrativos ou credenciais de produção.

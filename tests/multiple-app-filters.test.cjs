@@ -114,9 +114,9 @@ test('multiple analyst and correction progress selections preserve OR semantics 
  f.set('analystFilter',[]);f.set('correctionProgressFilter',[]);f.apply(['analystFilter','correctionProgressFilter']);assert.equal(f.context.correctionRows().length,4);
 });
 
-test('correction progress carries the applied original scenario and plural scope rather than form drafts',async()=>{
- const f=fixture();Object.assign(f.state.model.meta,{allYears:true,years:[2021,2026],correctionScenario:'original',operations:[EX,MI],suppliers:[A,B],controlOperations:[IM]});f.state.model.correctionGroups=[{progress:{key:'synthetic-key',done:false}}];f.set('operationFilter',[IM]);f.set('supplierFilter',[]);
+test('correction progress carries applied months, original scenario and plural scope rather than form drafts',async()=>{
+ const f=fixture();Object.assign(f.state.model.meta,{allYears:true,years:[2021,2026],months:[2,11],correctionScenario:'original',operations:[EX,MI],suppliers:[A,B],controlOperations:[IM]});f.state.model.correctionGroups=[{progress:{key:'synthetic-key',done:false}}];f.set('operationFilter',[IM]);f.set('supplierFilter',[]);const months=f.node('globalMonthFilter');months.multiple=true;months.options=Array.from({length:12},(_,i)=>({value:String(i+1),selected:false}));f.set('globalMonthFilter',['8']);assert.deepEqual(f.values('globalMonthFilter'),['8']);
  f.context.activeDetail=null;f.context.reviewQueue=()=>f.state.model.correctionGroups.map(group=>({progress:group.reviewProgress||group.progress,groups:[group],audits:[],issues:[]}));
  await f.context.toggleCorrectionProgress({dataset:{correctionProgress:'synthetic-key'},disabled:false,setAttribute(){},removeAttribute(){}});
- assert.equal(f.marks.length,1);assert.equal(f.marks[0].options.correctionScenario,'original');assert.deepEqual(f.marks[0].options.operations,[EX,MI]);assert.deepEqual(f.marks[0].options.suppliers,[A,B]);assert.deepEqual(f.marks[0].options.controlOperations,[IM]);assert.equal(f.marks[0].options.allYears,true);
+ assert.equal(f.marks.length,1);assert.equal(f.marks[0].options.correctionScenario,'original');assert.deepEqual(f.marks[0].options.operations,[EX,MI]);assert.deepEqual(f.marks[0].options.suppliers,[A,B]);assert.deepEqual(f.marks[0].options.controlOperations,[IM]);assert.equal(f.marks[0].options.allYears,true);assert.deepEqual(f.marks[0].options.months,[2,11]);
 });

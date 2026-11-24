@@ -1,5 +1,5 @@
 // Offline validation and controlled R2 restore. This module is not an HTTP route.
-import {CORRECTION_PROGRESS_LEGACY_KEY,CORRECTION_PROGRESS_OBJECT_BYTES,partitionCorrectionProgress} from '../worker/correction-progress.js';
+import {CORRECTION_PROGRESS_LEGACY_KEY,CORRECTION_PROGRESS_OBJECT_BYTES,partitionCorrectionProgress,isCorrectionProgressState} from '../worker/correction-progress.js';
 import {sanitizeMigrationMaterials} from '../worker/migration.js';
 const enc = new TextEncoder();
 const definitions = Object.freeze([
@@ -29,7 +29,7 @@ function validateObject(value,definition){
     sanitizeMigrationMaterials(value,{rejectUnknown:true});
   }else if(definition.key.includes('correction-progress')){
     keys(value,['schemaVersion','entries'],'Correções');
-    mapValues(value.entries,(v,k)=>{requireValue(/^[a-f0-9]{64}$/.test(k),'Correções: chave inválida.');fields(v,['done','updatedAt','updatedBy','updatedByUserId','reportRevision'],'Correção');requireValue(typeof v.done==='boolean','Correções: marcação inválida.');},'Correções');
+    mapValues(value.entries,(v,k)=>{requireValue(/^[a-f0-9]{64}$/.test(k),'Correções: chave inválida.');fields(v,['done','receiptDivergence','updatedAt','updatedBy','updatedByUserId','reportRevision'],'Correção');requireValue(isCorrectionProgressState(v),'Correções: marcação inválida.');},'Correções');
   }else{
     keys(value,['schemaVersion','revision','updatedAt','updatedBy','updatedByUserId','files','asOf','bd','control'],'Bases');
     requireValue(typeof value.revision==='string','Bases: revisão ausente.');
