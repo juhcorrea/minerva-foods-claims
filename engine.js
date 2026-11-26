@@ -821,16 +821,21 @@
   }
 
   // Corrections are a presentation/workflow scope, not a new financial ledger.
-  // Temporarily exclude Gado in Control C while preserving the full source
-  // links and all amounts used by receipts, balances and other dashboard tabs.
+  // Exclude historical Reembolso and, temporarily, Gado in Control C while
+  // preserving source links and amounts used by all financial dashboard tabs.
   const livestockCorrectionRow=source=>/\bGADO\b/.test(norm(source?.[2]));
+  const reimbursementCorrectionRow=source=>norm(source?.[2])==='REEMBOLSO';
   function getCorrectionReviewModel(model){return model?.correctionReview?{...model,...model.correctionReview,correctionReview:null}:model;}
   function applyCorrectionReviewScope(model,bdRows,controlRows,index,impactRows=null){
-    const excluded=new Set();for(let n=1;n<controlRows.length;n++)if(livestockCorrectionRow(controlRows[n]))excluded.add(n+1);
+    const excluded=new Set(),excludedGado=new Set(),excludedReembolso=new Set();
+    for(let n=1;n<controlRows.length;n++){
+      if(livestockCorrectionRow(controlRows[n])){excluded.add(n+1);excludedGado.add(n+1);}
+      if(reimbursementCorrectionRow(controlRows[n])){excluded.add(n+1);excludedReembolso.add(n+1);}
+    }
     if(!excluded.size)return;
-    const linkedGado=new Set(),linkedOther=new Set();
-    for(let n=1;n<controlRows.length;n++)if(controlRows[n])for(const claim of controlMatches(controlRows[n],index).matched)(excluded.has(n+1)?linkedGado:linkedOther).add(claim.row);
-    const exclusiveBd=new Set([...linkedGado].filter(row=>!linkedOther.has(row)));
+    const linkedExcluded=new Set(),linkedOther=new Set();
+    for(let n=1;n<controlRows.length;n++)if(controlRows[n])for(const claim of controlMatches(controlRows[n],index).matched)(excluded.has(n+1)?linkedExcluded:linkedOther).add(claim.row);
+    const exclusiveBd=new Set([...linkedExcluded].filter(row=>!linkedOther.has(row)));
     const keepIssue=issue=>correctionIssueSource(issue)==='BD'?!exclusiveBd.has(issue.row):!excluded.has(issue.row)&&!(issue.controlRows||[]).some(row=>excluded.has(row));
     const corrections=model.corrections.filter(change=>!excluded.has(change.row));
     const allowedChanges=new Set(corrections);
@@ -846,7 +851,7 @@
       delete clone.progress;delete clone.reviewProgress;return [clone];
     });
     // Supplier-wide excess warnings are recalculated from the remaining
-    // receipt rows, so an excluded Gado payment cannot survive as an alert
+    // receipt rows, so an excluded payment cannot survive as an alert
     // without a source row. No financial aggregate on the original is changed.
     const issues=model.issues.filter(keepIssue).flatMap(issue=>{
       if(issue.kind!=='RECEIVED_ABOVE_FORWARDED')return [issue];
@@ -861,8 +866,8 @@
     // doing so would invent a mismatch between BD and a partial Control sum.
     const audit=model.claimValueAudit,rows=(audit?.rows||[]).filter(row=>!(row.controlRows||[]).some(id=>excluded.has(id))&&!(row.bdRows||[]).some(id=>exclusiveBd.has(id))),uCorrections=(audit?.uCorrections||[]).filter(change=>!excluded.has(change.row));
     const auditSummary=summarizeClaimValueAudit(rows,uCorrections,Math.max(0,(audit?.summary.requiredClaims||0)-model.claims.filter(claim=>exclusiveBd.has(claim.row)&&requiresControlLink(bdRows[claim.row-1])).length),(audit?.meta.exemptBdRows||[]).filter(row=>!exclusiveBd.has(row)).length,(audit?.meta.excludedMixedComponents||[]).filter(group=>!(group.controlRows||[]).some(row=>excluded.has(row))).length);
-    const auditMeta={...audit?.meta,exemptBdRows:(audit?.meta.exemptBdRows||[]).filter(row=>!exclusiveBd.has(row)),excludedGadoGroups:(audit?.rows?.length||0)-rows.length,excludedMixedComponents:(audit?.meta.excludedMixedComponents||[]).filter(group=>!(group.controlRows||[]).some(row=>excluded.has(row)))};
-    const projection={corrections,correctionGroups,issues,baseReconciliation:{...model.baseReconciliation,rows:reconciliationRows,meta:reconciliationMeta},claimValueAudit:{...audit,rows,uCorrections,summary:auditSummary,meta:auditMeta},summary:{...model.summary,correctionCount:corrections.length,correctionGroupCount:correctionGroups.length,reviewCount:issues.length},meta:{...model.meta,correctionScope:{excludedControlRows:[...excluded].sort((a,b)=>a-b),excludedBdRows:[...exclusiveBd].sort((a,b)=>a-b),basis:'Controle C contendo a palavra Gado fica temporariamente fora da Correção de Base. Recebimentos, saldos, fontes e vínculos continuam preservados.'}}};
+    const auditMeta={...audit?.meta,exemptBdRows:(audit?.meta.exemptBdRows||[]).filter(row=>!exclusiveBd.has(row)),excludedScopeGroups:(audit?.rows?.length||0)-rows.length,excludedGadoGroups:(audit?.rows||[]).filter(group=>(group.controlRows||[]).some(row=>excludedGado.has(row))).length,excludedReembolsoGroups:(audit?.rows||[]).filter(group=>(group.controlRows||[]).some(row=>excludedReembolso.has(row))).length,excludedMixedComponents:(audit?.meta.excludedMixedComponents||[]).filter(group=>!(group.controlRows||[]).some(row=>excluded.has(row)))};
+    const projection={corrections,correctionGroups,issues,baseReconciliation:{...model.baseReconciliation,rows:reconciliationRows,meta:reconciliationMeta},claimValueAudit:{...audit,rows,uCorrections,summary:auditSummary,meta:auditMeta},summary:{...model.summary,correctionCount:corrections.length,correctionGroupCount:correctionGroups.length,reviewCount:issues.length},meta:{...model.meta,correctionScope:{excludedControlRows:[...excluded].sort((a,b)=>a-b),excludedBdRows:[...exclusiveBd].sort((a,b)=>a-b),excludedGadoControlRows:[...excludedGado].sort((a,b)=>a-b),excludedReembolsoControlRows:[...excludedReembolso].sort((a,b)=>a-b),basis:'Área/Setor do Controle C igual a Reembolso fica fora da conferência entre BD e Recebimento, pois esses casos históricos não eram incluídos na BD. Gado continua temporariamente fora da Correção de Base. Recebimentos, saldos, fontes e vínculos permanecem preservados.'}}};
     if(model.meta.correctionPeriod){
       const original=model.meta.correctionPeriod,period={...original,bdRows:original.bdRows.filter(row=>!exclusiveBd.has(row)),controlRows:original.controlRows.filter(row=>!excluded.has(row)),referenceBdRows:[],referenceControlRows:[]},parents=new Map();
       const find=key=>{if(!parents.has(key))parents.set(key,key);let root=key;while(parents.get(root)!==root)root=parents.get(root);while(key!==root){const next=parents.get(key);parents.set(key,root);key=next;}return root;};
