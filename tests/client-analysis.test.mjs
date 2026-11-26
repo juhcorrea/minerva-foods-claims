@@ -54,8 +54,8 @@ test('worker hydrates every queue item and explicit new marks override legacy fa
  const key=items[0].progress.key;f.manifest.progress.entries[key].done=false;const undone=await f.runner.analyze(f.manifest,options);assert.equal(E.buildCorrectionReviewItems(undone).find(item=>item.progress.key===key).progress.done,false);assert.equal(JSON.stringify(f.input),baseline);assert.deepEqual(undone.summary,first.summary);assert.equal(f.reads.length,f.manifest.parts.length);
 });
 
-test('receipt divergence survives browser reloads and filters without changing finances or excluded Gado scope',async()=>{
- const input=sources();input.control[0][2]='Setor';input.control[2][2]='Gado Vivo';
+for(const sector of ['Gado Vivo','REEMBOLSO'])test('receipt divergence survives browser reloads and filters without changing finances or excluded '+sector+' scope',async()=>{
+ const input=sources();input.control[0][2]='Setor';input.control[2][2]=sector;
  const f=manifestFixture(input),options={allYears:true,asOf:'2026-11-24'},first=await f.runner.analyze(f.manifest,options),items=E.buildCorrectionReviewItems(first);
  assert(items.length);assert(items.every(item=>!item.controlRows.includes(3)));
  const key=items[0].progress.key;f.manifest.progress={revision:'finance-review',entries:{[key]:{done:false,receiptDivergence:true,updatedAt:'2026-11-24T12:00:00Z',updatedBy:'Reviewer Example'}}};
